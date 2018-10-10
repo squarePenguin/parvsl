@@ -1,0 +1,75 @@
+\chapter{A first session with Lisp}
+To use the ``\vsl'' version of Lisp discussed here you will first have to
+fetch it and ensure that it works on your computer. This should be
+possible on almost any system that presents itself as a full computer,
+and Appendix A gives explicit explanations for how to do this for
+some of the most plausible platforms. Specifically it covers the case for
+Raspberry Pi, an ordinary pc running Windows and a Macintosh. At present \vsl{}
+is not directly usable on tablet-format machines, mobile phones or the like.
+That is not because it could not be ported to them, but more because
+the simple inner workings that it seeks to present would end up wrapped
+in rather a lot of messy platform-specific code. When using \vsl{}
+you will generally be interacting using a command prompt and keyboard
+rather than any more modern-seeming graphical interface.
+
+
+{\small\begin{verbatim}
+(de factorial (n)
+   (cond
+      ((zerop n) 1)
+      (t (times n (factorial (sub1 n))))))
+
+(dotimes (i 40)
+   (prin i)
+   (princ blank)
+   (print (factorial i)))
+\end{verbatim}}
+
+{\small\begin{verbatim}
+0 1
+1 1
+2 2
+3 6
+4 24
+5 120
+6 720
+7 5040
+8 40320
+9 362880
+10 3628800
+11 39916800
+12 479001600
+13 6227020800
+14 87178291200
+15 1307674368000
+16 20922789888000
+17 355687428096000
+18 6402373705728000
+19 121645100408832000
+20 2432902008176640000
+21 51090942171709440000
+22 1124000727777607680000
+23 25852016738884976640000
+24 620448401733239439360000
+25 15511210043330985984000000
+26 403291461126605635584000000
+27 10888869450418352160768000000
+28 304888344611713860501504000000
+29 8841761993739701954543616000000
+30 265252859812191058636308480000000
+31 8222838654177922817725562880000000
+32 263130836933693530167218012160000000
+33 8683317618811886495518194401280000000
+34 295232799039604140847618609643520000000
+35 10333147966386144929666651337523200000000
+36 371993326789901217467999448150835200000000
+37 13763753091226345046315979581580902400000000
+38 523022617466601111760007224100074291200000000
+39 20397882081197443358640281739902897356800000000
+Value: nil
+\end{verbatim}}
+
+
+% @@@@@ incomplete
+
+

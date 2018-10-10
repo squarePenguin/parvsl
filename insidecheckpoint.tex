@@ -1,0 +1,363 @@
+
+\chapter{Checkpoint and restore}
+
+
+
+% @@@@@ incomplete
+
+{\small\begin{verbatim}
+
+// A saved image will start with a word that contains the following 32-bit
+// code. This can identify the byte-ordering and word-width of the system
+// involved, so protects against attempts to reload an image on a machine
+// other than the one it was build on. If I was being more proper I would
+// include a version number as well.
+
+#define FILEID (('v' << 0) | ('s' << 8) | ('l' << 16) |   \
+                (('0' + sizeof(LispObject)) << 24))
+
+static const char *imagename = "vsl.img";
+
+LispObject Lpreserve(LispObject lits, int nargs, ...)
+{
+// preserve can take either 0 or 1 args. If it has a (non-nil) arg that will
+// be a startup function for the image when restored.
+    FILE *f;
+    ARG0123("preserve", x,y,z);
+    if (y != NULLATOM || z != NULLATOM)
+        return error1s("wrong number of arguments for", "preserve");
+    restartfn = (x == NULLATOM ? nil : x);
+    f = fopen(imagename, "wb");
+    if (f == NULL) return error1("unable to open image for writing", nil);
+    headerword = FILEID;
+    reclaim(); // To compact memory.
+// I write this stuff out as a bunch of bytes, since I only intend to
+// re-read it on exactly the same computer.
+    saveinterp = (LispObject)(void *)interpret;
+    saveinterpspec = (LispObject)(void *)interpretspecform;
+    fwrite(nonbases, 1, sizeof(nonbases), f);
+    fwrite(bases, 1, sizeof(bases), f);
+    fwrite(obhash, 1, sizeof(obhash), f);
+    fwrite((void *)heap1base, 1, (size_t)(fringe1-heap1base), f);
+    fwrite((void *)fpfringe1, 1, (size_t)(heap1top-fpfringe1), f);
+    fclose(f);
+// A cautious person would have checked for error codes returned by the
+// above calls to fwrite and close. I omit that here to be concise.
+    return nil;
+}
+
+jmp_buf restart_buffer;
+int coldstart = 0;
+
+LispObject Lrestart_csl(LispObject lits, int nargs, ...)
+{   LispObject save = lispout;
+    ARG0123("restart-csl", x, y, z);
+    if (z != NULLATOM)
+        return error1s("wrong number of arguments for", "restart-csl");
+    coldstart = 0;
+    if (x == nil || x == NULLATOM) coldstart = 1, x = nil;
+    if (y == NULLATOM) x = cons(x, nil);
+    else x = list2star(x, y, nil);
+    boffop = 0;
+    lispout = -2;
+    prin(x);
+    lispout = save;
+    longjmp(restart_buffer, 1);
+}
+
+
+struct defined_functions
+{   const char *name;
+    int flags;
+    void *entrypoint;
+};
+
+struct defined_functions fnsetup[] =
+{
+// First the special forms
+    {"quote",      flagSPECFORM, (void *)Lquote},
+    {"cond",       flagSPECFORM, (void *)Lcond},
+    {"and",        flagSPECFORM, (void *)Land},
+    {"or",         flagSPECFORM, (void *)Lor},
+    {"de",         flagSPECFORM, (void *)Lde},
+    {"df",         flagSPECFORM, (void *)Ldf},
+    {"dm",         flagSPECFORM, (void *)Ldm},
+    {"setq",       flagSPECFORM, (void *)Lsetq},
+    {"progn",      flagSPECFORM, (void *)Lprogn},
+    {"prog",       flagSPECFORM, (void *)Lprog},
+    {"go",         flagSPECFORM, (void *)Lgo},
+// The following are implemented as special forms here because they
+// take variable or arbitrary numbers of arguments - however they all
+// evaluate all their arguments in a rather simple way, so they
+// could be treated a sorts of "ordinary" function.
+    {"list",       flagSPECFORM, (void *)Llist},
+    {"list*",      flagSPECFORM, (void *)Lliststar},
+    {"iplus",      flagSPECFORM, (void *)Lplus},
+    {"itimes",     flagSPECFORM, (void *)Ltimes},
+    {"ilogand",    flagSPECFORM, (void *)Llogand},
+    {"ilogor",     flagSPECFORM, (void *)Llogor},
+    {"ilogxor",    flagSPECFORM, (void *)Llogxor},
+// Now ordinary functions. I have put these in alphabetic order.
+    {"iadd1",      0,            (void *)Ladd1},
+    {"apply",      0,            (void *)Lapply},
+    {"atan",       0,            (void *)Latan},
+    {"atom",       0,            (void *)Latom},
+    {"bignump",    0,            (void *)Lbignump},
+    {"boundp",     0,            (void *)Lboundp},
+    {"car",        0,            (void *)Lcar},
+    {"cdr",        0,            (void *)Lcdr},
+    {"char-code",  0,            (void *)Lcharcode},
+    {"iceiling",   0,            (void *)Lceiling},
+    {"close",      0,            (void *)Lclose},
+    {"code-char",  0,            (void *)Lcodechar},
+    {"compress",   0,            (void *)Lcompress},
+    {"cons",       0,            (void *)Lcons},
+    {"cos",        0,            (void *)Lcos},
+    {"idifference",0,            (void *)Ldifference},
+    {"idivide",    0,            (void *)Ldivide},
+    {"eq",         0,            (void *)Leq},
+    {"equal",      0,            (void *)Lequal},
+    {"error",      0,            (void *)Lerror},
+    {"errorset",   0,            (void *)Lerrorset},
+    {"eval",       0,            (void *)Leval},
+    {"exp",        0,            (void *)Lexp},
+    {"explode",    0,            (void *)Lexplode},
+    {"explodec",   0,            (void *)Lexplodec},
+    {"ifix",       0,            (void *)Lfix},
+    {"ifixp",      0,            (void *)Lfixp},
+    {"ifloat",     0,            (void *)Lfloat},
+    {"floatp",     0,            (void *)Lfloatp},
+    {"ifloor",     0,            (void *)Lfloor},
+    {"gensym",     0,            (void *)Lgensym},
+    {"igeq",       0,            (void *)Lgeq},
+    {"get",        0,            (void *)Lget},
+    {"getd",       0,            (void *)Lgetd},
+    {"gethash",    0,            (void *)Lgethash},
+    {"getv",       0,            (void *)Lgetv},
+    {"igreaterp",  0,            (void *)Lgreaterp},
+    {"ileftshift", 0,            (void *)Lleftshift},
+    {"ileq",       0,            (void *)Lleq},
+    {"ilessp",     0,            (void *)Llessp},
+    {"load-module",0,            (void *)Lrdf},
+    {"log",        0,            (void *)Llog},
+    {"ilognot",    0,            (void *)Llognot},
+    {"iminus",     0,            (void *)Lminus},
+    {"iminusp",    0,            (void *)Lminusp},
+    {"mkhash",     0,            (void *)Lmkhash},
+    {"mkvect",     0,            (void *)Lmkvect},
+    {"null",       0,            (void *)Lnull},
+    {"inumberp",   0,            (void *)Lnumberp},
+    {"oblist",     0,            (void *)Loblist},
+    {"onep",       0,            (void *)Lonep},
+    {"open",       0,            (void *)Lopen},
+    {"plist",      0,            (void *)Lplist},
+    {"preserve",   0,            (void *)Lpreserve},
+    {"prin",       0,            (void *)Lprin},
+    {"princ",      0,            (void *)Lprinc},
+    {"print",      0,            (void *)Lprint},
+    {"printc",     0,            (void *)Lprintc},
+    {"put",        0,            (void *)Lput},
+    {"puthash",    0,            (void *)Lputhash},
+    {"putv",       0,            (void *)Lputv},
+    {"iquotient",  0,            (void *)Lquotient},
+    {"rdf",        0,            (void *)Lrdf},
+    {"rds",        0,            (void *)Lrds},
+    {"read",       0,            (void *)Lread},
+    {"readch",     0,            (void *)Lreadch},
+    {"readline",   0,            (void *)Lreadline},
+    {"iremainder", 0,            (void *)Lremainder},
+    {"remhash",    0,            (void *)Lremhash},
+    {"remprop",    0,            (void *)Lremprop},
+    {"restart-csl",0,            (void *)Lrestart_csl},
+    {"return",     0,            (void *)Lreturn},
+    {"irightshift",0,            (void *)Lrightshift},
+    {"rplaca",     0,            (void *)Lrplaca},
+    {"rplacd",     0,            (void *)Lrplacd},
+    {"set",        0,            (void *)Lset},
+    {"sin",        0,            (void *)Lsin},
+    {"sqrt",       0,            (void *)Lsqrt},
+    {"stop",       0,            (void *)Lstop},
+    {"stringp",    0,            (void *)Lstringp},
+    {"isub1",      0,            (void *)Lsub1},
+    {"symbolp",    0,            (void *)Lsymbolp},
+    {"terpri",     0,            (void *)Lterpri},
+    {"time",       0,            (void *)Ltime},
+    {"trace",      0,            (void *)Ltrace},
+    {"untrace",    0,            (void *)Luntrace},
+    {"upbv",       0,            (void *)Lupbv},
+    {"vectorp",    0,            (void *)Lvectorp},
+    {"wrs",        0,            (void *)Lwrs},
+    {"zerop",      0,            (void *)Lzerop},
+    {NULL,         0,            NULL}
+};
+
+void setup()
+{
+// Ensure that initial symbols and functions are in place. Parts of this
+// code are rather rambling and repetitive but this is at least a simple
+// way to do things. I am going to assume that nothing can fail within this
+// setup code, so I can omit all checks for error conditions.
+    struct defined_functions *p;
+    undefined = lookup("~indefinite-value~", 18, 1);
+    qvalue(undefined) = undefined;
+    nil = lookup("nil", 3, 1);
+    qvalue(nil) = nil;
+    lisptrue = lookup("t", 1, 1);
+    qvalue(lisptrue) = lisptrue;
+    qvalue(echo = lookup("*echo", 5, 1)) = interactive ? nil : lisptrue;
+    qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
+       list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
+                 cons(lookup("embedded", 8, 1), nil));
+    quote = lookup("quote", 5, 1);
+    backquote = lookup("`", 1, 1);
+    comma = lookup(",", 1, 1);
+    comma_at = lookup(",@", 2, 1);
+    eofsym = lookup("$eof$", 5, 1);
+    qvalue(eofsym) = eofsym;
+    lambda = lookup("lambda", 6, 1);
+    expr = lookup("expr", 4, 1);
+    subr = lookup("subr", 4, 1);
+    fexpr = lookup("fexpr", 5, 1);
+    fsubr = lookup("fsubr", 5, 1);
+    macro = lookup("macro", 5, 1);
+    input = lookup("input", 5, 1);
+    output = lookup("output", 6, 1);
+    pipe = lookup("pipe", 4, 1);
+    qvalue(dfprint = lookup("dfprint*", 6, 1)) = nil;
+    bignum = lookup("~bignum", 7, 1);
+    qlits(lookup("load-module", 11, 1)) = lisptrue;
+    qvalue(raise = lookup("*raise", 6, 1)) = nil;
+    qvalue(lower = lookup("*lower", 6, 1)) = lisptrue;
+    cursym = nil;
+    work1 = work2 = nil;
+    p = fnsetup;
+    while (p->name != NULL)
+    {   LispObject w = lookup(p->name, strlen(p->name), 1);
+        qflags(w) |= p->flags;
+        qdefn(w) = p->entrypoint;
+        p++;
+    }
+}
+
+void cold_setup()
+{
+// version of setup to call when there is no initial heap image at all.
+    int i;
+// I make the object-hash-table lists end in a fixnum rather than nil
+// because I want to create the hash table before even the symbol nil
+// exists.
+    for (i=0; i<OBHASH_SIZE; i++) obhash[i] = tagFIXNUM;
+    for (i=0; i<BASES_SIZE; i++) bases[i] = NULLATOM;
+    setup();
+// The following fields could not be set up quite early enough in the
+// cold start case, so I repair them now.
+    restartfn = qplist(undefined) = qlits(undefined) =
+        qplist(nil) = qlits(nil) = nil;
+}
+
+LispObject relocate(LispObject a, LispObject change)
+{
+// Used to update a LispObject when reloaded from a saved heap image.
+    switch (a & TAGBITS)
+    {   case tagATOM:
+           if (a == NULLATOM) return a;
+        case tagCONS:
+        case tagSYMBOL:
+        case tagFLOAT:
+            return a + change;
+        default:
+//case tagFIXNUM:
+//case tagFORWARD:
+//case tagHDR:
+            return a;
+    }
+}
+
+void warm_setup()
+{
+// The idea here is that a file called "vsl.img" will already have been
+// created by a previous use of vsl, and it should be re-loaded.
+    FILE *f = fopen(imagename, "rb");
+    int i;
+    LispObject currentbase = heap1base, change, *s;
+    if (f == NULL)
+    {   printf("Error: unable to open image for reading\n");
+        exit(1);
+    }
+    if (fread(nonbases, 1, sizeof(nonbases), f) != sizeof(nonbases) ||
+        headerword != FILEID ||
+        fread(bases, 1, sizeof(bases), f) != sizeof(bases) ||
+        fread(obhash, 1, sizeof(obhash), f) != sizeof(obhash))
+    {   printf("Error: Image file corrupted or incompatible\n");
+        exit(1);
+    }
+    change = currentbase - heap1base;
+// Now I relocate the key addresses to refer to the CURRENT rather than
+// the saved address map.
+    heap1base  += change;
+    heap1top   += change;
+    fringe1    += change;
+    fpfringe1  += change;
+    if (fread((void *)heap1base, 1, (size_t)(fringe1-heap1base), f) !=
+              (size_t)(fringe1-heap1base) ||
+        fread((void *)fpfringe1, 1, (size_t)(heap1top-fpfringe1), f) !=
+              (size_t)(heap1top-fpfringe1))
+    {   printf("Error: Unable to read image file\n");
+        exit(1);
+    }
+    fclose(f);
+    for (i=0; i<BASES_SIZE; i++)
+        bases[i] = relocate(bases[i], change);
+    for (i=0; i<OBHASH_SIZE; i++)
+        obhash[i] = relocate(obhash[i], change);
+// The main heap now needs to be scanned and addresses in it corrected.
+    s = (LispObject *)heap1base;
+    while ((LispObject)s != fringe1)
+    {   LispObject h = *s, w;
+        if (!isHDR(h)) // The item to be processed is a simple cons cell
+        {   *s++ = relocate(h, change);
+            *s = relocate(*s, change);
+            s++;
+        }
+        else              // The item is one that uses a header
+            switch (h & TYPEBITS)
+            {   case typeSYM:
+                    w = ((LispObject)s) + tagSYMBOL;
+                    // qflags(w) does not need adjusting
+                    qvalue(w) = relocate(qvalue(w), change);
+                    qplist(w) = relocate(qplist(w), change);
+                    qpname(w) = relocate(qpname(w), change);
+                    if (qdefn(w) == (void *)saveinterp)
+                        qdefn(w) = (void *)interpret;
+                    else if (qdefn(w) == (void *)saveinterpspec)
+                        qdefn(w) = (void *)interpretspecform;
+                    qlits(w)  = relocate(qlits(w), change);
+                    s += 6;
+                    continue;
+                case typeSTRING: case typeBIGNUM:
+// These sorts of atom just contain binary data so do not need adjusting,
+// but I have to allow for the length code being in bytes etc.
+                    w = (LispObject)s;
+                    w += veclength(h);
+                    w = (w + sizeof(LispObject) + 7) & ~7;
+                    s = (LispObject *)w;
+                    continue;
+                case typeVEC: case typeEQHASH: case typeEQHASHX:
+                    s++;
+                    w = veclength(h);
+                    while (w > 0)
+                    {   *s = relocate(*s, change);
+                        s++;
+                        w -= sizeof(LispObject);
+                    }
+                    s = (LispObject *)(((LispObject)s + 7) & ~7);
+                    continue;
+                default:
+                    // The spare codes!
+                    disaster(__LINE__);
+            }
+    }
+    setup(); // resets all built-in functions properly.
+}
+
+\end{verbatim}}

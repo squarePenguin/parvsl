@@ -1,0 +1,2914 @@
+\chapter{Some small Lisp programs}
+One of the better ways to learn a programming language is to start with a
+body of code that somebody else has already written. Even if you can find
+a good copy of the material on-line or on a CD there is much to be said for
+typing it in yourself! There are two specific benefits that arise from this.
+The first is that your fingers get used to the rhythm of the language, and
+practised in typing the various keywords and you are obliged to read the
+original code carefully so that you transcribe it correctly. At a purely
+mechanical level that starts to get you really familiar with how the language
+looks and feels. The second big benefit is that however experienced you are
+and however carefully you type you are essentially certain to mis-transcribe
+a few things. You may read a digit one (1) where some character is in fact a
+lower case ell (l), or (especially in Lisp) you may mis-count parentheses.
+It is remarkably easy to lose concentration for a moment and miss out whole
+lines of stuff. How can your mistakes possibly count as a benefit rather
+than just a pain? Well because when you first try your example code it
+will presumably then not work, and you have just provided yourself with
+a nice exercise in debugging. Of course you could start by just doing a
+careful proof-read of your version against the ``official'' and tested code,
+but reading the messages you get and trying to uncover what was going on
+for yourself first will be excellent practise for when you write your own
+code from scratch and so do not have some known-good version to compare
+against. At the very least you will get to see some of the more common
+behaviours and messages your programming environment gives when presented
+with bad input. 
+
+The Lisp provided here was implemented more so that the
+code making up \vsl{} is short and reasonably comprehensible rather than
+with serious emphasis on it providing good diagnostics. Perhaps you will
+even end up deciding you wish to extend to code in {\tx vsl.c} so as
+to make it more friendly in this respect.
+
+The example Lisp programs here illustrate some of the features of Lisp, and
+also some of the sorts of programs you might find it good for. Almost all
+of these programs has been cut down to to almost the bare minimum, so that
+it illustrates a programming style or an application area. So while it is
+hoped that the code will be entertaining even as it is, a significant part
+of its purpose is to provide starting points for larger programming
+projects. At the end of each example there will be some comments on
+the technology that it has introduced, how you might extend the example
+and what related programs you could consider writing.
+
+\section{The $3n+1$ problem}
+Start with a number. If it is even then halve it, while if it is odd
+you multiply it by three and then add one. That gives you a second number.
+Do that same to it, and keep going to generate a sequence. For instance it
+you start with $7$ you get $7, 22, 11, 34, 17, 52, 26, 13, 40, 20, 10, 5,
+16, 8, 4, 2, 1$. It is reasonable to stop when you reach $1$ because
+from there on you would just get a dull loop $1, 4, 2, 1, 4, 2, 1,\ldots$.
+
+The challenge here is to investigate whether there is a starting value
+such that the sequence that it starts does not end up at $1$. You are
+{\em really} unlikely to find a case that does not, since people have
+tested all starting values up to at least $10^{18}$ and shown that in
+all those cases the sequence does end. However no proof that some larger
+starting value might cause trouble has been produced. It is amazing to see
+how as you alter the starting value the length of the sequence changes and
+how large numbers can arise along the way. So here is some Lisp
+code suitable for use with \vsl{} that will compute and display
+what goes on.
+
+It defines a function called {\tx threenplusone} that takes two
+arguments. The first is the value in your sequence being considered, while
+the second counts down so you can avoid going on for longer than you want.
+If the number ever reaches $1$ or if the count expires the function returns,
+doing a {\tx (terpri)} which will lead to a blank line being printed.
+Otherwise if tests if the number is even or odd and does what it has to.
+Yes doing simple arithmetic in Lisp can look ugly until you have got
+use to it! {\tx (add1 (times 3 n))} looks much bulkier than
+just $3n+1$, but despite that it is utterly unambiguous and really rather
+simple to write. Writing arithmetic this way makes the notation for it
+just the same as the notation for all other operations: Lisp can be held
+to be expressing a view ``what's so very important about arithmetic then
+that it deserves very special notation?''.
+{\small\begin{verbatim}
+% 3n+1 experiment. Look up "Collatz sequence" on the web.
+
+(de threenplusone (n count)
+   (prin n)
+   (princ " ")
+   (cond
+     ((or (onep n) (minusp count)) (terpri))
+     ((zerop (remainder n 2))
+        (threenplusone (quotient n 2) (sub1 count)))
+     (t (threenplusone (add1 (times 3 n)) (sub1 count)))))
+\end{verbatim}}
+\noindent Having defined a function we then need to call it. Here I just
+use {\tx dotimes} to try the cases up to (but not including) 30. So
+{\tx threenplusone} is called on $0, 1,\ldots , 29$. For this range
+using a cut-off limit of 140 to trap any calculation that might escape (as
+the one starting with $0$ does) turns out to be about right. If you alter
+the range of starting values you try you are liable to need to experiment
+with the limit too.
+{\small\begin{verbatim}
+(dotimes (n 30)
+   (terpri)
+   (threenplusone n 140))
+\end{verbatim}}
+
+When you have tried this small program you can try looking up more
+information about the $3n+1$ problem, for instance on Wikipedia. You will
+find that the challenge involving it is otherwise known as the Collatz
+Conjecture and that many people have contributed ideas towards its
+analysis or have supplied the results of lengthy computer testing. You will
+find that there are simple generalisations of this problem (for instance
+consider $3n+5$ in place of $3n+1$) and for these discovering just how many
+final cycles the sequences can drop into (on the original problem the only
+cycle you can reach if you start with a positive number is the $1, 4, 2$ one)
+is interesting. There are even ways in which this sequence can be used as
+a basis for generating wonderful images that are related to the famous
+Mandelbrot set. It feels very nice to be able to make the first Lisp
+example included here both very short and also one that introduces you to
+a topic whose full analysis has defeated mathematicians for around 75 years!
+
+If you try running this code extensively you will discover that it
+nests calls to {\tx threenplusone} very many deep as it
+computes. If you try it on a staring number that leads to a sequence
+longer than a few thousand (or perhaps a few tens of thousands)
+you may get a calamitous crash from \vsl{} when it
+runs out of stack space to handle this recursion. More advanced Lisp
+implementations would not suffer this way, and you could re-write the
+function using {\tx prog} in an uglier style so as to avoid problems
+even with \vsl. This can be a further exercise.
+
+\section{Evaluation of formulae}
+In \vsl{} you write arithmetic using fully spelt out names such as
+{\tx difference} and {\tx plus} for all the operations.
+\begin{wrapfigure}{r}{2.5in}
+{\centering
+\includegraphics[width=2.4in]{formulae-by-shonk-via-flickr.eps}}
+\caption{Some formulae (photo courtesy shonk on flickr)}
+\end{wrapfigure} Perhaps
+you feel that is really unspeakably clumsy and would rather be able
+to write something like {\tx (- (* 2 8) 7)}. Still in Lisp prefix
+notation with the operation specified at the start, but with your own
+choice of short symbols to specify which operation is to be performed.
+The code here shows how you can take a Lisp data structure that represents
+a formula in your new notation and evaluate it. Now of course if the only
+think you needed to do was to provide an alternate name for some existing
+Lisp operation you could just do that using function definition, as in
+{\small\begin{verbatim}
+(de - (a b) (difference a b))
+\end{verbatim}}
+\noindent but the scheme here could be extended to change behaviour in
+almost arbitrarily flexible ways. The order in which the code here is
+written is ``top down''. The main entry-point is coded first, and it makes
+reference to a collection of sub-functions that will be written later.
+The idea is that {\tx evaluate} will be given an expression. If that
+is just a number then nothing much has to be done. Otherwise the expression
+will have an operator and two arguments, and a function {\tx compound}
+will be used to process it.
+{\small\begin{verbatim}
+% Evaluation of arithmetic expressions
+
+(de evaluate (x)
+   (cond
+       ((numberp x) x)
+       (t (compound (operator x)
+                    (arg1 x)
+                    (arg2 x)))))
+\end{verbatim}}
+Even before {\tx compound}, {\tx arg1} and {\tx arg2}
+have been written it is possible to test the simple case where {\tx
+evaluate} is given a numeric argument. Being able to test parts of your code
+early is one of the nice things about using Lisp.
+
+This simple evaluator only allows for terms where there are exactly two
+arguments, and extracting them (and the operator) from a list merely involve
+use of combinations of {\tx car} and {\tx cdr}. It is still
+good style to make these accessor functions with meaningful names rather
+than using {\tx cadr} and {\tx caddr} in the higher level code
+directly.
+{\small\begin{verbatim}
+(de operator (x)
+   (car x))
+
+(de arg1 (x)
+   (cadr x))
+
+(de arg2 (x)
+   (caddr x))
+\end{verbatim}}
+
+Having got this far the code that actually does the evaluation becomes
+rather simple. The operands in any formula must each be evaluated and then
+combined.
+{\small\begin{verbatim}
+(de compound (op a1 a2)
+   (arithmetic op (evaluate a1) (evaluate a2))
+
+(de arithmetic (op a1 a2)
+   (cond
+      ((eq op '+) (plus a1 a2))
+      ((eq op '*) (times a1 a2))
+      ...
+\end{verbatim}}
+
+The code shown is left incomplete since you could wish to include division
+or other operations. When finished, an example use would be to
+go {\tx  (evaluate '(- (* 2 8) 7))}.
+
+If you were only ever using binary operators it would be trivial to alter
+the code to allow an infix rather than prefix notation, as in
+{\tx ((2 * 8) - 7)} by just adjusting the functions that extract
+the operator and arguments from a formula. But if you do that it becomes harder
+to allow for things that need just one operand, or that can accept many.
+
+The big extension of this example that turns it into a real project is to
+extend it to cope with variables as well as numbers, and to provide ways for
+its user to define new functions. Before long it would become a Lisp
+interpreter coded in Lisp. That might sound unspeakably and improbably
+ambitious, but a basic Lisp interpret can be as short as barely a couple of
+pages of code, and you could find plenty of explanation of ways to
+arrange it in (for instance) the original Lisp 1.5 manual.
+
+As a final way in which this example can lead on into further work, there is
+no special reason why the evaluation rules you implement here have to be
+especially Lisp-like. Yes the input needs to be given as a Lisp data-structure,
+but the collection of operations that are being choreographed and their
+exact behaviour are entirely up to you! For instance the widely used editor
+{\tx emacs} uses a variety of Lisp to allow its users to customise
+their editing experience. The Gnu Compiler Collection ({\tx gcc} and
+its friends) has an internal component that they call
+{\tx MELT}\cite{gcc-melt} that is distinctly Lisp-like. You could
+investigate the language Prolog and create a micro-prolog by coding
+an evaluator for it in Lisp. There are almost no limits!
+
+\section{Sorting}
+One of the fundamental tasks that almost any large program will need
+at some stage is that of sorting material into order. A full-scale Lisp
+would have a general-purpose sorting procedure built in, but \vsl{} is
+cut down and does not. So in this example we have code that can be used to
+sort a list of symbols into alphabetic order.
+
+There are many different strategies for sorting. The one used here is
+known as {\em tree sort}. It starts by building a tree structure. Each node
+of the tree contains a key and has a left and a right child-tree. Every key
+in the left sub-tree will come before the one in the mode, and every one in
+the right will come after it. It should be clear that once such a tree has
+been built that it will be possible to flatten it to recover a simple list
+of sorted items. So the top-level of the sort code merely builds and then
+flattens a tree.
+{\small\begin{verbatim}
+(de sort (items)
+   (prog (tree)
+      (dolist (x items)
+         (setq tree (insert x tree)))
+      (return (flatten tree))))
+\end{verbatim}}
+
+Now Lisp has a {\tx cons} operator that makes structures, but it does not
+have a direct way of building the sort of node required here with a key and
+space for two sub-trees. However it is easy to write tiny functions using
+{\tx car}, {\tx cdr} and {\tx cons} to model just what is wanted. That
+approach of using lists and {\tx cons} nodes to build absolutely whatever
+shape data structures is required is a normal way of using Lisp. Providing the
+wrapper functions as done here then makes subsequent use able to think in
+terms of nodes and branches rather than raw {\tx cons} cells.
+{\small\begin{verbatim}
+(de mknode (v l r)
+   (cons v (cons l r)))
+
+(de getval (x) (car x))
+
+(de leftbranch (x) (car (cdr x)))
+
+(de rightbranch (x) (cdr (cdr x)))
+\end{verbatim}}
+
+Inserting a new item into a tree is in fact rather easy. If the
+tree is empty (represented by \nil) you just construct a new node
+with empty children. Otherwise you need to compare the new key with the
+one in your top node and insert the new item in either the left or
+right child as appropriate.
+{\small\begin{verbatim}
+(de insert (item tree)
+   (cond
+      ((null tree) (mknode item nil nil))
+      ((orderp item (getval tree))
+         (insertleft item tree))
+      (t (insertright item tree))))
+\end{verbatim}}
+
+Inserting into the left or right child can be done by rebuilding a copy
+of the current node using the current key and one unchanged child. The code
+here could have been written out within the {\tx insert} function above, but
+making every function really short and arranging that each function
+implements just one idea can help keep the code clear and easy to understand -- and
+hence easier to debug.
+{\small\begin{verbatim}
+(de insertleft (item tree)
+   (mknode
+      (getval tree)
+      (insert item (leftbranch tree))
+      (rightbranch tree)))
+
+(de insertright (item tree)
+   (mknode
+      (getval tree)
+      (leftbranch tree)
+      (insert item (rightbranch tree))))
+\end{verbatim}}
+
+Now we have completed the job of building an ordered binary tree. So it is
+just necessary to flatten it. The flattened version of a tree will be
+the flattened left child, followed by the top item in the tree and
+finally the flattened right child. To make the example here fully
+self-contained a definition of the standard {\tx append} function for
+concatenating a pair of lists is included.
+{\small\begin{verbatim}
+(de append (a b)
+   (cond
+      ((null a) b)
+      (t (cons (car a) (append (cdr a) b)))))
+
+(de flatten (x)
+   (cond
+      ((null x) nil)
+      (t (append (flatten (leftbranch x))
+         (cons (getval x) (flatten  (rightbranch x)))))))
+\end{verbatim}}
+
+The only thing left to do is to provide a way of checking if two
+items are in alphabetic order. Again a full-scale Lisp might provide a
+built-in function to do this, but in \vsl{} it is possible to use
+{\tx explode} to expand any name (or in fact any other Lisp item) into
+a sequence of characters, and then {\tx char!-code} to map each
+individual character onto its numeric code. These codes are then easy
+to compare using {\tx lessp}. 
+{\small\begin{verbatim}
+(de orderp (a b)
+   (orderp1 (explode a) (explode b)))
+
+(de orderp1 (al bl)
+   (cond
+       ((null al) t)
+       ((null bl) nil)
+       ((equal (car al) (car bl)) 
+          (orderp1 (cdr al) (cdr bl)))
+       (t (lessp (char!-code (car al))
+                 (char!-code (car bl))))))
+\end{verbatim}}
+
+Finally it is possible to test the code. Tree-sort will usually do its
+work rapidly, but if its input happens to be in exactly the right order
+already (or indeed in exactly the reverse of that) the trees that it
+builds end up unpleasantly lop-sided and performance drops dramatically.
+If you want a sorting method that can never suffer from that sort of
+bad behaviour you have several options. One in in fact included later in the
+Route-finding example here, but you could also so a web search or
+check a book on Algorithms (Cormen et al\cite{cormen} in any
+of its editions is an excellent one)
+and adapt merge-sort for Lisp use. Using {\tx rplaca} and {\tx rplacd} mergesort
+could even avoid need for significant {\tx cons}ing. Perhaps a good activity
+would be to implemented as many sorting methods as you reasonably can and
+compare their performance on large amounts of data (sometimes random, sometimes
+already sorted, sometimes with many repeated items) to discover
+empirically which is the winner and how you can refine your code to make it
+run as fast as possible.
+{\small\begin{verbatim}
+(sort '(s o r t i n g))
+
+(sort '(these things we hold to be self evident))
+
+(sort (oblist))
+\end{verbatim}}
+
+\section{Arbitrary precision arithmetic}
+A proper Lisp supports arbitrary precision integer arithmetic so that any limits
+on the size that values may grow to are to do with memory constraints or
+some other internal but huge limit. Furthermore a proper Lisp arranges that
+``sufficiently small'' numbers are handled more efficiently than the general
+case. In \vsl{} the internal workings support two representations for
+integers. One is ``efficient'' and supports value that have just three
+fewer bits in their binary representation that the word-width of the computer
+in use. So on a 32-bit system this is the range from -268435456 to 268435455,
+while on a 64-bit computer it is much larger. \vsl{} stores larger numbers
+in arrays (in a way very similar to the manner in which it stores strings) and
+so it would be possible to have code that used just the right amount of
+space to cope with whatever big number arose. But to keep the source code for
+\vsl{} concise the current version actually just uses fixed precision
+64-bit integers there. The \vsl{} library builds on this to implement unlimited
+arithmetic representing huge numbers as lists of digits. This example shows
+a simplified version of the code used: it just supports addition and
+multiplication, and it will be less efficient than the full version.
+ 
+For simplicity here numbers are represented
+as lists of simple digits in the range 0-9.
+To make the arithmetic easier to implement the lists will store
+the least significant digit of any number first, so that when you look
+at a list the numbers seem to be written backwards.
+
+The first task is to be able to convert an ordinary Lisp integer into
+such a list. But given that the second task will be to add two big
+integers the code here looks ahead to what will be needed then and
+provides a function that adds a small-number ({\tx carry}) into a big
+number that is stored as a list ({\tx a}).  Then conversion to big format can
+be done by just carrying a value into an empty big-number.
+{\small\begin{verbatim}
+(de carryinto (a carry)
+   (cond
+      ((null a) (cond
+         ((zerop carry) nil)
+         (t (cons (remainder carry 10)
+                  (carryinto nil (quotient carry 10))))))
+      (t (cons (remainder (plus (car a) carry) 10)
+               (carryinto (cdr a)
+                   (quotient (plus (car a) carry) 10))))))
+
+(de makebig (n)
+   (carryinto nil n))
+\end{verbatim}}
+
+Addition is now just a matter of adding corresponding digits of two numbers
+and keeping track of the carries. When all of the digits of one of the inputs
+have been processed this falls back to become the case already dealt with.
+{\small\begin{verbatim}
+(de bigplus (a b)
+   (bigplusc a b 0))
+
+(de bigplusc (a b carry)
+   (cond
+      ((null a) (carryinto b carry))
+      ((null b) (carryinto a carry))
+      (t (cons (remainder (plus (car a) (car b) carry)
+                          10)
+               (bigplusc (cdr a) (cdr b)
+                  (quotient
+                     (plus (car a) (car b) carry)
+                     10))))))
+\end{verbatim}}
+
+Short multiplication, in other words multiplying a big number by a small
+one is pretty obvious too.
+{\small\begin{verbatim}
+(de smalltimes (a b carry)
+   (cond
+      ((null b) (carryinto nil carry))
+      (t (cons (remainder (plus (times a (car b)) carry)
+                          10)
+          (smalltimes a (cdr b)
+              (quotient (plus (times a (car b)) carry)
+                        10))))))
+\end{verbatim}}
+
+The key to finishing off the multiplication code is to recognise that
+{\tx cons}ing a zero on the front of a list amounts to shifting all of
+its digits up a place, and hence multiplies it by 10. Given that
+long multiplication becomes just an exercise in using short multiplication
+and addition.
+{\small\begin{verbatim}
+(de bigtimes (a b)
+   (cond
+      ((or (null a) (null b)) nil)
+      (t (bigplus (smalltimes (car a) b 0)
+                  (cons 0 (bigtimes (cdr a) b))))))
+\end{verbatim}}
+
+Having written some code it is always prudent to put in some
+test cases. A really nice thing about Lisp is that you can generally
+interleave test cases with function definitions.
+{\small\begin{verbatim}
+(makebig 100)
+(makebig 123456789)
+(bigplus (makebig 123456789) (makebig 987654321))
+\end{verbatim}}
+
+A more interesting test will define a function that can raise numbers to
+a power, and use it to compute first some small powers of 2 (where we
+will recognise the answers and can check them easily) and then some
+that are big enough to show off the capabilities of this code.
+{\small\begin{verbatim}
+(de bigsquare (x)
+   (bigtimes x x))
+
+(de bigpower (a n)
+   (cond
+      ((onep n) a)
+      ((zerop (remainder n 2))
+         (bigsquare (bigpower a (quotient n 2))))
+      (t (bigtimes a
+         (bigsquare (bigpower a (quotient n 2)))))))
+
+(bigpower (makebig 2) 10)
+(bigpower (makebig 2) 20)
+(bigpower (makebig 2) 100)
+(bigpower (makebig 2) 1000)
+\end{verbatim}}
+
+The simplest way to build on this example is to alter it to use
+a radix much larger than 10. It would be easy to use any power of ten up to
+10000 and then all internal working would remain fast. If you increased
+the radix to 1000000000 you could probably still keep all working within
+\vsl's existing range. Using a larger radix should significantly speed
+things up. The code in the \vsl{} library uses a power of 2 (specifically
+$2^{30}$) rather than a power of 10. That makes printing somewhat more
+expensive but helps in other respects -- especially with operations such as
+{\tx logand} and {\tx logor}. The library version also needs to cope with
+negative numbers, division and a collection of extra operations such as
+bit-wise logical ones. But the library code is still not highly optimised,
+and you could work towards producing a faster or better behaved
+replacement for it.
+
+At a more radical level you could rework the code in {\tx vsl.c} to support
+true arbitrary precision working in the places where the existing code
+just uses 64-bit values. This could be very beneficial since, as shown
+by one of the benchmark tests documented later here, the existing
+Lisp-coded arithmetic may be an order of magnitude slower then a
+respectable C coded version could be.
+You could either implement your own code to do the
+high precision working, or perhaps investigate existing libraries.
+Probably the leading multi-precision library is the GPM, which can be found
+via {\tx http://gmplib.org}. However the storage management arrangements that
+GMP make do not fit very obviously comfortably with the ones that \vsl{}
+uses, and care would be needed in supporting a scheme to save and later
+on restore Lisp images: using it would involve rather more than just
+linking together the two bodies of code in a naive manner. 
+
+If you write your own code then all issues of licensing it are basically up
+to you. The BSD license that \vsl{} is covered by is permissive and perhaps
+its most important feature is that it reminds you that \vsl{} does not
+come with any guarantee. But if you use GMP or any other brought-in
+library you will naturally wish to ensure that you understand the
+consequences of its license terms and adhere to them properly.
+For the commonly used GNU Public License and its LGPL variation
+you can check the Practical Guide to GPL Compliance\cite{practicalgpl}
+which elaborates in concrete and practical language the implications of
+the legal wording that apply.
+
+Given high precision integer arithmetic there are experiments you can do
+involving the identification of large prime numbers, performing high
+security data encryption (look up the ``RSA'' encryption method),
+building in high precision integers to support fractions or floating
+point work\ldots the opportunities are almost endless.
+
+\section{Prettyprinting}
+This next example application is in fact included in the library of Lisp
+code that \vsl{} expects to be provided with from the start. It is
+included here because it illustrates some of the benefits from the way
+in which Lisp code can be treated as Lisp data, and because extending and
+improving it can make a worthwhile project.
+
+When working with Lisp code it is vital to keep parentheses correctly matched.
+A simple typing error or counting failure that leads to one getting
+omitted can utterly wreck the meaning of a piece of code. One way to
+help users with this is to provide something that can reformat their
+code with neat and systematic indentation. When they check what they have
+written they will mainly then be reviewing the way that bits of their code
+are grouped based on that indentation, which is perhaps easier for them
+than parenthesis counting. Of course one could imagine such re-layout code
+being built into the text editor that they use, but here is some quite
+short Lisp code that can print out Lisp for checking. The top-level
+function that people call will be called {\tx prettyprint}, but all
+that will really do is to arrange to start on a fresh line and call a function
+{\tx pprint} giving it and extra argument that indicates the current
+indentation level.
+{\small\begin{verbatim}
+(de prettyprint (x)
+   (terpri)
+   (pprint x 0)
+   (terpri)
+   nil)
+\end{verbatim}}
+
+If the expression to be displayed is atomic or if it is a short
+list (checked for her by seeing if its printed representation has
+no more than 40 characters) it is just printed in the ordinary Lisp
+manner. Otherwise we have a list that must be split over several lines.
+A left parenthesis is printed, then the function (indented just one
+extra space). Then the job of printing everything else is passed down to
+{\tx pprintail} which is told to apply an indentation three spaces deeper.
+{\small\begin{verbatim}
+(de pprint (x n)
+   (cond
+      ((or (atom x)
+           (lessp (length (explode x)) 40)) (prin x))
+      (t (princ "(")
+         (pprint (car x) (add1 n))
+         (pprintail (cdr x) (plus n 3)))))
+\end{verbatim}}
+
+{\tx pprintail} does obvious things when it reaches the end of a list,
+but is mostly there to start a new line, indent by the relevant number of spaces
+and call {\tx pprint} to print each member of the list. The example
+finishes by using {\tx prettyprint} to display the definition of part of
+its own code.
+{\small\begin{verbatim}
+(de pprintail (x n)
+   (cond
+      ((null x) (princ ")"))
+      ((atom x) (princ " . ")
+                (prin x)
+                (princ ")"))
+      (t (terpri)
+         (spaces n)
+         (pprint (car x) n)
+         (pprintail (cdr x) n))))
+
+(prettyprint (getd 'pprint))
+\end{verbatim}}
+
+This prettyprinter does a reasonably good job for such a short body of code,
+but for there are still collections of cases where it could do with
+enhancement. The first thing is that its decisions about when it
+can merely print lists without indentation (based on a 40-character threshold)
+is crude and does not depend on how far across the page you are. Very long
+thin lists are displayed with each item on a separate line in a way that
+feels a horribly wasteful of space. As the size of the expression you are
+printing increases the indentation can get to be comparable with your
+line length, and the results and up messy. Vectors are not addressed at all
+by the prettyprinter, and it has no idea what to do with excessively long
+stings or numbers. All in all it provides a start, but there is much scope
+for improvement!
+
+\section{Tracing, {\tx errorset} and backtraces}
+The example code here is not really to show Lisp being used to
+solve a problem. It is more about resolving problems that can be
+encountered with Lisp code. Lisp is in general a nice language to
+debug because it is generally possible to input data to test functions
+as you define them. After all the data is liable to be merely lists!
+But if something has been coded and is not behaving it can be a real help
+to see all calls to it and the corresponding results it delivers as it is
+exercised by a few test cases. The example given here defines a function
+for computing factorials and then traces both it (a user defined function)
+and {\tx sub1} (a function built into the \vsl{} kernel) and runs a small
+test. 
+{\small\begin{verbatim}
+(de fact (n)
+   (if (zerop n)
+       1
+       (times n (fact (sub1 n)))))
+
+(trace '(fact sub1))
+
+(fact 3)
+\end{verbatim}}
+
+The output generated by running this test follows, and you can see both all
+the calls to {\tx sub1} and how {\tx fact} recurses and then eventually
+unwinds to deliver a result. In this instance all the data being worked with is
+simply numeric, but a general good feature of Lisp is that lists as well as
+atomic data have well defined printable representations and so there is
+usually no need to do anything special to arrange that {\tx trace} can
+display arguments and results.
+{\small\begin{verbatim}
+(fact 3)
+Calling: fact
+Arg1: 3
+Calling: sub1
+Arg1: 3
+sub1 = 2
+Calling: fact
+Arg1: 2
+Calling: sub1
+Arg1: 2
+sub1 = 1
+Calling: fact
+Arg1: 1
+Calling: sub1
+Arg1: 1
+sub1 = 0
+Calling: fact
+Arg1: 0
+fact = 1
+fact = 1
+fact = 2
+fact = 6
+Value: 6
+\end{verbatim}}
+
+A second issue relevant when debugging is the concept of a backtrace.
+When a Lisp function fails the default behaviour of \vsl{} is to print
+a list showing what functions were active in the run up to the exception.
+To illustrate that the code here defines a function whose sole real purpose
+is to crash -- it does so by calling the {\tx error} function. While
+backtraces can be invaluable when you are debugging there can be occasions
+when you expect errors to arise, or even wish to provoke them deliberately
+to abort a path of computation you have concluded is not being productive.
+In such cases any backtrace could be an unwelcome distraction. The function
+{\tx errorset} can be used to request evaluation of a Lisp expression
+such that any error in the evaluation is reported back to {\tx errorset}
+rather than causing the Lisp run to terminate. {\tx errorset} can also
+control how much information about any error gets displayed.
+{\small\begin{verbatim}
+(untrace '(sub1))
+
+(de fail (n)
+   (if (zerop n)
+       (error 1 "crashing")
+       (times n (fail (sub1 n)))))
+
+(errorset '(fail 3) nil nil)
+
+(errorset '(fail 3) t nil)
+
+(errorset '(fail 3) t t)
+\end{verbatim}}
+
+Here is the output when {\tx errorset} asks for full diagnostics.
+{\small\begin{verbatim}
+(errorset '(fail 3) t t)
+
++++ Error: error function called: (1 "crashing")
+Calling: error
+Calling: fail
+Calling: fail
+Calling: fail
+Calling: fail
+Value: nil
+\end{verbatim}}
+
+The {\tx trace} capability was rather easy to add into \vsl{} mainly because
+it is implemented as just a simple interpreted system. But the version in
+place does not display the names of function arguments (it just calls them
+{\tx arg1} and so on). It might be safer to arrange that rather than
+using the standard {\tx print} function it used some (new) variant) that
+set some limit to how much it can display. This would be crucial if
+there was a risk that cyclic structures might get created via {\tx rplacd}.
+
+The current backtrace in \vsl{} does not display arguments to the functions
+it lists. And it is probable that a nice interactive debugging capability
+could be developed by merging the two and adapting {\tx trace} to provide
+a breakpoint or single stepping capability for \vsl. 
+
+These changes would of course be within the implementation of \vsl.
+An alternative project starting from the idea of tracing would be to
+write code that picked up the definition of an existing
+Lisp function and re-wrote it to insert extra fragments of Lisp
+to achieve what {\tx trace} does at present. For instance the body
+of a function could perhaps be replaced by something along the lines of
+{\small\begin{verbatim}
+   (progn
+      (princ "arg1: ")
+      (print a1)
+      (let ((r ORIGINAL_BODY))
+         (princ "= ")
+         (print r)
+         r))
+\end{verbatim}}
+
+It might be hard to make this Lisp-based trace code work for built-in
+functions (which do not have Lisp-coded definitions to edit) but it could
+provide extreme flexibility for when user-written code needed investigation.
+
+\section{An animal guessing game}
+Wherever there is a collection of sample applications to illustrate how to
+use a programming language there has to be some sort of game. The first such
+included here is a rather naive one that asks the user questions and on the
+basis of their answers guesses what animal they are thinking of. It keeps
+a database of questions it might wish to ask in the form of a binary tree --
+very similar to the one used in the previous sorting example. Here each node
+of the tree contains the text of a question to ask, and then the left and right
+sub-trees correspond to where to continue the conversation based on whether the
+answer to the question was ``yes'' or ``no''. When the program reaches a leaf
+that means it has run out of questions it can ask, so it has to make its guess.
+Leaves of the tree are symbols giving the name of the animals to guess at that
+point.
+\begin{figure}
+\begin{center}
+\includegraphics[width=5in]{honey-badger.eps}
+\end{center}
+\caption{Does it have sharp teeth? Is it a honey badger?}
+\end{figure}
+
+If the program guesses right it just asks the user to try again. If it fails
+it will get the user to provide a new question, and it build that into its
+search tree. The tree is updated using the potentially destructive
+{\tx rplaca} and {\tx rplacd} operations so this example provides some sort
+of illustration of their possible use.
+
+The first few functions are just there to get things started.
+{\small\begin{verbatim}
+(de animal nil
+   (while t
+      (progn (say_hello)
+             (setq known_animals (guess known_animals)))))
+
+(de say_hello nil
+   (terpri)
+   (lpri '(Think of an animal and I will guess it))
+   (terpri))
+
+(de lpri (l)
+   (dolist (x l)
+      (princ x)
+      (princ " "))
+   (terpri))
+\end{verbatim}}
+Observe that in Lisp it may be most convenient to keep a sentence as
+a list of words rather than just as a single symbol or string -- but it
+is easy to write a function like {\tx lpri} to print it in the format
+you most like.
+
+The function {\tx guess} is a close cousin of the code that inserted a
+new node in a binary search tree. It is coded using {\tx rplaca} to update
+the existing tree rather than making a copy of the original. You can judge for
+yourself if this makes it shorter or clearer.
+{\small\begin{verbatim}
+(de guess (known_animals)
+   (cond
+      ((atom known_animals) (I_guess known_animals))
+   (t (printc (car known_animals))   
+      (cond
+         ((yesp (read))
+            (rplaca
+               (cdr known_animals)
+               (guess (cadr known_animals))))
+         (t (rplacd
+               (cdr known_animals)
+               (guess (cddr known_animals)))))
+      known_animals)))
+
+(de I_guess (creature)
+   (lpri (list 'Is 'it 'a creature))
+   (cond
+      ((yesp (read)) (printc 'Hurrah) creature)
+      (t (give_up creature))))
+
+(de yesp (a)
+   (if (eq a !$eof!$)
+       (stop 0)
+       (or (eq a 'yes) (eq a 'y))))
+\end{verbatim}}
+
+If the program fails to guess an animal it needs to extend the tree
+by adding a new question. A line of text to make up that question is
+grabbed using {\tx readline} and ends up part of the tree.
+{\small\begin{verbatim}
+(de give_up (I_thought)
+   (prog (new_animal new_question)
+      (lpri '(I give up))
+      (lpri '(what was it?))
+      (setq new_animal (read))
+      (lpri '(Please type in a question that would))
+      (lpri  (list 'distinguish 'a new_animal
+                   'from 'a I_thought))
+      (setq new_question (readline))
+      (lpri '(thank you))
+      (return (cons new_question (cons new_animal I_thought)))))
+\end{verbatim}}
+
+Finally it is necessary to provide an initial database. The one
+here is rather small and the questions that it asks may not appear subtle.
+So feel free to adapt it to make it bigger and cleverer. Once the database
+is in place you just have to invoke {\tx (animal)} to play. The code is
+not at all clever so if you accidentally type an extra line it may get
+confused.
+{\small\begin{verbatim}
+(setq known_animals
+   '(Does! it! have! a! long! neck!?
+       (Does! it! live! in! africa giraffe . swan)
+       Does! it! have! big! ears!?
+       (Does! it! have! a! big! nose elephant . rabbit)
+       . crocodile))
+
+(animal)
+yes
+no
+no
+snake
+has it got a forked tongue?
+yes
+no
+yes
+yes
+\end{verbatim}}
+
+Perhaps identifying an animal like this feels as if the game here
+belongs in the nursery. However if the interface to this ``game'' was
+tidied up and a much larger and more serious database provided it could
+become useful. You may like to look at a book of plants (eg the Flora
+of the British Isles\cite{flora}\footnote{which and ``Artificial Key to
+Families'' in a form that could almost be adapted}) and see if you can build
+a decision tree for identifying flowers. The Clue Books guide to
+Seashore Animals\cite{seashore} could also provide a starting place
+where your sequence of questions has already been sketched.
+Or almost any other field-guide could be adapted.
+
+A rash and over-enthusiastic person
+would consider making the questions relate to medical symptoms and the
+eventual ``guesses'' to diagnoses of illness. I believe that a fault-finding
+guide to car or motorcycle engines would be safer than one the try to
+discern what was wrong with a human patient! For some of these examples
+you may need to extend the code to allow a ``I do not know'' response as
+well as just ``yes'' and ``no'', and for a large body of knowledge you will
+need to develop a knowledge capture program that allows you to build
+you database in a systematic manner.
+
+\section{Route-finding}
+Finding the shortest path from point A to point B via some transportation
+network leads to a classical problem in Computer Science. The network
+is thought of as a graph (with towns as vertexes and roads between them
+as edges) with each edge assigned a weight or cost. Any textbook on algorithms
+will present efficient ways to solve this problem. Here we have a
+version of one of them coded in Lisp.
+
+A key concept needed here is that of a {\em heap}. A heap is a variety
+of tree where the lightest elements always appear towards the top. Where in
+the binary tree used for sorting earlier you put an arbitrary key in the
+root of the tree and places other items to the left or right according as they
+were smaller or larger than that, here we just put the smallest item
+at the top. Furthermore each sub-tree has its smallest item at its root, but
+beyond that there is no great concern about what has to go left and what
+right.
+
+The start of the code here defines wrapper functions that allow nodes
+in the tree to gave the structure {\tx ((key . value) . (left . right))}.
+Adding an item to a heap then ensures that the smallest item is kept at the
+top but otherwise it just alternates which child-tree it inserts new
+data into. This keeps the two sub-trees equal in size, and hence avoids the
+degenerate cases that could occasionally make tree-sort slow.
+{\small\begin{verbatim}
+(de node (kv l r) (cons kv (cons l r)))
+(de kv (x)    (car x))
+(de k  (x)    (caar x))
+(de v  (x)    (cdar x))
+(de left (x)  (cadr x))
+(de right (x) (cddr x))
+
+(de add_to_heap (item heap)
+   (cond
+      ((null heap) (node item nil nil))
+      ((lessp (car item) (k heap))
+         (node item
+               (right heap)
+               (add_to_heap (kv heap) (left heap))))
+      (t (node (kv heap)
+               (right heap)
+               (add_to_heap item (left heap))))))
+\end{verbatim}}
+
+The heap will be used as a {\em priority queue}. Items will be inserted
+from time to time, and then at each stage the smallest will need to be
+identified and extracted. Well the smallest item is guaranteed to be at the
+top, so finding it is trivial. The trickier task is to remove it and leave
+the remaining items in the heap in good order.
+
+The idea used here is that if you inspect the code that inserts items into
+a heap any addition always ends up with there being something new at the
+extreme right hand end of the structure. So by mirroring the insert code
+it should be possible to remove that particular item and end up with a
+tree that has the same shape that the original has before the most recent
+insert operation. This is an excellent plan in that it guarantees to keep
+the left and right sub-heaps neatly balanced in size. Unfortunately it
+removes the rightmost item, while it was the top one that needed to be
+deleted! So the code here saves the forcibly removed item so that it can be
+put back in place of the item that used to be at the top. This end up having
+removed the top item (as desired) and having kept the heap nicely
+balanced, but the item that has just been brought to the top may not
+in fact be the smallest value present. So observe that a function that has
+not yet been presented called {\tx restore\_heap} is called to fix that
+issue.
+{\small\begin{verbatim}
+(de shrink_heap (heap)
+   (cond
+      ((null (right heap))
+       (setq removed (kv heap))
+       nil)
+      (t (node (kv heap)
+               (shrink_heap (right heap))
+               (left heap)))))
+
+(de remove_top_item (heap)
+   (let!* ((removed nil)
+           (h1 (shrink_heap heap)))
+      (if (null h1)
+          nil
+          (restore_heap (cons removed (cdr h1))))))
+\end{verbatim}}
+
+The function {\tx restore\_heap} just has to allow the top item in the
+heap to sink to its correct level so that anything lighter than it
+floats up to be above it. Thus the top key has to be compared against the
+keys at the top of each sub-heap. The code is made a little messier by needing
+to cope with the possibility that one or even both sub-heaps could be empty.
+But if you trace through the tests in the following code you will see that there
+are four cases that end up needing treating:
+\begin{enumerate}
+\item The whole heap is empty;
+\item The top of the left sub-heap is the smallest item anywhere;
+\item The top of the right sub-heap is the smallest item anywhere;
+\item The item you had just placed at the top of the heap is
+exactly where it belongs.
+\end{enumerate}
+The code to cope with each of those cases is shorter that the sequence
+of tests that detect which case applies.
+{\small\begin{verbatim}
+(de restore_heap (heap)
+   (cond
+      ((null heap) nil)
+      ((and (left heap)
+            (lessp (k (left heap)) (k heap))
+            (or (null (right heap))
+                (lessp (k (left heap)) (k (right heap)))))
+       (node (kv (left heap))
+             (restore_heap (cons (kv heap) (cdr (left heap))))
+             (right heap)))
+      ((and (right heap)
+            (lessp (k (right heap)) (k heap)))
+       (node (kv (right heap))
+             (left heap)
+             (restore_heap (cons (kv heap) (cdr (right heap))))))
+      (t heap)))
+\end{verbatim}}
+
+We now have the code for heaps complete -- we can add a new key into a heap
+and we can remove the top item. Those keen on algorithms can observe that
+if a heap has $N$ items stored in it each of these operations will have a
+cost proportional to $\log(N)$, which means that the costs grow rather
+slowly even for large heaps. As a temporary diversion to the real task of
+route-finding it is perhaps useful to exercise and test the heap code before
+doing much more. Given heaps it is amazingly easy to write a function
+to sort lists. It takes all its input and adds each item in turn into a heap.
+Then for so long as the heap is not empty it repeatedly removes the
+top item of the heap. This naturally reads off the items in ascending
+order. Because it is convenient to use {\tx cons} to put each next smallest
+item on the front of a list the raw result list ends up in descending
+order, so I just use {\tx reverse} to put it into the state I want. The
+test case for sorting used here is based in digits of pi, which provide
+a systematic but random-seeming set of numbers.
+{\small\begin{verbatim}
+(de heapsort (l)
+   (let ((h nil))
+      (dolist (x l) (setq h (add_to_heap (list x) h)))
+      (setq l nil)
+      (while h
+         (setq l (cons (k h) l))
+         (setq h (remove_top_item h)))
+      (reverse l)))
+
+(heapsort '(3
+    1415926535 8979323846 2643383279 5028841971 6939937510
+    5820974944 5923078164 0628620899 8628034825 3421170679
+    8214808651 3282306647 0938446095 5058223172 5359408128
+    4811174502 8410270193 8521105559 6446229489 5493038196
+    4428810975 6659334461 2847564823 3786783165 2712019091
+    4564856692 3460348610 4543266482 1339360726 0249141273
+    7245870066 0631558817 4881520920 9628292540 9171536436
+    7892590360 0113305305 4882046652 1384146951 9415116094
+    3305727036 5759591953 0921861173 8193261179 3105118548
+    0744623799 6274956735 1885752724 8912279381 8301194912
+    9833673362 4406566430 8602139494 6395224737 1907021798
+    6094370277 0539217176 2931767523 8467481846 7669405132
+    0005681271 4526356082 7785771342 7577896091 7363717872
+    1468440901 2249534301 4654958537 1050792279 6892589235
+    4201995611 2129021960 8640344181 5981362977 4771309960
+    5187072113 4999999837 2978049951 0597317328 1609631859
+    5024459455 3469083026 4252230825 3344685035 2619311881
+    7101000313 7838752886 5875332083 8142061717 7669147303
+    5982534904 2875546873 1159562863 8823537875 9375195778
+    1857780532 1712268066 1300192787 6611195909 2164201989))
+\end{verbatim}}
+
+With a priority queue (implemented as a heap) available the route-finding
+code itself is fairly short. It keeps its queue with cities and the
+length of a route to them that it knows about. This obviously starts with
+the source city at distance zero from itself. At each step it
+picks the city that the queue shows as next closest. Sometimes that will in
+fact be a second routing to a city that has already been met, and so it
+is ignored. Otherwise it sets the {\tx distance} property on the new city
+so that everybody can tell how far it was from the source. So that it can
+reconstruct a route as well as merely calculating a distance it also
+sets a {\tx previous} property that shows shows the previous city on the
+short path. Then for all the neighbours of the new city it inserts an
+entry in the queue showing how they could be reached if a path via this
+location were selected.
+
+Once the desired destination has been reached all this stops and the code
+can backtrack through the {\tx previous} references to reconstruct a
+route. The code has a couple of commented out lines that would print messages
+as each city was processed. These could be reinstated if that extra output was
+helpful for understanding or debugging.
+{\small\begin{verbatim}
+(de find_route (source destination)
+   (prog (queue city distance prev)
+      (setq queue (node (list!* 0 source nil) nil nil))
+      (while (and queue (not (get destination 'distance)))
+         (setq distance (k queue)) % Next nearest place
+         (setq city (v queue))     % City and predecessor
+         (setq prev (cdr city)) (setq city (car city))
+         (setq queue (remove_top_item queue))
+         (when (null (get city 'distance)) % Seen before?
+            (put city 'distance distance)
+            (put city 'previous prev)
+%           (princ "Distance to ") (princ city)
+%           (princ " is ") (print distance)
+            (dolist (x (get city 'neighbours))
+               (setq queue (add_to_heap
+                   (list!* (plus distance (cdr x))
+                           (car x)
+                           city)
+                   queue)))))
+      (when (null queue) (error 0 "No route exists"))
+      (setq distance (get destination 'distance))
+      (while (not (eq destination source))
+          (princ "Via: ")
+          (print
+             (setq destination (get destination 'previous))))
+      (return distance)))
+\end{verbatim}}
+
+A test of this obviously needs some towns and some
+distances between them set up. The example here is rather small
+but still may show what can be achieved.
+{\small\begin{verbatim}
+(de nput (source neighbours)
+   (put source 'neighbours neighbours))
+
+(nput 'Cambridge '((Bedford . 15) (Royston . 20)))
+(nput 'Royston '((Cambridge . 20) (Watford . 30)
+                 (London . 50)))
+(nput 'London '((Royston . 20) (Watford . 25) (Oxford . 50)))
+(nput 'Bedford '((Cambridge . 15) (Watford . 30)))
+(nput 'Watford '((Bedford . 30) (Royston . 30)
+                 (London . 25) (Oxford . 40)))
+(nput 'Oxford '((Royston . 50) (Watford . 25) (London . 50)))
+
+(find_route 'Cambridge 'Oxford)
+\end{verbatim}}
+
+The code as presented here is untidy in that it leaves all sorts of
+properties on the city-names that it processes. Specifically it leaves
+{\tx distance} and {\tx previous} information around. That would cause
+severe confusion, not to say incorrect results, if a second query were to
+be made. So a first task to develop this example code would be to
+clean that up.
+
+Books on algorithms will explain alternative ways of arranging heaps, based
+on the use of arrays. In Lisp the function {\tx mkvect} can make a vector
+(in other words a 1-dimensional array) and {\tx putv} and {\tx getv}
+can then access it. You could re-work the code to use the more standard
+array-based style of heap.
+
+Those who are feeling seriously ambitious can look in a {\em big} algorithms
+book such as Cormen et al.\cite{cormen} and find out about
+Fibonacci Heaps, a quite elaborate data structure specifically good for use
+in this application.
+
+\section{The {\tx tak} benchmark}
+Lisp implementers and enthusiasts like to run benchmarks. An especially
+influential collection of tests was published by Richard Gabriel\cite{Gabriel},
+\begin{wrapfigure}{l}{2.3in}
+{\centering
+\includegraphics[width=2.1in]{takeuchi-by-takai-flickr.eps}}
+\caption{Ikuo Takeuchi (photo courtesy takai on flickr)}
+\end{wrapfigure} and it is worth going back to that to see how any single test can be measuring
+merely one aspect of system speed -- and that timings across a range
+of carefully designed tests are needed before valid general conclusions can
+be drawn. However one tiny benchmark, known as {\tx tak}, became perhaps
+especially popular. That may be because the code for it was truly short
+but it nevertheless ran for long enough to be a useful test.
+
+The function used in {\tx tak} originated with Ikuo Takeuchi, and is a
+ridiculously recursive function that busily calls itself merely performing
+trivial arithmetic operations. Indeed the only test it does is to compare
+two (small) integers to see which is bigger, and its only arithmetic is to
+subtract one from a value. The version in Gabriel's book is written as for
+Common Lisp, but the adaptation for the Standard Lisp dialect as used with
+\vsl{} is not a difficult one. Note that because {\tx tak} only ever uses
+small integers in its arithmetic the lower-level functions {\tx ilessp}
+and {\tx isub1} are used rather than the normal versions that could
+handle arbitrary-sized integers.
+{\small\begin{verbatim}
+(de tak (x y z)
+   (cond
+      ((not (ilessp y x)) z)
+      (t (tak (tak (isub1 x) y z)
+              (tak (isub1 y) z x)
+              (tak (isub1 z) x y))))))
+\end{verbatim}}
+
+Having defined out function we need to try it out, and see how long it
+tapes. The \vsl{} function {\tx time} returns a result in milliseconds
+that can be used to measure CPU time. The expected result of computing
+{\tx (tak 18 12 6)} is just 7.  
+{\small\begin{verbatim}
+(setq a (time))
+(tak 18 12 6)
+(difference (time) a)
+\end{verbatim}}
+Using \vsl{} on a Raspberry Pi
+gives a time of around 0.24 second. 
+This is an astonishing result, since it is
+faster than most of the times recorded for special purpose Lisp
+hardware in Gabriel's book, and is only just beaten by large (and very
+expensive) mainframes. Only the legendary Cray supercomputer delivered
+a significantly better result -- and these days even that is trumped
+when \vsl{} is run on a fast desktop machine. To give some idea of just
+how amazing this is I should note that \vsl{} has been coded for
+simplicity not speed, and that the code is being run via an interpreter,
+while the results from Gabriel will be for highly tuned full-scale
+Lisp systems with state of the art compilers and even in some cases
+custom hardware support. With a Lisp system that is at least slightly
+better optimised (specifically the CSL one used with the Reduce algebra
+system\cite{Reduce}) the {\tx tak} benchmark takes only 0.06 seconds on
+a Raspberry Pi, further showing how well modern hardware performs
+when compared with even truly expensive older computers.
+
+This suggests that using a truly cheap computer system today puts one in
+a position to study problems that were cutting edge not very long ago.
+
+If the Lisp-coded functions {\tx lessp}
+and {\tx sub1} that are capable of supporting big integers are substituted
+this cost increases by a factor of ten, but that is essentially alll down
+to the clumsy (if simple) way in which those versions are at present
+implemented.
+
+Now of course having made this test there will be many ways to follow through.
+Perhaps the first is to track down and read almost anything that Richard
+Gabriel wrote, since much of it is entertaining as well as informative. His
+book on benchmarking has amazingly detailed information about the inner
+designs and working of the Lisp systems he was measuring, and insightful
+comments on what matters.
+
+The next task would clearly be to try some more of his test cases. Some
+will be harder than others to map (fairly) from Commmon Lisp style so
+that they suit \vsl. It would be possible to put {\tx tak} into \vsl{} as
+a built-in primitive coded in C. How much difference would that make
+to speed? When you get to considering a compiler for \vsl{} you can see
+just how much difference to benchmark timings that makes.
+
+There is also scope for investigating \vsl{} and seeing exactly which
+parts of it contribute most to the time spent if various benchmarks, and
+seeing if refinements to the code can help. This test makes it abundantly
+clear that the existing simplistic \vsl support for big integers is
+a time-sink.
+
+I might further suggest additional historical research to find the
+speed, size and capability of the computers used in a range of
+groundbreaking past developments to compare then with what is now
+available. The tiny benchmark considered here may provide a starting
+point towards realising just how much it should be possible to do
+with even the cheapest option today, and that it does not just approach
+but often utterly dominates that which was available not very long ago.
+
+\section{Differentiation}
+Symbolic algebra was one of the early tasks that Lisp was designed for.
+The aspect of that considered here is differentiation, and algebraic
+formulae are represented as Lisp expressions in a very traditional
+way. Differentiation is always performed with respect to {\tx x}, and
+the rules used are:
+\begin{align*}
+\frac{dx}{dx} \quad & \Rightarrow \quad 1 \\
+\frac{dy}{dx} \quad & \Rightarrow \quad 0 \\
+\frac{d}{dx} (u + v) \quad & \Rightarrow \quad \frac{du}{dx} + \frac{dv}{dx} \\
+\frac{d}{dx} (u v) \quad & \Rightarrow \quad u \frac{dv}{dx} + v \frac{du}{dx} \\
+\frac{d}{dx} (u / v) \quad & \Rightarrow \quad (v \frac{du}{dx} - u \frac{dv}{dx}) / v^{2}
+\end{align*}
+where the second rule that is shown as defining the derivative of $y$ should
+be interpreted as applying to all variables that are distinct from $x$ and also
+all numbers. In Lisp terms to all atomic formulae other than the one for $x$.
+
+Expressing these rules within a Lisp function is really rather easy, but
+illustrated how easy it is to find cases where composites of {\tx car} and
+{\tx cdr} such as {\tx caddr} arise.
+{\small\begin{verbatim}
+(de deriv (a)
+   (cond
+      ((eq a 'x) 1)
+      ((atom a)  0)
+      ((eqcar a 'plus)
+         (list 'plus (deriv (cadr a))
+                     (deriv (caddr a))))
+      ((eqcar a 'difference)
+         (list 'difference (deriv (cadr a))
+                           (deriv (caddr a))))
+      ((eqcar a 'times)
+         (list 'plus
+            (list 'times (cadr a) (deriv (caddr a)))
+            (list 'times (deriv (cadr a)) (caddr a))))
+      ((eqcar a 'quotient)
+         (list 'quotient
+            (list 'difference
+               (list 'times (deriv (cadr a)) (caddr a))
+               (list 'times (cadr a) (deriv (caddr a))))
+            (list 'times (caddr a) (caddr a))))
+      (t 'unknown)))
+\end{verbatim}}
+
+Here if an unrecognised operator occurs the function merely returns the
+literal {\tx unknown}. It makes sense to test behaviour on a range of
+trivial examples before getting ambitious. One easy way to create
+a reasonably elaborate test is to use just these simple rules to
+form (say) the fourth derivative of $1/x$. 
+{\small\begin{verbatim}
+(deriv '(plus x y))
+(deriv '(times x y))
+(deriv '(quotient 1 x))
+
+(deriv (deriv (deriv (deriv '(quotient 1 x)))))
+\end{verbatim}}
+
+Without any simplification of the result the result is amazingly clumsy and
+starts off as
+{\small\begin{verbatim}
+(deriv (deriv (deriv (deriv '(quotient 1 x)))))
+Value: (quotient (difference (times (difference (plus
+(times (difference (plus (times (difference (plus
+(times 0 1) (times 0 x)) (plus (times 1 0) (times 0 1)
+)) (plus (times x 1) (times 1 x))) (times (difference
+(plus (plus (times 0 0) (times 0 1)) (plus (times 0 1)
+(times 0 x))) (plus (plus (times 1 0) (times 0 0))
+(plus (times 0 0) (times 0 1)))) (times x x))) (plus
+(times (difference (times 0 x) (times 1 1)) (plus
+(plus (times x 0) (times 1 1)) (plus (times 1 1)
+(times 0 x)))) (times (difference (plus (times 0 1)
+(times 0 x)) (plus (times 1 0) (times 0 1))) (plus
+(times x 1) (times 1 x))))) (plus (times (times x x)
+...
+\end{verbatim}}
+If you inspect this it has an amazing number of sub-formulae
+such as {\tx (plus (times 1 0) (times 0 1))} that would collapse
+dramatically when simplified. 
+
+A different differentiation program was included as one of the
+benchmarks in the Gabriel\cite{Gabriel} book on Lisp performance. The code
+given there is explained as a Common Lisp version of a symbolic
+derivative benchmark written by Vaughan Pratt -- the code here has
+been converted back out of Common Lisp into the dialect that \vsl{} uses,
+but because the code only uses a rather small subset of Lisp this
+was not a difficult task. In many respects the most subtle issue is that
+the mapcar function takes its arguments in different orders in the two
+different Lisp traditions.
+{\small\begin{verbatim}
+(de deriv!-aux (a) (list '/ (deriv a) a))
+
+(de deriv (a)
+   (cond
+      ((atom a)
+         (cond ((eq a 'x) 1) (t 0)))
+      ((eq (car a) '+)
+         (cons '+ (mapcar (cdr a) 'deriv)))
+      ((eq (car a) '-)
+         (cons '- (mapcar (cdr a) 'deriv)))
+      ((eq (car a) '*)
+      (list '* a
+         (cons '+ (mapcar (cdr a) 'deriv!-aux))))
+      ((eq (car a) '/)
+         (list '-
+            (list '/
+               (deriv (cadr a))
+               (caddr a))
+            (list '/
+               (cadr a)
+               (list '*
+                  (caddr a)
+                  (caddr a)
+            (deriv (caddr a))))))
+      (t (error 1 'bad)))))
+\end{verbatim}}
+A single differentiation takes almost all time and so to
+get a reasonably reliable timing there is a test-harness that
+arranges to perform half a million simple differentiations. This
+number is arranged by looping 100000 times and calling the {\tx deriv}
+function five times within the loop.
+{\small\begin{verbatim}
+% Try once to verify results.
+(deriv '(+ (* 3 x x) (* a x x) (* b x) 5))
+
+(de run ()
+   (prog (i)
+      (setq i 100000) % Call deriv 500000 times
+   loop
+      (cond
+         ((zerop i) (return nil)))
+      (setq i (sub1 i))
+      (deriv '(+ (* 3 x x) (* a x x) (* b x) 5))
+      (deriv '(+ (* 3 x x) (* a x x) (* b x) 5))
+      (deriv '(+ (* 3 x x) (* a x x) (* b x) 5))
+      (deriv '(+ (* 3 x x) (* a x x) (* b x) 5))
+      (deriv '(+ (* 3 x x) (* a x x) (* b x) 5))
+      (go loop)))
+
+(setq a (time))
+(run)
+(difference (time) a)
+\end{verbatim}}
+The \vsl{} system has a {\tx time} function that returns a measure of
+CPU time measured in milliseconds. The difference between a reading before
+and after the test is reported. Gabriel reports timings for this test
+on a number of machines, but with 5000 rather than 500000 calls. For
+instance on the ``Lambda'' special-purpose Lisp machine those 5000
+calls took 3.62 or 6.40 seconds depending on options, and a VAX/780
+\begin{wrapfigure}{r}{2.5in}
+{\centering
+\includegraphics[width=2.4in]{vax-780-vax-o-matic-flickr.eps}}
+\caption{A VAX/780 (photo courtesy vax-o-matic on flickr)}
+\end{wrapfigure} took 23 seconds. These timings can really put the
+performance of modern hardware into perspective -- on an fairly fast
+desktop pc the \vsl{} timing is not much over 5 seconds for the
+full half million trials. A cheap machine such as a Raspberry Pi
+is slower than that but still dramatically faster than systems that
+were the mainstay of many Computer Science departments in the 1980s.
+
+The first test program here illustrates the need for simplification. This
+too was something that was observed very early in the history of Lisp.
+A thesis by Fenichel\cite{Fenichel} from 1966 implemented a general
+rewrite system that could accept new rules such as
+\begin{align*}
+u + 0 \quad & \Rightarrow \quad u \\
+0 / u \quad & \Rightarrow \quad 0 
+\end{align*}
+While the system described there could simplify things, my favourite
+quotation from Fenichel's thesis is
+{\em \begin{quotation}
+The current FAMOUS implementation presents a mean lethal dose of inefficiency.
+That is, approximately half of the problems given to FAMOUS have been
+solve so slowly that the users have lost interest in waiting for their
+solutions.
+
+The figure ``one half'', moreover is probably charitable. The system's major
+user is overmotivated and all of the system's users have been more
+interested in seeing what the system can do than in what the system can do
+with some predetermined problem. \ldots
+\end{quotation}}
+
+So not only is there a challenge to simplify but also there is a
+challenge to make things run at a sensible speed!
+
+As you might imagine, once the early Lisp programmers had got differentiation
+under control their next target was integration\ldots
+
+\section{Parsing}
+Some people will view Lisp's parenthesised input notation as barbaric.
+This example shows that the language can cope with a more traditionally
+human notation too. Specifically it presents a parser that can read
+in simple arithmetic expressions and convert them into Lisp form read
+for further processing. The code given here is only a page long and only
+copes with the four arithmetic operations of {\tx +}, {\tx -}, {\tx *} and
+{\tx /}. But purely at the cost of some more code it could extend first
+to support more operators, and then to cover the whole syntax of a
+normal-looking programming language.
+
+The first function needed is one to read a ``symbol''. The version here
+maintains a variable called {\tx cursym} that holds the most recent symbol
+that has been read, and it takes the next single character as the next
+whole symbol. It then skips blanks and newlines. There is no discrimination
+between names, numbers and operators, no arrangement for multi-character
+items and in general this is pared to be as simple as it possibly could be.
+{\small\begin{verbatim}
+(de nextsym ()
+   (let ((prev cursym))
+      (setq cursym (readch))
+      (while (or (eq cursym blank)
+                 (eq cursym !$eol!$))
+             (setq cursym (readch)))
+      prev))
+\end{verbatim}}
+
+{\small\begin{verbatim}
+(de expression ()
+   (let
+      ((tree (term)))
+      (while
+         (or (eq cursym '!+) (eq cursym '!-))
+         (setq tree (list (nextsym) tree (term))))
+      tree))
+
+
+(de term ()
+   (let
+      ((tree (factor)))
+      (while
+         (or (eq cursym '!*) (eq cursym '!/))
+         (setq tree (list (nextsym) tree (factor))))
+      tree))
+
+(de factor ()
+   (cond
+      ((eq cursym lpar)
+         (nextsym)
+         (let
+            ((tree (expression)))
+            (nextsym)
+            tree))
+      (t (nextsym))))
+
+(de parser ()
+   (let ((cursym nil))
+      (nextsym)
+      (expression)))
+
+(parser)
+2+(a-b)*(4/x+7);
+\end{verbatim}}
+
+\section{Expanding macros}
+%@@@@@@
+{\small\begin{verbatim}
+(de macroexpand_cond (l)
+   (cond
+      ((null l) nil)
+      (t (cons (macroexpand_list (car l))
+               (macroexpand_cond (cdr l))))))
+
+(de macroexpand (x)
+   (cond
+      ((atom x) x)
+      ((not (atom (car x)))
+         (cons (macroexpand (car x))
+               (macroexpand_list (cdr x))))
+      ((eqcar x 'quote) x)
+      ((eqcar x 'cond)
+         (cons 'cond (macroexpand_cond (cdr x))))
+      ((or (eqcar x 'prog) (eqcar x 'lambda))
+         (cons 'prog (cons (cadr x)
+            (macroexpand_list (cddr x)))))
+      ((eqcar (getd (car x)) 'macro)
+         (macroexpand (apply (cdr (getd (car x)))
+                             (list x))))
+      (t (cons (car x) (macroexpand_list (cdr x))))))
+
+(de macroexpand_list (l)
+   (cond
+      ((atom l) l)
+      (t (cons (macroexpand (car l))
+               (macroexpand_list (cdr l))))))
+
+(cdddr (getd 'expand_dolist))
+
+(macroexpand_list (cdddr (getd 'expand_dolist)))
+
+(stop 0)
+\end{verbatim}}
+
+\section{Compiling}
+%@@@@@
+{\small\begin{verbatim}
+% A compiler that compiles Lisp into C, but
+% that makes no attempt at optimisation.
+
+% comval is the central dispatch that takes any
+% Lisp expression and creates C code that moves
+% the value of it into a variable called "w".
+
+(de comval (x)
+   (cond
+      ((symbolp x) (loadsymbol x))
+      ((atom x) (loadliteral x))
+      ((get (car x) 'compfn)
+         (eval (list (get (car x) 'compfn)
+                     (list 'quote (cdr x)))))
+      ((eqcar (getd (car x)) 'macro)
+          (comval (apply (cdr (getd (car x)))
+                         (list x))))
+      (t (loadargs (cdr x))
+         (callfunction (car x) (length (cdr x))))))
+
+
+% Literal values used within the function being
+% compiled will live in a vector. This function
+% keeps track of what will go in that vector.
+
+(de findlit (x)
+   (prog (w)
+      (setq w (assoc x lits))
+      (cond (w (return (cdr w))))
+      (setq lits (cons (cons x nlits) lits))
+      (setq nlits (add1 nlits))
+      (return (sub1 nlits))))
+
+% Loading the value of a variable involved loading
+% (as a literal) the name of the variable and then
+% accessing its value cell.
+
+(de loadsymbol (x)
+   (princ "    w = qvalue(elt(lits, ")
+   (princ (findlit x))
+   (printc "));"))
+
+(de loadliteral (x)
+   (princ "    w = elt(lits, ")
+   (princ (findlit x))
+   (printc ");"))
+
+% loadargs merely arranges to push all the
+% arguments onto a stack.
+
+(de loadargs (l)
+   (dolist (x l)
+      (comval x)
+      (printc "    push(w);")))
+
+% After loadargs you can use callfunction to
+% pop args into individual variables and call
+% the function concerned.
+
+(de callfunction (f nargs)
+   (dotimes (n nargs)
+      (princ "    pop(a")
+      (prin (difference nargs n))
+      (printc ");"))
+   (loadliteral f)
+   (princ "    w = (*(lispfn *)qdefn(w))(qlits(w), ")
+   (princ nargs)
+   (dotimes (n nargs)
+      (princ ", a")
+      (prin (add1 n)))
+   (printc ");"))
+      
+% Now I will put in a collection of functions that
+% provide special-case treatment. All "special forms"
+% need this, and some other code can benefit from it
+% in terms of efficiency.
+
+(de comcar (x)
+   (comval (car x))
+% For simplicity I make taking CAR of an atom a
+% fatal error here.
+   (printc "    if (!isCONS(w)) disaster(__LINE__);")
+   (printc "    w = qcar(w);"))
+
+(put 'car 'compfn 'comcar)
+
+(de comcdr (x)
+   (comval (car x))
+   (printc "    if (!isCONS(w)) disaster(__LINE__);")
+   (printc "    w = qcdr(w);"))
+
+(put 'cdr 'compfn 'comcdr)
+
+(de comcond (x)
+   (cond
+      ((null x) (loadliteral nil))
+      (t (let ((lab1 (gensym))
+               (lab2 (gensym)))
+         (comval (caar x))
+         (princ "    if (w == nil) goto ")
+         (print lab1)
+         (comprogn (cdar x))
+         (princ "    goto ")
+         (print lab2)
+         (prin lab1)
+         (printc ":")
+         (comcond (cdr x))
+         (princ lab2)
+         (printc ":")))))
+
+(put 'cond 'compfn 'comcond)
+
+(de comprogn (x)
+   (cond
+      ((null x) (loadliteral nil))
+      (t (dolist (c x) (comval c)))))
+
+(put 'progn 'compfn 'comprogn)
+
+(de tidylits (a)
+   (mapcar (reverse a) 'car))
+
+(de localargs (l v)
+   (cond
+      ((null l) nil)
+      (t (princ ", ")
+         (prin (car v))
+         (localargs (cdr l) (cdr v)))))
+
+(de pushargs (names vars)
+   (cond
+      ((null names) nil)
+      (t (princ "    push(qvalue(elt(lits, ")
+         (princ (findlit (car names)))
+         (printc ")));")
+         (princ "    qvalue(elt(lits, ")
+         (princ (findlit (car names)))
+         (princ ")) = ")
+         (prin (car vars))
+         (printc ";")
+         (pushargs (cdr names) (cdr vars)))))
+
+(de popargs (l)
+   (dolist (v l)
+      (princ "    pop(qvalue(elt(lits, ")
+      (princ (findlit v))
+      (printc ")));")))
+
+(de compile (fn)
+   (prog (def pops lits nlits)
+      (setq nlits 0)
+      (setq def (cddr (getd fn)))
+      (terpri)
+      (princ "LispObject L")
+      (princ fn)
+      (printc "(LispObject lits, int n, ...)")
+      (printc "{")
+      (printc"    LispObject w, a1, a2, a3, a4;")
+      (princ "    ARG")
+      (princ (length (car def)))
+      (princ "(""")
+      (princ fn)
+      (princ """")
+      (localargs (car def) '(v1 v2 v3 v4))
+      (printc ");")
+      (setq pops
+         (pushargs (car def) '(v1 v2 v3 v4)))
+      (comprogn (cdr def))
+      (popargs (reverse (car def)))
+      (printc "    return w;")
+      (printc "}")
+      (terpri)
+      (princ "lits: ")
+      (print (tidylits lits))))
+
+
+(compile 'cadr)
+
+(compile 'pushargs)
+
+% This example will generate INCORRECT code because
+% at present this compiler does not have a 'compfn
+% for PROG (or GO or RETURN).
+(compile 'comprogn)
+\end{verbatim}}
+
+
+\section{Simple graphics}
+It is often nice to be able to draw pictures. As it stands \vsl{} does
+not have any directly built-in graphics capabilities, but it is easy
+to provide some using a helper program. The one shown here is
+called {\tx wxplot} and is written in C++ using a graphics library
+called {\tx wxWidgets}\cite{wxWidgets}. The purpose of this helpere is to recieve a
+stream of simple commands from \vsl{} (or indeed anywhere else) and
+draw something based on them. The commands that it accepts each consist of
+a command letter followed by twoi or three integers. The commands provide
+for selection of a background colour, selection of a colour to draw in,
+movement of the pen to an absolute position and drawing a straight
+line.
+
+As indicated, the code that creates a window and draws in it has been
+coded using {\tx wxWidgets}, but there are actually a large number of
+other graphical toolkits that could have been used almost equally as
+easily. So anybody who wishes could re-work the code here to use one
+of the others. Perhaps {\tx Qt}\cite{Qt} is one of the leaders, but it
+is larger and more elaborate than {\tx wxWidgets}, and for current
+purposes small is good.
+
+% @@@@@
+{\small\begin{verbatim}
+// wxplot.cpp                               A C Norman, 2011
+// Simple plotting using wxWidgets. Works with wxWidgets 2.8
+// This code is subject to the BSD license from
+// the accompanying file "bsd.txt".
+
+#include "wx/wxprec.h"
+#include "wx/wx.h"
+#include <iostream>
+using namespace std;
+
+DECLARE_EVENT_TYPE(FROM_THREAD, -1)
+DEFINE_EVENT_TYPE(FROM_THREAD)
+
+class wxPlot : public wxApp         // The program as a whole.
+{
+public:
+    virtual bool OnInit();
+};
+
+class InputThread : public wxThread // Where input is read.
+{
+public:
+    InputThread(class PlotFrame *pf)
+    {   owner = pf;
+    };
+protected:
+    virtual ExitCode Entry();
+private:
+    class PlotFrame *owner;
+};
+
+class PlotFrame : public wxFrame    // A window to display.
+{
+public:
+    PlotFrame(const wxString& title);
+    void OnQuit(wxCommandEvent& event);
+    void OnPaint(wxPaintEvent& event);
+    void OnThread(wxCommandEvent& event);
+private:
+    int x, y;
+    wxBitmap bitmap;
+    wxMemoryDC bitmapDC;
+    InputThread *inThread;
+    DECLARE_EVENT_TABLE()
+};
+
+BEGIN_EVENT_TABLE(PlotFrame, wxFrame)
+    EVT_MENU(   wxID_EXIT,             PlotFrame::OnQuit)
+    EVT_PAINT(                         PlotFrame::OnPaint)
+    EVT_COMMAND(wxID_ANY, FROM_THREAD, PlotFrame::OnThread)
+END_EVENT_TABLE()
+
+IMPLEMENT_APP(wxPlot)
+
+bool wxPlot::OnInit()
+{   PlotFrame *frame = new PlotFrame(wxT("wxplot"));
+    frame->Show(true);
+    return true;
+}
+
+PlotFrame::PlotFrame(const wxString& title)
+    : wxFrame(NULL, wxID_ANY, title),
+      bitmap(480, 400)
+{   bitmapDC.SelectObject(bitmap);
+    bitmapDC.SetBackground(*wxLIGHT_GREY_BRUSH);
+    bitmapDC.Clear();
+    bitmapDC.SetPen(*wxBLACK_PEN);
+    bitmapDC.SelectObject(wxNullBitmap);
+    x = 480/2; y = 400/2;
+    wxSize winsize(480, 400);
+    SetSize(winsize); SetMinSize(winsize); SetMaxSize(winsize);
+    Centre();
+    inThread = new InputThread(this);
+    inThread->Create();
+    inThread->Run();
+}
+
+void PlotFrame::OnQuit(wxCommandEvent& WXUNUSED(event))
+{   Close(true);
+}
+
+void PlotFrame::OnThread(wxCommandEvent& event)
+{   char c; int u, v, w;
+    bitmapDC.SelectObject(bitmap);
+    sscanf(event.GetString().mb_str(),
+           "%c %d %d %d", &c, &u, &v, &w);
+    switch (c)
+    {
+    case 'x': // x red green blue  Set background colour.
+        bitmapDC.SetBackground(wxBrush(wxColour(u, v, w)));
+        bitmapDC.Clear();
+        break;
+    case 'c': // c red green blue  Set colour to draw in.
+        bitmapDC.SetPen(wxPen(wxColour(u, v, w)));
+        break;
+    case 'V': // V x y             Move to position x, y.
+        x = 480/2 + u; y = 400/2 - v;
+        break;
+    case 'D': // D x y             Draw to position x, y.
+        bitmapDC.DrawLine(x, y, 480/2 + u, 400/2 - v);
+        x = 480/2 + u; y = 400/2 - v;
+    }
+    bitmapDC.SelectObject(wxNullBitmap);
+    Refresh();   // Get window re-painted soon.
+}
+
+void PlotFrame::OnPaint(wxPaintEvent& event)
+{   wxPaintDC dc(this);
+    dc.DrawBitmap(bitmap, 0, 0);
+}
+
+wxThread::ExitCode InputThread::Entry()
+{   string line;
+    while (cin)
+    {   getline(cin, line);
+        if (line[0] == 'Q') break;
+        wxCommandEvent msg(FROM_THREAD, GetId());
+        msg.SetString(wxString(line.c_str(), wxConvUTF8));
+        wxPostEvent(owner, msg);
+    }
+    return (wxThread::ExitCode)0;
+}
+\end{verbatim}}
+{\small\begin{verbatim}
+% Using the wxplot application to draw a picture...
+
+(de draw (x y)
+   (princ "D ") (princ x) (princ " ") (printc y))
+
+(de move (x y)
+   (princ "V ") (princ x) (princ " ") (printc y))
+
+(de circle (n)
+   (prog (w)
+      (setq w (quotient (times n 7) 10))
+      (move n 0)
+      (draw w w)
+      (draw 0 n)
+      (draw (minus w) w)
+      (draw (minus n) 0)
+      (draw (minus w) (minus w))
+      (draw 0 (minus n))
+      (draw w (minus w))
+      (draw n 0)))
+
+(de spider (n)
+   (cond
+      ((minusp n) nil)
+      (t (circle n)
+         (spider (difference n 10)))))
+
+(de drawit ()
+   (prog (a)
+      (setq a (open "./wxplot" 'pipe))
+      (wrs a)
+      (spider 180)
+      (printc "Q")
+      (close (wrs nil))))
+
+(drawit)
+\end{verbatim}}
+
+
+\section{Turtle Graphics}
+``Turtle Graphics'' is a style of creating drawings by imagining that
+you have a turtle that crawls around the floor with a pen attached so that
+it leaves
+\begin{wrapfigure}{r}{2.5in}
+{\centering
+\includegraphics[width=2.4in]{turtle.eps}}
+\caption{An example of graphical output from \vsl}
+\end{wrapfigure} a trail. It is associated with the Logo programming language
+and mechanical robot turtles that have perhaps most often been used
+in primary schools to introduce children to geometry and computation. The
+key idea it applies is that the turtle will respond to commands to
+turn left or right by various amounts and to crawl forward. Simulating this
+in \vsl{} just involves converting these relative movements into standard
+Cartesian coordinates so that information can be sent to the {\tx wxplot}
+drawing code used in the previous example.
+
+If a turtle alternates between moving forward by a small amount and
+turning right by a fixed small angle it will trace a path that is
+roughly circular. Making the angle turned smaller will smooth corners
+along the path and lead to a better circle, but the forward movement will need
+to be scaled down at the same time to keep the image size reasonable.
+If the angle turned by is changed at each step much more complicated
+images emerge. The code here uses a scheme that sets up a sequence of
+values for a variable {\tx a} that increases as an arithmetic progression
+$0, 11, 22, 33, 44, 55,\ldots$ and then a second one {\tx b} where at
+each stage it is increased by the current value of {\tx a}. This value
+{\tx b} is then used to instruct the turtle what angle to turn by, working
+in degrees. 
+{\small\begin{verbatim}
+(setq x 0.0)
+(setq y 160.0)
+(setq dir 0)
+
+(de turn (n)    % Turn by n DEGREES (not radians)
+   (setq dir (remainder (plus dir n) 360)))
+
+(de draw (len)  % Draw line in the current dir
+   (setq x (plus x
+      (times len (cos (times dir 0.01745329252)))))
+   (setq y (plus y
+      (times len (sin (times dir 0.01745329252)))))
+   (princ "D ") (prin (fix x))
+   (princ " ") (print (fix y)))
+
+(prog (o a b)
+   (setq o (open "./wxplot" 'pipe))
+   (wrs o)
+   (printc "x 100 200 220") % Select background colour
+   (printc "c 200 30 180")  % Select colour for plot
+   (printc "V 0 160")       % starting point for pen
+   (setq a 0 b 0)
+   (dotimes (i 5000)
+      (draw 8.0)
+      (setq a (plus a 11))
+      (setq b (plus b a))
+      (turn b))
+   (printc "Q")
+   (close (wrs nil)))
+\end{verbatim}}
+
+There is great scope for experiment here using different starting
+values for the sequences {\tx a} and {\tx b}, and an increment other than
+11 for the values that {\tx a} takes. But perhaps the real challenge is
+to explain why the path that the turtle takes here, that seems so chaotic to
+start with, seems to close up on itself leaving a figure with threefold
+symmetry. The code given merely takes 5000 steps -- is there a neat way
+of predicting ahead of time whether a path will close up and exactly
+how many steps are needed to achieve that? The book by Abelson and
+diSessa\cite{Turtles} may provide all sorts of other leads for worthwhile
+investigation, experimentation and fun in this area, and it certainly
+shows that Turtle paths are not just for pre-school children.
+
+
+\section{Mazes and Dungeons}
+% @@@@@
+
+{\small\begin{verbatim}
+(de adventure nil
+   (printc '(Welcome to the Lisp Dungeon))
+   (setq location 'start)
+   (setq carrying nil)
+   (display_position)
+   (while (not (eq location 'finish))
+      (make_move (readline))
+      (display_position))
+   'Congratulations)
+
+(de display_position nil
+   (terpri)
+   (princ "at: ")
+   (lpri (get location 'description))
+   (dolist (item carrying)
+      (lpri (list 'you 'are 'carrying item)))
+   (dolist (item (get location 'objects))
+      (lpri (list 'you 'see item)))
+   (princ "exits:")
+   (dolist (dir '(north south east west up down))
+      (cond
+         ((get location dir)
+          (princ " ")
+          (princ dir))))
+   (terpri))
+
+(de lpri (l)
+   (dolist (x l) (princ x) (princ " "))
+   (terpri))
+
+(de make_move (word)
+   (cond
+      ((member word carrying) (drop word))
+      ((member word (get location 'objects))
+         (pick_up word))
+      ((get location word) (move_to word))
+      (t (lpri (list word 'not 'understood)))))
+
+(de drop (word)
+   (setq carrying (delete word carrying))
+   (put location 'objects
+      (cons word (get location 'objects)))
+   (lpri (list 'dropped word)))
+
+(de pick_up (word)
+   (put location 'objects
+      (delete word (get location 'objects)))
+   (setq carrying (cons word carrying))
+   (lpri (list 'got word)))
+
+(de move_to (word)
+   (setq location (get location word)))
+
+(put 'start 'description '(The entry to a maze))
+(put 'hall 'description '(A fine gothic hallway))
+(put 'twist 'description '(A twisty passage))
+(put 'dead 'description '(Dead end))
+(put 'cave 'description '(Aladdin!'s cave))
+(put 'finish 'description '(Castle splendid))
+
+(put 'start 'north 'hall)
+(put 'hall 'east 'twist)
+(put 'twist 'up 'cave)
+(put 'cave 'east 'dead)
+(put 'cave 'west 'finish)
+(put 'hall 'south 'start)
+(put 'twist 'north 'hall)
+(put 'cave 'down 'twist)
+(put 'dead 'down 'cave)
+
+(put 'start 'objects '(lantern lasergun))
+(put 'twist 'objects '(keys map))
+(put 'cave 'objects '(treasure))
+
+(adventure)
+lantern
+lasergun
+north
+east
+up
+treasure
+lasergun
+west
+
+\end{verbatim}}
+
+\section{Towards Common Lisp Compatibility}
+The Lisp dialect that this book uses is not Common Lisp, and many
+Lisp users will question this situation. So this section discusses some
+of the special capabilities that a full Common Lisp would require and
+looks at how they could be added to \vsl. Actually each separate extension
+needed could end up involving a reasonably small amount of extra code, and
+so where there are particular Common Lisp features that matter to you it should
+be easy to provide them. But the total size of all extensions would
+not be small by any reasonable standards.
+
+When this section gets to providing code examples that support Common Lisp
+compatibility it will concentrate on the features relied upon by
+Bark's Land Of Lisp book\cite{LandOfLisp} since that is a text aimed at the
+beginner and containing worked examples generally similar in scale to the ones
+presented here.
+
+The discrepancies between Standard Lisp and Common Lisp come in a range
+of styles. There are cases where both dialects provide similar functions but
+use different names or specify arguments in a different order. Altering
+\vsl{} to cope with things of that sort would be close to trivial. Common
+Lisp demands support for many additional data-types. These include
+rational and complex numbers, vectors that can hold bits, bytes, words
+or floating point values, character constants, user-specified record
+structures and a whole range of specialities that interact with the
+inner workings of the system (readtables, packages, pathnames,
+streams, \ldots). The data tagging scheme used in \vsl{} could
+probably cope with most of these without too much trouble, and the
+trick used here to support big integers illustrates an escape route that
+could certainly make it possible to add as many fresh data-types as were
+ever needed. Of course if rational numbers such as $\frac{1}{3}$
+and $\frac{17}{93}$ and complex numbers such as $1+i$ are introduced then all
+the arithmetic code in \vsl{} will need enlarging to cope. The dispatch
+code that compares the types of two values that are to be combined and
+selects a proper type for the result of an arithmetic operation will
+become significantly more complicated and risks becoming slower. When
+complex values are supported there are not just extra functions that are
+needed to support them (for instance the simple ones that extract the
+real and imaginary parts) but all the elementary functions -- sines,
+cosines, square roots, logarithms and so on -- have to be re-worked
+to behave properly in the complex domain. Common Lisp sets precise
+rules as to how branch cuts are to be handled in such cases, and completing
+a high quality implementation will be a serious (but fun) amount of work.
+
+\subsection{Spelling and Syntax}
+The fact that different Lisp dialects merely use different names for
+some functions is hardly a serious issue in any implementation. So for
+instance where Standard Lisp used the name {\tx plus} for a function that
+can add up some numbers Common Lisp uses the name ``{\tx +}''. But the
+use of a single character name does not alter the fact that addition is
+denoted with the operator first, as in {\tx (+~1~2~3)} rather than $1+2+3$.
+
+Changing the exact names used by \vsl{} to match Common Lisp is not a big deal.
+A little more work is required in that the Common Lisp reader (at least by
+default -- it has elaborate mechanisms to make it re-configurable) treats most
+operator-like characters as if they were letters. Thus the input
+{\tx (a+b*c)} would be a list of length 5 in Standard Lisp and a list of
+length 1 in Common Lisp. The symbol in that list would have had to be written
+as {\tx !A!+!B!*!C} if for some reason you wanted it in
+Standard Lisp, because in addition to treating {\tx +} and {\tx *} as letters
+Common Lisp has a default behaviour where all input is converted to upper
+case as it is read. The true Common Lisp name for two of the most fundamental
+Lisp functions are {\tx CAR} and {\tx CDR} not {\tx car} and {\tx cdr}. The
+main consequence of this is that with Common Lisp most of your output will
+unexpectedly appear in upper case unless you take special steps.
+
+Thus to create \vcl{} the first and rather easy things that had to be done
+to the \vsl{} sources involved altering all the names of built-in functions to
+spell them in upper case and to adjust a few of their names. The tokeniser
+needing altering so that the escape character was ``{\tx \textbackslash}''
+rather than ``{\tx !}'', and so that most symbols could appear in names. The
+printing code needed corresponding changes because otherwise it would have
+felt obliged to insert escape characters in a lot of unnecessary places.
+Common Lisp has an unusual concept of ``potential numbers'' and so it is
+quite possible to have a symbol whose name starts with digits. This case is
+used for built-in functions such as {\tx 1+} (corresponding to Standard Lisp
+{\tx add1}). Thus the tokenizer needs to start by assembling an almost
+arbitrary string of alphanumeric characters and then test to see if it matches
+the syntax of a number.
+
+Common Lisp symbols are not recorded in a single object list but in a
+collection of ``packages''. This provides a way to avoid name-clash
+problems in large programs, but in general is not terribly important in
+small examples. However one aspect of this scheme must be supported. A name
+whose spelling starts with a colon (eg {\tx :a} or {\tx :b}) is a {\em keyword}
+and behaves as a constant. Keywords are used in some function definitions,
+and so \vcl{} detects that syntax and treats it specially.
+
+A complete Common Lisp would require a fairly elaborate re-programmable
+reader. That has not been addressed at all in \vcl, but if the capabilities were
+seen as genuinely useful then extending the code to support them would be
+straightforward but fiddly and reasonably bulky code. And of course then if
+you wanted you could reconfigure it back to support the lexical structure as
+originally used in \vsl! 
+
+\subsection{Rational numbers}
+The second fairly simple extension to support Common Lisp is forced by the
+fact that as soon as you implement the four basic arithmetic operators
+you are faced with the fact that Common Lisp specifies that dividing one
+integer by another in general delivers a rational number. So even though a
+large proportion of real users are not at all liable to really want
+exact rational arithmetic one is almost forced to provide it from the
+start. In \vcl{} this is done using the same mechanism that \vsl{} uses
+to support arbitrary-precision integers. A symbol (in this case
+{\tx \textasciitilde{}RATIO}) is reserved and any list-structure starting with
+it is treated as standing for a fraction. The dispatch code in arithmetic
+that already had to cope with combinations of large and small integers
+as well as floating point values now gets slowed down with extra tests for
+rational numbers, and the obvious code then uses rules such as
+\begin{align*}
+\frac{a}{b} + \frac{c}{d} \quad & \Rightarrow \quad
+\frac{a d + b c}{b d}
+\end{align*}
+followed by a step the reduces the result to its lowest terms. Anybody
+wishing to complete the support for arithmetic would need to provide
+complex numbers as well, and this could obviously be done using just the
+same sort of mechanism. Full Common Lisp can support up to four different
+precisions of floating point number not just the one used here. Of course
+with each new data-type there is an opportunity to introduce a full range
+of functions that work with it. Since these will in general be straightforward
+to add in one at a time \vcl{} does not rush to provide everything. Apart from
+such issues as that implementing high quality complex-valued elementary
+functions that match Common Lisp's ideas about where branch cuts must go is
+a delicate and time-consuming task really requiring significant numerical
+experience these will all be things that anybody using \vcl{} could
+add in as and when they found a need.
+
+\subsection{{\tx setf} and friends}
+In Standard Lisp and the old-style Lisp tradition a variable is updated
+using {\tx setq}, the {\tx car} and {\tx cdr} parts of a {\tx cons} can
+be overwritten using the functions {\tx rplaca} and {\tx rplacd}, properties
+can be attached to symbols using {\tx put} so that {\tx get} can retrieve
+them and there are pairs of accessor and mutator functions for array
+access, hash tables and anything else that needs them. Common Lisp seeks to
+unify all of these so that only the accessor functions are used as such. To
+update anything you would use {\tx setf}. This takes a {\em place}, which is
+either a variable name or something that looks like a call to an acccesor
+function. It expands into whatever is needed to update that place. The user
+thus does not need to remember the names of all the mutator functions. With
+this instead of writing {\tx (rplacd~a~b)} you would say
+{\tx (setf~(cdr~a)~b)}. Supporting this for \vsl{} is mainly just a matter
+of listing all the accessor functions that are considered to indicate places,
+and arranging to map {\tx setf} onto the relevant mutator. The code in
+{\tx vcl.cl} at present only covers a basic few case, making this one of the
+many places where there is scope for the reader to extend and complete what
+they find here. A proper implementation will take care to arrange that the
+arguments to {\tx setf} get evaluated in the expected order whatever
+convolutions the expanded version of the code involves. It will also arrange
+that the result delivered is as {\tx setf} expectes -- the value that was
+stored.
+
+Associated with {\tx setf} are some other macros that can update generalised
+places. When building lists it is frequently useful to put a new item on
+the from of a list or remove that first item. If the list is though of as
+a stack of values the names {\tx push} and {\tx pop} for these operations
+becomes reasonable. As with {\tx setf} itself these are fairly simple macros
+to implement, but a version more proper than the one in \vcl{} would
+worry more about coping properly when the expressions used with them had
+side-effects and so the order of evaluation became critical: pedantry about
+this may sometimes lead to a much larger bulk of code in the expansion!
+
+\subsection{{\tx defun} and {\tx defmacro}}
+The next way in which Common Lisp goes beyond most earlier dialects of
+the language is in how functions indicate what arguments they specify.
+The relatively uncontroversial part of this allows for arguments that are
+optional and that possibly have default values to be used if the caller
+did not supply them. In Common Lisp this is indicated as follows:
+{\small\begin{verbatim}
+(defun name (arg1
+             &optional
+             arg2
+             (arg3 default3)
+             (arg4 default4 supplied4)
+             &rest
+             arg5-and-up)
+   ...)
+\end{verbatim}}
+Any arguments before the special word {\tx optional} indicate ordinary
+arguments that must be supplied. After that word arguments are optional
+and they can be specified in several ways. As shown in the above example
+{\tx arg2} is simply optional, and if the caller only passes one argument
+then {\tx arg2} will end up with a value of \nil. The next
+case shows {\tx arg3} where {\tx default3} stands for an arbitrary Lisp
+expression providing a default value (typically non-\nil) to be used if
+the caller does not supply a proper value. The final case shown is for
+{\tx arg4} where not only is a default provided, by the additional variable
+{\tx supplied4} can be tested by the function and indicates whether
+the caller had supplied a genuine value or (conversely) the default had
+been used.
+
+The word {\tx \&rest} allows functions to be called with excess arguments --
+these are collected into a list, and in this case would be made available
+to the function under the name {\tx arg5-and-up}. An extreme case of the use
+of a {\tx \&rest} argument would be as in
+{\small\begin{verbatim}
+(defun my-list (&rest l) l)
+\end{verbatim}}
+\noindent which would define a function that behaves like the built-in
+{\tx list} one, by just returning the list of all its arguments. A function
+without {\tx \&rest} may not be called with more arguments than it expects.
+
+The initial code in \vsl{} does not support any of this, but to support
+some degree of Common Lisp compatibility a variant on it, \vcl{},
+has support for {\tx \&rest} implemented directly within the interpreter.
+The changes needed add less than 50 lines of code: it is necessary to
+detect the special marker {\tx \&rest} in an bound variable list and collect
+all subsequent actual arguments to be passed as a single list rather than
+as separate values.
+
+The treatment of {\tx \&optional} is arranged by having the Lisp feature
+that defines functions expand definitions so that at a low level all
+arguments that are not mandatory are hanled by {\tx \&rest}. The
+macro that does this inserts code that checks just how long the
+{\tx \&rest} list was, and uses that information to fill in values for
+optional arguments.
+
+The following example shows the code that \vcl{} arranges to generate when
+starting from
+{\small\begin{verbatim}
+(defun f (a &optional (b BB) (c CC c-p) &rest d) ...)
+\end{verbatim}}
+
+For reasons that are to do with the exact Common Lisp rules about scope
+(in particular a form used to provide a default value for an optional
+argument can depend on all the earlier arguments)
+the actual function defined uses
+freshly-generated new names for its actual arguments. Here these are shown
+as {\tx G1} and {tx G2}.
+All the names that will be made available to the
+body of the function are introduced in a single {\tx let*} clause. This
+is done for two reasons. The first is that forms that specify default
+values for optional variable are allowed to refer to any previous
+arguments. The second is that in full Common Lisp the body of a function
+can start with declarations that impact the treatment of all the
+arguments, and here those declarations now just have an effect on the
+variables bound by {\tx let*}.
+{\small\begin{verbatim}
+(de f (G1 &rest G2)
+   (let* ((a   G1)
+          (b   (if G2 (pop G2) BB))
+          (c   (if G2 (car G2) CC))
+          (c-p (and G2 (progn (setq G2 (cdr G2)) t)))
+          (d   G2))
+      ...))
+\end{verbatim}}
+
+As well as {\tx \&optional} and {\tx \&rest} it is also possible to use the
+word {\tx \&key} followed by specifers for keyward arguments. These can have
+default values and can be provided with associated variable the tell if
+a real value had been given or the default was used. The special feature of
+keyword arguments is that the caller may specify them in any order. So if the
+function definition had been
+{\small\begin{verbatim}
+(defun f (a &key b (c 3) d e) ...)
+\end{verbatim}}
+\noindent then a call could be something like
+{\small\begin{verbatim}
+(f 1 :d 4 :b 2 :e 5)
+\end{verbatim}}
+\noindent where {\tx a} is an ordinary first argument, {\tx c} end up with
+its default value and the other arguments are given the values shown after
+the keywords in the call.
+
+The implementation of this is in fact a remarkably easy continuation of the
+style used for optional arguments. A sub-function is used to search the list of
+all arguments to find keywords and the exoabsion ends up much
+as follows:
+{\small\begin{verbatim}
+(de find-keyword (k l)
+   (cond
+      ((or (null l) (null (cdr l))) nil)
+      ((eq k (car l)) (cdr l))
+      (t (find-keyword k (cddr l)))))
+
+(de f (G1 &rest G2)
+   (let* ((a G1)
+          (G3)    ; a workspace variable used below
+          (b (if (setq G3 (find-keyword :b G2)) (car G3) nil))
+          (c (if (setq G3 (find-keyword :c G2)) (car G3) 3))
+          (d (if (setq G3 (find-keyword :d G2)) (car G3) nil))
+          (e (if (setq G3 (find-keyword :e G2)) (car G3) nil)))
+      ...))
+\end{verbatim}}
+
+That does not arrange to detect additional unexpected keyords, and so
+it will not be as good at error reporting as would be ideal, but it
+is a good start.
+
+Finally Common Lisp allows the use of a keyword {\tx \&aux} that can be
+followed by variables that are not actually arguments but are merely
+extra local variable to be made available within the function. In the
+macro-expansion as discussed here these trivially end up tagged on the
+end of the list of things that {\tx let*} introduces.
+
+What might have become clear is that use of these facilities carries a cost.
+If the value they bring is sufficiently high then that is clearly not
+a problem, and for functions that are only rarely called speed will not
+be an issue. However the excessive use of keyword arguments for
+various Common Lisp functions has attracted comments since the launch
+of the dialect. See for instance
+Brooks and Gabriel\cite{Brooks:1984:CCL} and a quotation from Richard Stallman
+on the {\tx emacs} developers list
+(\url{http://lists.gnu.org/archive/html/emacs-devel/2003-08/msg00436.html})
+to the effect ``I do not like the Common Lisp style of using keyword arguments
+for many common functions.  I basically do not have a very high
+opinion of many of the decisions that were made in Common Lisp.''
+
+The \vcl{} does not include any significant optimisations and so will
+be especially painful. But part of the purpose of this book is to leave
+projects for its readers -- so finding ways of speeding things up in this
+area can be one of those.
+
+{\tx defmacro} defines macros in a suitable elaborate manner and needs the
+same sort of treatment.\marginpar{So far I have not implemented thisin vcl.cl,
+but it should be easier than defun.}
+
+\subsection{{\tx loop}}
+Common Lisp provides a facility called {\tx loop} that aims to make all
+sorts of iteration easy to specify. It is a magnificant example of how having
+a language like Lisp with a macro capability makes it possible to graft on
+almost anything. In the case of {\tx loop} the addition that is added on
+is essentially a whole new language, with its own syntax and around
+seventy keywords. The explanation of what it is supposed to do in
+Common Lisp the Language\cite{Steele:1990:CLL} covers 38 pages.
+Even without serious concern for optimisation an implementation can be
+over 1000 lines of Lisp (the version used in {\tx clisp}\cite{clisp},
+and a more serious version (as in CMU Comon Lisp\cite{McDonald:1987:CCL})
+can be twice that size. 
+
+There is thus a conflict: the full version of {\tx loop} is seen by many
+as absurdly overblown with its sub-language not even being in the broader
+style of Lisp. On the other hand {\em simple} cases of it can be very
+useful. So \vcl{} supports a rather modest subset, where the exact limitations
+are only really discernable by inspecting the implementation in the
+file {\tx vcl.cl}. This approach is perhaps in line with much of the
+rest of the book: the starter implementation can be viewed as the beginning
+of a project that would end up expanding it to support full Common Lisp.
+
+As with the case of {\tx defun}, the explanation given here will show the
+style of expansion needed rather than including full coverage of exactly how
+it is achieved.
+
+There are a number of simple cases of {\tx loop} that do things that almost
+everybody will need at least sometimes. In the examples shown here I will show the loop keywords in
+upper case so that there is no ambiguity as to which parts of the
+code are part of the {\tx loop} syntax and which are names chosen by the
+user. First consider counting loops
+that simply obey a sequence of Lisp statements a number of times. This
+will represent a generalisation of the simpler {\tx dotimes} iteration
+macro. 
+{\small\begin{verbatim}
+(LOOP FOR v FROM 5 TO 10 DO (print v))
+(LOOP FOR v BELOW 4 DO (print v) (print (* v v)))
+\end{verbatim}}
+The first of these shows that the starting and finishing value for the
+user's variable {\tx v} can both be specified. The second starts by
+default from zero, and in this case counts through 0, 1, 2 and 3. It
+illustrates that several Lisp forms may follow {\tx DO}.
+
+A plausible expansion for the first of these would have used {\tx prog}
+in Standard Lisp, but Common Lisp deconstructs that using {\tx block} to
+make something that can handle {\tx return} and {\tx tagbody} to support
+{\tx go}. Thus the loop might render as
+{\small\begin{verbatim}
+(block nil
+   (let* ((v 5))
+      (tagbody
+   top   (when (> v 10) (return nil))
+         (print v)
+         (setq v (1+ v))
+         (go top))))
+\end{verbatim}}
+with something rather similar for the second. It is certainly clear that
+use of {\tx loop} has made it possible to express the iteration in a much
+more concise manner.
+
+The next two cases for {\tx loop} iterate over a list rather than over
+a range of numbers. In the examples I will show the list to be traversed
+as a fixed one, but any Lisp expression yielding a list can be
+used:
+{\small\begin{verbatim}
+(LOOP FOR v IN '(a b c) DO (print v))
+(LOOP FOR v ON '(a b c) DO (print v))
+\end{verbatim}}
+One might hope that it would be obvious what each of these does: the output
+from the first is just
+{\small\begin{verbatim}
+A
+B
+C
+\end{verbatim}}
+(note that Common Lisp mapped lower case input to upper case interal names),
+while the second one will produce
+{\small\begin{verbatim}
+(A B C)
+(B C)
+(C)
+\end{verbatim}}
+by letting {\tx v} range over all the non-empty parts of the starting list.
+The expansion here has to be a little careful if it wants to avoid
+taking {\tx car} of an empty list in some cases, and it certainly needs
+two variables -- one to run down the list and the other to be the {\tx v}
+specified by the user:
+{\small\begin{verbatim}
+(block nil
+   (let* ((w '(a b c))  ; internal variable
+          (v nil))      ; for the user
+      (tagbody
+   top   (when (null w) (return nil))
+         (setq v (pop w))
+         (print v)
+         (go top))))
+\end{verbatim}}
+
+The next complication is that as well as {\tx DO} it is possible to write
+either {\tx SUM} or {\tx COLLECT}. The more interesting of these is
+{\tx COLLECT}, which arranges to build a list from the values concerned.
+Thus a list of the first few squares might be built using
+{\small\begin{verbatim}
+{LOOP FOR v UNDER 10 COLLECT (* v v))
+\end{verbatim}}
+A plausible expansion works by keeping two pointers to what
+will end up as the result list. The first always points to its
+head, while the other tracks its end. A new item can then
+be added to the end of the list using {\tx rplacd} top overwrite
+the termination. To remain in a Common Lisp style this is expressed
+here using {\tx setf}, but that just expands rather directly into the
+primitive operation it stands for.
+{\small\begin{verbatim}
+(block nil
+   (let* ((v 0)          ; counting variable
+          (r (list nil)) ; list being created
+          (p r))         ; end of list so far
+      (tagbody
+   top   (when (>= v 10) (go end))
+         (setq p (setf (cdr b) (list (* v v))))
+         (setq v (1+ v))
+         (go top)
+   end   (return (cdr r)))))
+\end{verbatim}}
+
+The implementation I have of a subset that includes many of the more
+sensible styles of use of {\tx loop} is of the following form
+{\small\begin{verbatim}
+(dm loop (u)
+   (prog (bindings prelude endtests
+          body updates postlude returnform)
+      ;; decode the syntax of the LOOP in u.
+      ...
+      (return
+         `(block nil
+             (let* ,(reverse bindings)
+                (tagbody
+                   ,@(reverse prelude)
+              top  (when (or ,@(reverse endtests))
+                         ,@(reverse postlude)
+                         (return ,returnform))
+                   ,@(reverse body)
+                   ,@(reverse updates)
+                   (go top)))))))
+\end{verbatim}}
+The missing code builds up the list of bindings, the body of code to be
+iterated and everything else by pushing items onto the front of
+lists, hence the need for all the calls to {\tx reverse}. It follows
+essentially the patterns of expansion shown in the various examples
+give earlier.
+
+Just supporting these few cases of {\tx loop} perhaps provides some value
+for programmers: anybody finding that they need much more can just extend
+the macros for themselves! 
+
+\subsection{{\tx labels}}
+The Common Lisp {\tx labels} construction provides a way of introducing
+local function definitions. It is discussed here since it provides a further
+illustration of the way that Lisp macros can be used to extend the core
+language in extremely flexible ways, and because it provides an opportunity
+to show (reasonably sane) uses of {\tx loop} in action.
+
+The implementation here maps local definitions into global ones that
+use generated symbols as their names in place of the names originally
+provided by the user. The function {\tx sublisfns} defined here is intended
+to take a list of substitutions that are to be made and apply them to the
+first item in any list within a form. The idea behind that is that the first
+item of any sub-list may be a function name, and by only substituting there
+it will be possible to avoid altering variable names or raw data. A proper
+version of this code shoulld probably expand macros as it went and understand
+all possible special forms, not just {\tx quote}, but for simple cases it
+should suffice.
+{\small\begin{verbatim}
+(defun sublisfns (l u &aux w)
+   (cond
+      ((atom u) u)
+      ((eqcar u 'quote) u)
+      (t (setq w (assoc (car u) l))
+         (cons (if w (cdr w) (sublisfns l (car u)))
+               (loop for v in (cdr u)
+                     collect (sublisfns l v))))))
+\end{verbatim}}
+Then the main {\tx labels} macro just needs to list the names of the new
+local functions it is to introduce and create private names for
+them (using {\tx gensym}). It uses {\tx sublisfns} to change everything to
+use these new names, uses {\tx eval} to cause the functions concerned to get
+defined (at macro-expansion time) and is then done.
+{\small\begin{verbatim}
+(~dm labels (u)
+   (prog (defs names)
+      (setq u (cdr u))
+      (setq defs (pop u))
+      (setq names
+         (loop for v in defs
+               collect (cons (car v) (gensym))))
+      (loop for v in defs
+            do (eval (cons 'defun (sublisfns names v))))
+      (return (cons 'progn (sublisfns names u)))))
+\end{verbatim}}      
+
+
+\subsection{{\tx format}}
+The fundamental printing functions (such as {\tx print}) in Lisp print a
+single item. In terms of accessing information this is not a terrible
+limitatiion, since if you want to display elaborate messages you can
+put all relevant information into a list, as in
+{\small\begin{verbatim}
+(print (list "The value of" x "is" (eval x)))
+\end{verbatim}}
+where your messages and data all get printed -- albeit with a pair of
+parentheses surrounding everything. But for interaction with humans it can
+be desirable to avoid those parentheses. Common Lisp provides a function
+{\tx format} for this. It takes a specification for a destination, a format
+string and then any data you want merged into the output. The format string
+contains escape sequences each starting with ``{\tx \textasciitilde} showing
+where data is to be displayed mereged in with the raw text of the format.
+Perhaps the three most important escape sequences are {\tx \textasciitilde{}A}
+which displays material in as plain way as possible (as in {\tx princ}). So
+in particular a string will just have its contents displayed. Then
+{\tx \textasciitilde{}S} is similar but displays strings with their
+surrounding quotes, and puts escape characters into any symbol whose
+name could otherwise cause confusion. Finally {\tx \textasciitilde{}\%}
+forces a new line. Thus it could be used as in
+{\small\begin{verbatim}
+(format t "~%The value of %s is %s~%" x (eval x))
+\end{verbatim}}
+
+As with {\tx loop} the designers of Common Lisp went utterly overboard
+in extending the capabilities of {\tx format}. A full implementation embeds
+a whole new language within format strings. It can also arrange to
+convert numbers to spelt-out versions (but only in American English,
+because of its use of the word ``billion'') and to pluralise
+words (again just in English, noy say in French or Japanese).
+As well as being able to generate Roman
+numerals it can generate them in ``old style'' where 4 is shown as {\tx IIII}
+rather than as {\tx IV}. All for the benefit of those who will ever find
+these features useful!
+
+The first argument to {\tx format} indicates where the generated output should
+go. While in general it can be the identifier for an output stream who
+special cases are very commonly used: {\tx nil} indicates that the
+result should be collected and returned as a string, and {\tx t} that it
+should go to the terminal.
+
+The version included here is a heavily cut-down one that only supports the
+basics, but for very many users those are what can give the greatest
+benefit. As with almost everything else here it provides a natural starting
+place for anybody ambitious to add extensions up to and including
+providing full support for everything the Common Lisp standard mandates,
+such as the example given in ``Common Lisp the Language" that reads (after
+the line has been split to allow it to fit here)
+{\small\begin{verbatim}
+"~:[{~;[~]~:{~S~:[->~S~;~*~]~:^ ~}~:[~; ~]~ ~{~S->~^ ~}
+ ~:[~; ~]~[~*~;->~S~;->~*~]~:[}~;]~]" 
+\end{verbatim}}
+and which is intended to help ``print a Xapping Data type'', coming with the
+comment ``Are you ready for this one?''.
+
+{\small\begin{verbatim}
+(defun format (dest fmt &rest args)
+   (prog (c a res o)
+      (when dest
+         (setq o (wrs (if (eq dest t) nil dest))))
+      (loop for i from 0 to (upbv fmt) do
+         (cond
+            ((eq (setq c (getv fmt i)) '~)
+               (setq c
+                  (char-downcase (getv fmt (setq i (1+i)))))
+               (cond
+                  ((eq c '%)
+                     (if (null dest)
+                        (push $eol$ res)
+                        (terpri)))
+                  ((eq c '~)
+                     (if (null dest)
+                        (push '~ res)
+                        (princ '~)))
+                  (t (setq a (if (null args) nil (pop args)))
+                     (cond
+                        ((eq c '|a|)
+                           (if (null dest)
+                              (setq res
+                                 (reversip2 (explodec a) res))
+                              (princ a)))
+                        ((null dest)
+                         (setq res
+                            (reversip2 (explode a) res)))
+                        (t (prin a))))))
+            ((null dest) (push c res))
+            (t (princ c))))
+      (return
+         (cond
+             ((null dest) (list-to-string (reversip res)))
+             (t (wrs o) nil)))))
+\end{verbatim}}
+\subsection{Lexical scoping}
+The way that \vsl{} copes with variable bindings is that each symbol has
+a component that holds its current value. When a variable is bound either as
+an argument or as a local variable this value is saved, and at the end of the
+function call or block it is restored. The machanism is easy to implement in
+an interpreter of the sort shown here. However when a function accesses some
+variable that it itself has not bound it can lead to anomalies. Specifically
+the value that will be loaded as associated with a name will be the one
+corresponding to whatever function most recently started execution and
+bound it. Language purists (and the Common Lisp designers) believe that
+the value used should correspond instead to a binding that textually or
+{\em statically} encloses the point where the variable reference occurs.
+
+Illustrations of this issue tend to require that functions be passed as
+arguments to other functions. This arises with cases such as {\tx mapcar}.
+If dynamic rather than static binding is used, as in \vsl, code such
+as
+{\small\begin{verbatim}
+   (de testcode (a l)
+      (mapcar l '(lambda (x) (cons a x))))
+   (testcode '1 '(78 79 80))
+\end{verbatim}}
+that might be expected to return {\tx ((1 . 78) (1 . 79) (1 . 80))}. And indeed
+it will as written. However is instead of using a variable called {\tx a} as
+the first argument for {\tx testcode} and as the free variable in the
+lambda-expression one instead uses the name of a variable bound by
+{\tx mapcar} all sorts of bad things happen. A user writing code that
+uses {\tx mapcar} should not need to know what names it happens to use so
+as to avoid them! Static binding makes behaviour here more stable.
+
+It may be proper to note that in the above example I have merely
+quoted the lambda-expression that is passed to {\tx mapcar}, while in
+a full Lisp one should write {\tx (function~(lambda~(a)~\ldots))} to
+arrange that everything is handled properly. In Common Lisp this
+can be abbreviated as {\tx \#'(lambda~(a)~\ldots)}. Following its path
+of minimality neither of these notations is supported in \vsl.
+
+The cost of this is that an interpreter has to work rather harder if it is
+to implement static binding, and in certain extreme cases it can make
+compilation much more compicated even though in the majority of simple
+functions it is in fact easier to compile for. Older Lisp dialects tend to
+take the view that using ``unusual'' names for the variable used in those
+few functions that take other functions as arguments sidesteps the
+issue, and note that in Common Lisp use the most commen examples
+(such as {\tx map} and {\tx mapcar}) is liable to be replaced by use of the
+{\tx loop} macro. Thus they ignore the matter.
+
+Rather than show a re-implementation of Lisp using static binding those who
+wish to pursue this matter should start by doing a web search on
+``static and dynamic scope'', or read a serious textbook about
+compilerssuch as the Purple Dragon Book\cite{PurpleDragon}.
+
+
+\subsection{Additional data-types}
+The existing code explained in this book illustrated the addition of
+a big-integer data-type to \vsl. Common Lisp expects to have more varieties
+of floating point number and complex arithmetic too. It has a much more
+elaborate idea of what strings and arrays must support, a range of variations
+on the idea of a hash table, a separate data-type for characters and
+in general all sorts of extra stuff. For each data-type it expects provision
+of a range of functions to support it. In addition to all the fixed extra
+types that it supports it provides a facility called {\tx defstruct} that
+creates new types (each distinct from all existing ones) for user-defined
+sorts of data. Adding and or all of these tp \vsl{} would actually be quite
+straightforward. The tag coding scheme it uses has a number of tag values
+currently spare, and the values produces by {\tx defstruct} could naturally
+be represented as a variation on the existing vector type but using the
+first entry of the array to indicate its type. The messiest thing to support
+would be what Common Lisp refers to as ``non-simple'' arrays, but even that
+would not be a problem for anybody fopr whom performance was not a high
+priority -- and on today's fast machines that can be almost everybody.
+
+\subsection{Other additional functions and macros}
+Basic Common Lisp provides rather more than 1000 predefined functions and
+macros, and as has been seen some of these are fairly complicated and their
+implementation will involve dozens of sub-functions. Furthermore any real
+implementation of the language will need to support a range of extensions
+since the official standard is now somewhat old and would seem limiting.
+On checking two widely used Common Lisp implementations (gcl\cite{gcl}
+amd clisp\cite{clisp}) one starts off with just over 7000 names in play
+and the other with almost 8500.
+
+Part of the style and purpose of this book is to provide ideas for
+programming challenges and projects for the reader. Each little group
+of Common Lisp functions can represent a separable fragment of such
+a challenge, and even though getting everything implemented (and debugged)
+would be a rather large task there is much fun to be had identifying
+which section of the specification to work on next and gradually making
+progress towards the final goal of full compliance! A reasonable way to
+help set goals in this regard would be to identify some body of existing
+(Common) Lisp code and work towards providing just the functions it relies
+on. In many cases you can expect that to be a rather small subset of the
+full standard.
+
+
+\section{The Reduce algebra system}
+Amazingly and even though \vsl{} is rather small, a substantial
+proportion of the over 300,000 lines of code making up the Reduce
+algebra system
+\begin{wrapfigure}{l}{2.5in}
+{\centering
+\includegraphics[width=2.4in]{tony-hearn.eps}}
+\caption{Tony Hearn, creator of Reduce}
+\end{wrapfigure} can be loaded and run on top of it. There are some
+significant limitations and restrictions, but nevertheless the resulting
+system can differentiate and integrate, solve equations, compute
+high-precision floating point values and run almost all of the large
+number of Reduce specialist modules. Getting all that code fully stable
+represents a substantial exercise, and at any particular moment there
+are liable to be bugs -- for instance arising because one of the Reduce
+modules relies on some Lisp feature that has not yet been implemented
+or simulated in vsl{}.
+
+Reduce on \vsl{} will also be slower than a version built on a full-sized
+Lisp that has a compiler. Actually it is {\em dramatically} slower! One of
+the larger bottlenecks is that \vsl{} does not have a built-in function for
+checking whether symbol-names are in alphabetic order, and the version that
+works by using other Lisp features is amazingly clumsy. So one rather crude
+initial test showed \vsl{} taking 300 times as long for a small calculation
+than one of the standard systems normally used with Reduce!
+
+It is obviously not going to be feasible to include tens or hundreds of
+lines of Reduce source here. It is not even sensible to include the thousand
+lines of Lisp-code that provide a compatibility layer that builds \vsl{} up to
+where it can be used to create a copy of Reduce. So instead here are
+instructions for fetching and building everything from the web.
+
+Create a new directory and select it as current for your command-line.
+
+First fetch a set of \vsl sources using {\tx subversion}. If you do not have that
+installed on your computer already you need to discover how to obtain it.
+On Linux this will be easy using a package manager (typically {\tx yum}
+on Fedora or {\tx apt-get} on Debian or Ubuntu). On Windows if you visit
+{\tx www.cygwin.com} you can fetch their setup program and install their
+environment -- ensuring that you install {\tx make}, {\tx gcc} and
+{\tx subversion}, and probably {\tx tex}.
+
+Then you can go
+{\small\begin{verbatim}
+U=https://reduce-algebra.svn.sourceforge.net
+V=$U/svnroot/reduce-algebra/trunk
+svn co $V/vsl
+\end{verbatim}}
+which should create a directory called {\tx vsl} and put a collection of
+files in it. The above instructions build up the path at {\tx sourceforge}
+to fetch this from in parts so you only have to type a modest
+amount on each line. The files you will fetch amount to about a megabyte,
+and so should not be a severe strain on anything.
+
+So that you can build a version of the Reduce algebra
+system you should follow up the above subversion call with another (relying
+on the variable {\tx \$V} you set up to point to the subversion repository).
+{\small\begin{verbatim}
+svn co $V/packages
+\end{verbatim}}
+This time you will end up with around 60 Mbytes in a directory called
+{\tx packages}. That is the full set of sources for Reduce. Even though you
+are not liable to be able to make use of all of them the easiest recipe
+involves you fetching everything.
+
+To build just \vsl{} and then try it you can then go
+{\small\begin{verbatim}
+   cd vsl
+   make
+   ./vsl
+   (oblist)
+   (stop 0)
+\end{verbatim}}
+
+For the build to succeed you will need to have the {\tx gcc} C compiler
+installed, and to rebuild the manual the {\tx pdflatex}\footnote{typically
+installed for you as part of some broader \LaTeX package such as texlive.}
+command is required. Again you may need to use a package manager to ensure
+that they are available.
+
+In the above small example you verify that \vsl{} will run by calling the
+function {\tx (oblist)} to display a list of all \vsl's built-in
+symbols, then you use {\tx (stop 0)} to exit from the system.
+
+To try Reduce (see {\tx http://reduce-algebra/sourceforge.net} for
+full information. In particular there is a manual hidden there) you go
+{\small\begin{verbatim}
+  make reduce
+  ./vsl -ireduce.img
+\end{verbatim}}
+
+The ``{\tx make reduce}'' step builds (much of) Reduce and saves
+the result in {\tx vsl.img}. When you next start \vsl it reloads that
+image file. At the time of writing this book you need to start Reduce
+manually by calling the Lisp function {\tx (begin)}, but then you can
+try various algebraic examples.
+
+For instance 
+{\small\begin{verbatim}
+   df((x^2-1)^10, x, 10)/2^10/factorial(10);
+\end{verbatim}}
+should compute the 10th Legendre polynomial:
+\[ \frac{46189 x^{10} - 109395 x^{8} + 90090 x^{6} - 30030 x^{4} +
+3465 x^{2} - 63}{256}\]
+
+The next example has had to have its output slightly adjusted
+to cope with line-length constraints here, but shows that the \vsl{}
+version of Reduce can compute worthwhile integrals.
+{\small\begin{verbatim}
+int(1/(x^6-1), x);
+
+                    2*x - 1
+( - 2*sqrt(3)*atan(---------)
+                    sqrt(3)
+
+                    2*x + 1          2
+  - 2*sqrt(3)*atan(---------) + log(x  - x + 1)
+                    sqrt(3)
+
+         2
+  - log(x  + x + 1) + 2*log(x - 1) - 2*log(x + 1))
+
+/12
+\end{verbatim}}
+As a final example here, the input
+{\small\begin{verbatim}
+   in "alg.tst";
+\end{verbatim}}
+runs what was once used as the definitive test-case for Reduce and
+illustration of its capabilities.
+
+This naturally leads into a series of truly major projects. Firstly to
+check how well \vsl{} can be made to support {\em all} of Reduce. There are
+certain to be functions needed by examples not tried so far. Next to
+do a first pass of optimisation by identifying the most critical functions
+and providing C coded versions of them within \vsl. Arbitrary precision
+integer arithmetic is very much needed, and comments about routes towards
+providing that were made earlier. Adding a compiler to \vsl{} to bring its
+performance fully up to scratch could follow on. And finally some serious
+work would then be required to give \vsl{} a nice windowed user-interface
+and to make Reduce work smoothly with it. By that stage \vsl{} would have
+grown so it was no longer the small simple system it starts as but
+a fully-fledged Lisp. 
+

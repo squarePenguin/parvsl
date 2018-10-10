@@ -1,0 +1,327 @@
+\chapter{Some implementation tricks and extensions}
+The main version of {\vsl} emphasises simplicity over capability.
+This chapter discusses a couple of alternative implementation
+strategies that could extend it. I will refer to an extended version
+of {\vsl} including the ideas discussed here as {tx vslplus}.
+
+
+\section{Conservative Garbage Collection}
+{\vsl} has a garbage collector that requires
+that all references into the heap can be unambiguously identified. This
+constraint complicates the code, leads to the need for extensive use of
+a special Lisp stack and will make Lisp compilation much messier than
+if such a constraint did not apply. In 1988 Bartlett\cite{conservative}
+and then Appell and Hanson\cite{conservative1} presented garbage
+collection schemes that used a copying strategy but did not impose this
+constraint. They both control the preservation of data that is subject to
+(possible) reference from an ambiguous location in units of pages and by
+so doing they reduce the overheap of tracking where such data is.
+However at the same time they may tend to waste a little space and
+(more seriously) set a limit on the largest size that an object can
+have (and fit within one page).
+
+So although I will refer back to those important early papers I will want
+to arrange that I can cope with almost arbitrarily large vectors in my
+heap. However I will not feel the need to allow for pointers that
+refer within an object (ie to other than an object head) and I will view
+values that have the {\vsl} tag-bits removed as valid. So in my first
+implementation at least I will accept that if the user has code that
+writes something like
+{\small\begin{verbatim}
+    LispObject a = ... // eg a string
+    ... qstring(a) ...
+\end{verbatim}}
+and a compiler makes optimisations that compute and later re-use the
+untagged address that the {\tx qstring} macro generates then there could
+be pain.
+
+Well actually it will be easy for me to take any ambiguous
+value and discard its tag bits before checking if it might be a
+pointer into the heap, and for the benefit of {\tx qstring} and
+{\tx elt} view such a value as pinning the object whose address was
+just before it -- or possibly scan back from it to the head of the
+previous object in memory and then untagged references even into the
+middle of arrays would become safe. That could make the code
+safer in the context of unduly optimising compilers and would
+probably not lead to verty much additional memory waste, so it
+becomes the new policy. Whenever I talk later down about checking if
+a reference is to the start of an object I have to mean scan back
+to the start of the previous object and treat the reference as pinning]
+that.
+
+\subsection{What are the ambiguous bases?}
+The key problem that a Conservative Garbage Collector addresses is
+support for a system where some pointers into the heap are stored in
+locations where one can not be certain that they contain valid data. This
+could include cases where pointer-containing memory is interleaved
+with memory containing arbitrary other material and where it is not feasible
+to maintain maps or table showing exactly what is where. For a mark-and-sweep
+garbage collection strategy all that would be needed to cope with this would
+be to have the mark process in the garbage collector mark from every
+location that could possibly contain a pointer. The code would have to be
+robust against data that looked superficially like a pointer but was to an
+invalid address. That includes addresses outside the computer's memory,
+outside the heap, inside the heap but into the middle of an object (rather
+than pointing at its head) and misaligned pointers. But in that case
+the sweep phase of the collector would not need any adjustment at all.
+
+For a copying collector things are harder, because if data is copied
+from an old half-space to a new one then any pointer to it must be changed
+to track it. ``Ambiguous bases'' are memory locations that might contain
+a pointer in the heap, and the value stored in one is an ``ambiguous
+reference''. Any such reference could be a pointer but might be
+merely an integer with an unfortunate value, or part of a string or
+other binary data. So for safety its value must not be changed by the
+garbage collector, but the heap item it (potentially) refers to must be
+preserved. Thus items in the heap referred to directly from an
+ambiguous base must be handled as for a mark-and-sweep collector.
+
+Any item in the heap that is only referenced from locations that are
+not ambiguous can, however, be copied or moved.
+
+The only ambiguous bases I need to consider in {\tx vsl} are on the
+C stack. All other referencess can be taken as fully under control, and the
+garbage collector must and will (and can) have information showing all
+the static variables that can ever hold references. Indeed the {\tx vsl}
+code ensures this by keeping its (static) roots in an array called
+{\tx bases} making it truly easy identify and process them.
+
+I need to have code that
+can be assured of finding everything that is (or that should be) on the
+stack. This may involve some trickery in the fact of variables that are
+stored in registers not (immediately) on the stack\ldots but I hope that
+arranging that the garbage collector itself declared and uses a large number
+of variables will ensure that if flushes all earlier callee-save values
+to the real stack.
+
+One thing that emerges from this is that the original {\tx vsl} scheme
+for floating point numbers (which allocates floats downwards from the top
+of the heap and everything else upwards from the bottom) becomes untenable.
+To see this imagine a case where a tight loop allocated very many floats and
+nothing else. Almost the whole heap is full of floats when garbage collection
+is triggered. Now suppose an ambiguous pointer pins one of the last to be
+allocated (and this in fact seems a very plausible situation). Then an
+address low within the heap has to end up storing a float. If the
+segregation between floats and other things is to be retained then this
+will really limit the space available for anything else. So an early
+change to {\vsl} needed to support conservative garbage collection has to be
+to store floats in a way where they can mingle freely with other items in
+the heap. There are two potential ways of doing this -- either every float
+is stored with a header word (doubling the space it consumes and
+slighly slowing allocation) or a bitmap is needed that flags which words
+in the entire heap contain floats (probably with similar speed impact).
+
+Let me compare the space demands of each. If there $f\%$ of the heap is
+consumed by floats in the current scheme then adding headers consumes an
+additional $f\%$. For the bitmap approach I need one bit for every 64-bits of
+heap, leading to a $1.5\%$ storage overhead regardless of whether floats are
+being used or not. Almost all of the time in most Lisp code there will hardly
+be any floats at all, but when they are in use the percentage heap occupation
+that may matter most relates to floats that have just been allocated, used
+and discarded. The bitmap approach could reduce the frequency of garbage
+collections triggered during heavy floating point use by up to a factor of
+two. Heavy use of declarations in the code and a ``sufficiently clever''
+compiler that managed to do a lot of floating point arithmetic un-boxed
+could also make that saving. But I end up judging that the memory-use for
+the bitmap is in general a low overhead during general use as it
+provides a useful saving during stretches of execution that allocate
+many million floats.
+
+\subsection{Overall strategy}
+\begin{enumerate}
+\item For each ambiguous base, look at content. If it does not refer to
+heap data that I had previously allocated ignore it. Otherwise
+tag that data as immovable.
+
+To implement this I first do a range check on the address to see if its
+lies within the area of the current active heap-half. I need to check
+tag-bits and alignment for sanity. I will maintain a bit-map that has
+a bit set to mark the first address of every object in the heap. Because
+all objects are doubleword aligned this needs one bit for every 8-bytes
+of heap, so this is only a 1 in 64 (1.5\%) burden on memory - and the cost
+of setting that bit during a {\tx cons} (and other allocation operations) is
+not terribly severe. That gives a really simple way that I can end up
+certain that I know when an ambiguous pointer truly points at the head
+of an object. If the object was a symbols it started with a flag word,
+and if it was a vector-like atom it would have a header word -- and in each
+of those cases it would be easy to find a spare bit to use to mark it
+as immovable (I will often use the term ``pinned'' here to describe that
+state). However cons cells and headerless floats do not have spare bits,
+so the bitmap scheme here is the simplest option.
+
+I want to mention a range of possibilities here even if I end up discarding
+them. It seems probably that {\em usually} there will only be a modest
+number of items that end up pinned. In that case using a hash table to
+record where they are could seem attractive. The reason I do not go down
+that route is twofold: I do not have a reliable bound on how large that
+table would be, and bitmap tagging is already a guaranteed unit-cost solution.
+However a hash table could be attractive in that if multiple ambigiuous
+bases contain the same value it could help some processing deal with each
+just once. I think at present I do not believe that to be a big enough
+benefit to be worth fussing with.
+
+
+\item  Note that I must not start copying {\em anything} until I have
+identified
+everything that must be pinned. Items that are pinned
+must never move! So run the normal copying GC except that when a
+pinned is reached it is just left in place. The items within
+the pinned item are not copied at this stage because to do so would
+involve stack use within the garbage collector, and that is undesirable.
+
+Then
+re-scan the ambiguous bases and copy items that are referred to from
+pinned items. Note that this is not moving the
+pinned items themselved, just their contents. Also there is
+a requirement here that the set of and values in ambiguous bases must
+not have changed during garbage collection so far.
+
+Since the contents of an item must be copied exactly once
+and since several ambiguous bases may refer to the same location it will
+be necessary to be able to tell if something has been processed. This is
+not very different from the challenge already facing the existing copying
+garbage collector. Specifically floating point values will (still) use
+a bitmap.
+
+\item After copying there are some pinned items in the old heap. These
+must remain identifiable. Since it will be necessary to do a linear scan
+of the bitmap of pinned items at some stage the neatest idea will be
+to retain that bitmap and make allocation inspect it. When needing to
+skip past pinned items this will involve looking at their headers. Because
+in at least very many cases of garbage collection the stack will only
+be a few thousand words deep but the heap might be millions of words
+long it can be expected that pinned items are sparse in the heap, and
+in particular that there will be long gaps between adjacent pinned
+words. If the bitmap is often inspected word by word these runs can be
+skipped over in blocks of 32, speeding up the sweep usefully.
+
+
+\end{enumerate}
+
+
+\subsection{Overview of bitmap states at start and end of collection}
+\begin{description}
+\item[Active space at start]
+~
+
+\begin{enumerate}
+\item A map that has a bit set showing the location of every
+headerless floating point value in the heap.
+\item A map that will be used to mark floats. Clear it at start of GC.
+\item A map that indicates that start address of each item in the heap.
+\item The map that had marked pinned addresses from the previous
+collection that were hence locations that could not be allocated
+during the recent phase of computation. Since the garbage collection is
+now starting (possibly because the heap was full) the data in this bitmap
+is no longer required, so the map is cleared and can be used to tag
+locations pinned at this time.
+\end{enumerate}
+\item[Second space at start]
+~
+
+\begin{enumerate}
+\item A map that has a bit set showing the location of every
+headerless floating point value in the heap. The only data that
+can be in this space will be material pinned during the previous
+collection.
+\item a map that would be used to mark floats. Not used! Thus the
+space for maps can be reduced by having only a half-sized one for
+marking floats so it doe snot cover the second half-space.
+\item A map available to indicate that start address of each item in the heap.
+Again the only items in the heap are ones that were pinned last time, so this
+can be a copy of the pinning bitmap left over from the previous collection.
+\item The map that had marked pinned addresses from the previous
+collection. The data from these is still in place and must be avoided while
+cupying into the second space, but that purpose can be achieved via the
+(copy of) the data as above. Copying can proceed and set a new start-of-object
+bit while avoding allocating where ons is already set. So this map can be
+cleared at the start of collection. Well more precisely the object-start
+and pinned maps can be exchanged to avoid the need for any bulk copying then
+the map to be used as the new pinning map can be cleared.
+\end{enumerate}
+\item[Old active space at end]
+~
+
+\begin{enumerate}
+\item A map that has a bit set showing the location of every
+headerless floating point value in the heap. To be ready for next
+time I think this needs masking with the map of pinned items in effect
+to discard all non-pinned floats on the old space.
+\item floating point mark bits. Not needed at end of collection.
+\item A map that indicates that start address of each item in the heap.
+The data in this will no longer be needed
+\item Pinned data from this collection. Required for the future since
+the addresses so marked must be avoided by allocation within this
+half-space when that done during the next garbage collection.
+\end{enumerate}
+\item[Second space at end]
+~
+
+\begin{enumerate}
+\item Floating point map, now showing the location of both long-term
+pinned floats and ones that have just been copied to this space.
+\item (floating point mark bits)
+\item Object start adddresses.
+\item Pinned data. The information here is no longer required. 
+\end{enumerate}
+\end{description}
+
+\subsection{Interaction with saving heap images}
+There can be two situations where an image of the state of Lisp must be
+saved to a file. The first is when it represents a checkpoint and
+execution must continue after the image has been written. In this case
+all pinned items must be written, and the image on disc thus ends up
+(potentially) sparse. The pinned items have to be written out not because
+the ambiguous pointers that led to their pinning will still be present
+in a frest run of {\tx vslplus} but because ordinary unambigiuous references
+to them are also liable to exist.
+
+The second case is when the system will stop immediatly after creating
+an image file, and in this case it can be arranged that a fully compacted
+image file results.
+I can do a garbage collection that avoids marking from
+ambiguous roots during {\tx preserve} since
+at that stage there ought not to be any important stack to mark. As a result
+no items will remain pinned at the end of garbage collection.
+Well in such cases I need just
+a bit more -- I should ensure that the new space that I copy to does not
+contain any items that had been pinned during the previous GC.
+This can be achieved by performing two garbage
+collections so I end up with a fully compacted heap to save.
+
+There are further issues that arise if there is a desire to expand the heap
+at run-time. If this is to be done other than when the stack is empty
+it is important that all existing parts of heap memory remain
+in position so that pinned items remain accessible. So if run-time
+heap expansion is to be considered it becomes necessary to structure
+both halves of the heap into segments with initial
+segments allocated at system start-up and new ones potentially added
+dynamically. Of course the format for saved heap images then has to
+allow for that! The size selected for segments will limit the size of the
+largest vector that can be allocated, and space will sometimes end up
+wasted near the end of a segment when a large item will only fit in the
+next one.
+
+\subsection{Wrapping up}
+With the rework described here many of the existing uses of {\tx push} and
+{\tx pop} in the original code become unnecessary, since Lisp references kept
+in simple C local variables become garbage-collection-safe. The speed
+of garbage collection is slightly impacted, and around $5\%$ extra memory
+is needed for bitmaps, but experience has shown that conservative garbage
+collection schemes manage to recycle memory very nearly as effectively as
+simple precise ones, and they simplify not just the rest of the inner workings
+of the system they are built to work with, but the ability of it to
+link to other bodies of code that they may wish to exchange data with. It is
+overall a good policy to adopt. 
+
+
+\section{Managing compiled code}
+When a Lisp system compiles bits of Lisp into native code for the machine
+that is in use it finds itself first treating the generated code as data (while
+it fills in all the bits) and then as executable code. Modern operating
+systems tend to try to protect against such behaviour since the dynmamic
+creation of code is a technique used in various sorts of malware. So
+typically special operating system calls are called for to mark some
+region of memory as available for use in this way.
+
+% @@@@

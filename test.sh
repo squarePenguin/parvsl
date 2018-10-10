@@ -1,0 +1,363 @@
+#! /bin/bash
+
+echo $1
+mod=${1%%.log}
+mod=${mod##testlogs/}
+
+case $mod
+in
+alg)
+  dir="alg"
+  ;;
+poly)
+  dir="poly"
+  ;;
+polydiv)
+  dir="poly"
+  ;;
+arith)
+  dir="arith"
+  ;;
+factor)
+  dir="factor"
+  ;;
+int)
+  dir="int"
+  ;;
+matrix)
+  dir="matrix"
+  ;;
+solve)
+  dir="solve"
+  ;;
+desir)
+  dir="solve"
+  ;;
+ineq)
+  dir="solve"
+  ;;
+modsr)
+  dir="solve"
+  ;;
+rsolve)
+  dir="solve"
+  ;;
+algint)
+  dir="algint"
+  ;;
+arnum)
+  dir="arnum"
+  ;;
+assist)
+  dir="assist"
+  ;;
+dummy)
+  dir="assist"
+  ;;
+cantens)
+  dir="assist"
+  ;;
+atensor)
+  dir="atensor"
+  ;;
+avector)
+  dir="avector"
+  ;;
+invbase)
+  dir="invbase"
+  ;;
+boolean)
+  dir="misc"
+  ;;
+cali)
+  dir="cali"
+  ;;
+camal)
+  dir="camal"
+  ;;
+changevr)
+  dir="misc"
+  ;;
+compact)
+  dir="misc"
+  ;;
+dfpart)
+  dir="misc"
+  ;;
+lie)
+  dir="misc"
+  ;;
+assert)
+  dir="assert"
+  ;;
+odesolve)
+  dir="odesolve"
+  ;;
+pf)
+  dir="misc"
+  ;;
+trigd)
+  dir="misc/trigd"
+  ;;
+cvit)
+  dir="hephys"
+  ;;
+physop)
+  dir="hephys"
+  ;;
+excalc)
+  dir="excalc"
+  ;;
+gentran)
+  dir="gentran"
+  ;;
+fide)
+  dir="fide"
+  ;;
+numeric)
+  dir="numeric"
+  ;;
+randpoly)
+  dir="misc"
+  ;;
+reacteqn)
+  dir="misc"
+  ;;
+roots)
+  dir="roots"
+  ;;
+rlfi)
+  dir="misc"
+  ;;
+sets)
+  dir="misc"
+  ;;
+xideal)
+  dir="xideal"
+  ;;
+eds)
+  dir="eds"
+  ;;
+groebner)
+  dir="groebner"
+  ;;
+ideals)
+  dir="groebner"
+  ;;
+linalg)
+  dir="linalg"
+  ;;
+ncpoly)
+  dir="ncpoly"
+  ;;
+normform)
+  dir="normform"
+  ;;
+orthovec)
+  dir="orthovec"
+  ;;
+laplace)
+  dir="laplace"
+  ;;
+pm)
+  dir="pm"
+  ;;
+qsum)
+  dir="qsum"
+  ;;
+scope)
+  dir="scope"
+  ;;
+sparse)
+  dir="sparse"
+  ;;
+spde)
+  dir="spde"
+  ;;
+specfn)
+  dir="specfn"
+  ;;
+specfn2)
+  dir="specfn"
+  ;;
+tps)
+  dir="tps"
+  ;;
+limits)
+  dir="misc"
+  ;;
+defint)
+  dir="defint"
+  ;;
+fps)
+  dir="specfn"
+  ;;
+trigint)
+  dir="trigint"
+  ;;
+ratint)
+  dir="ratint"
+  ;;
+mathml)
+  dir="mathml"
+  ;;
+mathmlom)
+  dir="mathml"
+  ;;
+rltools)
+  dir="redlog/rltools"
+  ;;
+redlog)
+  dir="redlog/rl"
+  ;;
+cgb)
+  dir="cgb"
+  ;;
+ofsf)
+  dir="redlog/ofsf"
+  ;;
+acfsf)
+  dir="redlog/acfsf"
+  ;;
+ibalp)
+  dir="redlog/ibalp"
+  ;;
+pasf)
+  dir="redlog/pasf"
+  ;;
+qqe_ofsf)
+  dir="redlog/qqe_ofsf"
+  ;;
+mri)
+  dir="redlog/mri"
+  ;;
+talp)
+  dir="redlog/talp"
+  ;;
+sum)
+  dir="sum"
+  ;;
+zeilberg)
+  dir="sum"
+  ;;
+symmetry)
+  dir="symmetry"
+  ;;
+taylor)
+  dir="taylor"
+  ;;
+mrvlimit)
+  dir="mrvlimit"
+  ;;
+residue)
+  dir="residue"
+  ;;
+susy2)
+  dir="susy2"
+  ;;
+tri)
+  dir="tri"
+  ;;
+trigsimp)
+  dir="trigsimp"
+  ;;
+crack)
+  dir="crack"
+  ;;
+liepde)
+  dir="crack"
+  ;;
+applysym)
+  dir="crack"
+  ;;
+conlaw)
+  dir="crack"
+  ;;
+xcolor)
+  dir="xcolor"
+  ;;
+wu)
+  dir="wu"
+  ;;
+ztrans)
+  dir="ztrans"
+  ;;
+geoprover)
+  dir="geometry"
+  ;;
+rataprx)
+  dir="rataprx"
+  ;;
+lpdo)
+  dir="lpdo"
+  ;;
+guardian)
+  dir="guardian"
+  ;;
+cdiff)
+  dir="cdiff"
+  ;;
+bibasis)
+  dir="bibasis"
+  ;;
+clprl)
+  dir="clprl"
+  ;;
+gcref)
+  dir="gcref"
+  ;;
+smt)
+  dir="redlog/smt"
+  ;;
+lalr)
+  dir="lalr"
+  ;;
+ranum)
+  dir="ranum"
+  ;;
+listvecops)
+  dir="listvecops"
+  ;;
+cde)
+  dir="cde"
+  ;;
+sstools)
+  dir="sstools"
+  ;;
+*)
+  echo "Module $mod not recognized"
+  exit 1
+  ;;
+esac
+
+echo line 333
+
+case "$mod"
+in
+alg       | poly      | polydiv   | arith     | factor)
+  ;;
+int       | matrix    | solve     | desir     | ineq)
+  ;;
+modsr     | rsolve    | algint    | arnum     | assist)
+  ;;
+dummy     | cantens   | atensor   | avector   | invbase)
+  ;;
+boolean   | cali      | camal     | changevr  | compact)
+  ;;
+dfpart    | lie)
+  ;;
+*)
+  pkg="load \"$mod\";"
+  ;;
+esac
+
+./vsl -ireduce.img <<EOF | tee $1
+off int;
+$pkg on echo;
+showtime;
+in "../packages/$dir/$mod.tst";
+showtime;
+quit;
+EOF
+
+exit 0

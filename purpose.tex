@@ -1,0 +1,147 @@
+\chapter{The purpose of this book}
+This book is for people who like to understand how things work. It is
+about getting to grips with computers and understanding how programming
+languages really work by seeing not just what they do but how they do it.
+The main language used here is Lisp. This is a simple enough language
+that a very large part of its internal workings can be explained -- but
+it is general enough that learning about how Lisp works can give insight
+into the structure of almost all other programming systems. The aim
+is to make the Lisp that is explained here Visible, and so perhaps
+not surprisingly the version that is to be discussed is known as
+Visible Standard Lisp, abbreviated as \vsl.
+
+The term ``visible'' as applied here is intended
+to indicate that all of its the inner workings are available for
+inspection.  Lisp is one of the oldest
+computer languages that is still in use (albeit in niche applications). It
+it is also one that has been seriously influential in the development
+of more modern languages, and so understanding it can give useful insight
+into how we have got to where we are. The key application area that Lisp
+dominated for many years was Artificial Intelligence, and perhaps in particular
+the automation of logic, reasoning and symbolic mathematics. A second area
+where it has been important has been as a notation embedded within some
+other large program and used to describe customisation or scripting
+capabilities there. The vsl{} system discussed here could serve quite
+well in either of these broad areas.
+
+Before explaining the organisation of the book here are a few taster
+fragments that show what can be done with Lisp. You will find a fuller
+explanation of each later on.
+
+\setlength{\oddsidemargin}{1cm}
+\setlength{\evensidemargin}{1cm}
+(1) Arithmetic on big numbers works, so you can type in
+{\small\begin{verbatim}
+   (expt 7 510)
+\end{verbatim}}
+and obtain the output
+{\small\begin{verbatim}
+Value:
+10000009377765355041159521080236291875500397545959064338020
+91046611830071747256290251642675754113510381906538657851472
+80048260730260174481888634961017465832153767083905055973115
+17146314730511796799136227470799861707690686485640934223257
+99898508099347892972049510888294887959312673650548919269730
+26731194699108560193240351188856787007789047064042449190113
+93827146105377053911155370062040100951494893263068969133321
+6918712082217175249
+\end{verbatim}}
+
+Note how close to a power of ten this is, and so we have to a really
+good approximation $7^{510} = 10^{431}$. From this we deduce that the
+logarithm of $7$ is very close to $431/510$. Checking this with a calculator
+reveals it has around 8 significant figures correct.
+
+Of course big-number arithmetic has applications in encryption and
+in keeping track of the bank balances of the very very rich as well as
+for computing logarithms.
+
+(2) One of the sample programs included here uses turtle
+\begin{wrapfigure}{r}{2.5in}
+{\centering
+\includegraphics[width=2.4in]{snowflake.eps}}
+\caption{A snowflake pattern}
+\end{wrapfigure} graphics to draw snowflake patterns. The
+key directives are {\tx turn} which changes the heading of the turtle
+by a given number of degrees, and {\tx draw} which makes it march forward
+a given distance leaving a visible trail. The particular graphics capabilities
+shown here are not standardised across all versions of Lisp, but the
+simple line-drawing capbility used here is available with \vsl{} and is
+fully explained later on.
+
+The full code has a few lines that reduce turtle graphics to
+drawing instructions in ordinary cartesian coordinates, but the central part
+of the Lisp to draw the image shown here is just
+{\small\begin{verbatim}
+   (setq a 5 b 0)
+   (dotimes (i 2160)
+      (draw 12.0)
+      (setq a (plus a 7))
+      (setq b (plus b a))
+      (turn b))
+\end{verbatim}}
+\noindent and there is obviously scope for experimentation to see how changing the
+numbers used alters the image created.
+
+(3) The above two examples only use short fragments of Lisp code. The
+final one here is based on use of many thousands of lines of Lisp to
+implement an algebra system capable of integrating, differentiating and
+performing all manner of other symbolic calculations. Here is a short
+transaction that evaluates an integral:
+{\small\begin{verbatim}}
+1: int(x*(log x)^4, x);
+
+
+  2          4           3           2
+ x *(2*log(x)  - 4*log(x)  + 6*log(x)  - 6*log(x) + 3)
+-------------------------------------------------------
+                           4
+\end{verbatim}}
+\setlength{\oddsidemargin}{0cm}
+\setlength{\evensidemargin}{0cm}
+
+The first part of this book is a gentle introduction to Lisp and its
+use. There will be those who view the term ``Lisp'' as referring to some
+specific dialect. If that line were taken it would have been hard to avoid
+the use of Common Lisp\cite{Steele:1990:CLL}. However Common Lisp is a large
+and ambitious interpretation of the Lisp central ideas, and making its
+implementation visible would be unfeasible. So the version of Lisp
+used here preserves the key aspects of the language (for instance a notation
+that uses unspeakable numbers of parentheses!), but is styled after
+the Standard Lisp developed at the University of Utah\cite{StdLisp2},
+which allows its scale to me much more reasonable. A section later in the book
+provides some commentary about adapting everything here to match Common Lisp,
+and the associated sample programs are provided in both Standard and Common
+dialects.
+
+The second section explains how the Lisp implementation used here works.
+As well as making the source code accessible as a basis for learning about
+Lisp and language implementation in greater generality it has comments
+about the implementation issues of some features not included in the
+code used here. As a result it amounts to a challenge to add some of
+those, or to rework the existing code following alternate fundamental choices.
+In this respect the aim is not to make this a book for passive readers, but
+a starting point for active engagement with Lisp code. It should make it
+possible both to write code in Lisp to do useful things, and also to
+adjust and extent the implementation of Lisp to add extra capabilities or
+tune it for particular needs. The source code of much of \vsl{} is coded
+in the language C, and so as well as providing an introduction to Lisp this
+book can be viewed as a resource showing C in use. But those who are not
+fully fluent in C should still be able to follow the key aspects of how
+\vsl's implementation works by reading the quoted C code as if it were
+a sort of abstract pseudo-code and relying on explanations in the text to
+sort out any places where C syntax could seem obscure.
+
+Then there are a collection of miniaturised Lisp applications. These are
+intended as starting points for more development rather that complete
+polished code, but they illustrate the use of Lisp for a range of
+tasks -- some frivolous and some serious.
+
+Lisp has always tended to be the sort of language that a minority
+of programmers get intensely attached to. Perhaps by learning it and
+observing how simple it is, while at the same time how powerful it is,
+will let anybody reading this join that minority! Discovering its history,
+structure and use can give new insights into features of other
+programming languages, and in many cases make them seem either
+terribly limiting or dreadfully over-complicated. 
+

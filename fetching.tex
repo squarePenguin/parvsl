@@ -1,0 +1,186 @@
+\chapter{Fetching, building and installing \vsl}
+\section{Raspberry Pi and other Linux platforms}
+The instructions here have been tested in a Raspberry Pi model B
+with a freshly installed copy of Debian Linux from the version
+{\tx debian6-19-04-2012}. Everything will fit on a 4Gbyte SD card but
+it will be much more comfortable with one that is larger - but also
+significantly more pain to perform the initial installation of the
+operating system because of a need to re-size partitions so as to use
+al available space. It seems best to assume that the various Raspberry Pi
+starter guides and web-sites will provide careful blow-by-blow instructions
+for operating system installation, and merely provide a brief overview
+of the steps involved here. It is also probable that many users will
+buy an SD card that already has Linux installed on it. If that is Debian
+then you can skip the next few steps\ldots and that could be a real
+relief!
+
+\begin{description}
+\item[Fetch {\tx debian6-19-04-2012.img}] It should be reasonable to fetch
+any later version, most plausibly by checking the downloads area on the
+Raspberry Pi web-site. Obviously if you use a newer version there could
+in principle be slight differences in your experince, so check any
+release notes or explanatory documentation associated with the version
+you fetch. You may potentially save yourself serious grief later by
+confirming that the image you downloaded has the correct check-sum. If you
+do not  do that and end up with a corrupted download or a version where
+somehow a few bytes have been damaged then the behaviour later may be
+messy.
+\item[Use {\tx win32diskmanager} to write the SD card] \ldots if you
+used a Windows computer to fetch the debian image, or {\tx dd} if you happen
+to have a Linux machine. On a Macintosh you may find
+{\tx raspiwrite} does what you need. Detailed instructions should be
+available via the Raspberry Pi web site.
+\item[Re-size the partitions on the SD card] This so that you can benefit from
+all the space on your SD card. Some Linux systems automatically arrange this
+when you first start them up, but at least the initial Debian release for
+Raspberry Pi does not. To re-size the partitions the smoothest scheme seems
+to be to use {\tx gparted} from Linux -- and if you have a computer that
+mostly runs Windows to boot it from a ``live'' Linux CD or DVD so you
+can do this. Again check websites associated with the particular
+operating system image that you download.
+\item[Move the SD card to your Raspberry Pi and check it] It may at this
+stage be necessary to reconfigure it to work with the particular monitor
+you are using with it, or to reset it to start up with a graphical login
+rather than merely a text one. 
+\end{description}
+
+You can perhaps see that obtaining a card that has been fully configured
+and is 100\% ready for use is liable to make life a lot easier.
+
+\section{Windows}
+The instructions given here should apply for all versions of Windows
+from XP up as far as Windows 8. It will be possible to use either
+a 32-bit or a 64-bit version of the operating system without that having
+any major effect on results. But please note that despite the name of
+the operating system that is used this will be establishing a command-line
+based environment in which you will work! You will need an internet connection
+active while setting things up. Most of the steps that have to be taken
+only need to be done once, and so will be presented here as
+instructions to follow without huge amounts of explanation of the
+background. But you can follow them through happy in the knowledge that the
+software you are fetching is Free and Open Source so you will not have
+to pay for it, the licences that apply to it are all friendly, and if you
+become really keen and want to investigate everything in the most
+minute detail that is not just possible and legal but is encouraged.
+
+The first thing to do will be to launch a web browser and navigate to
+\url{http://www.cygwin.com}. There you will find a link that lets you
+fetch a utility names {\tx setup} that can install the ``cygwin''
+tools and development environment. Download {\tx setup} (or more
+pedantically {\tx setup.exe}) and store it in some folder. It could make
+sense to save it as {\tx c:{\textbackslash}software{\textbackslash}cygwin-setup{\textbackslash}setup.exe}.
+
+Now launch {\tx setup}. It should announce itself as the ``Cygwin Net
+Release Setup Program'' and let you click on {\tx Next} to proceed.
+Select ``Install from Internet'' then at the next stage you probably accept
+the default behaviour and make the Cygwin Root Directory {\tx c:{\textbackslash}cygwin}
+with the package installed for all users. At the next stage you can ask the
+installer to use the directory where you saved {\tx setup} as your
+Local Package Directory -- for instance this may be
+{\tx c:{\textbackslash}software{\textbackslash}cygwin-setup}. There are options that need to be set if you
+connect to the internet via some proxy. If Internet Explorer works for you
+then you can copy and use the settings that it has.
+Next you need to select a download site -- you should obviously scan the list
+of alternatives you are given and try to select one that is liable to be
+close to you. If your first choice gives trouble you can cancel the
+installation and try another.
+
+At this stage you are presented with a screen headed ``Select Packages'' where
+you choose which components of cygwin to install. There is a search box towards
+the top left. Type the implausible name {\tx mingw64-i686} into it and you
+then need to expand the {\tx Devel} branch below by clicking on the
+{\tx +} sign in a box. You should see a range of package names mostly
+tagged as {\tx Skip}. If you click on the {\tx Skip} you can cycle round
+selecting between the version numbers of any available versions, and
+{\tx Keep}, {\tx Uninstall} and {\tx Reinstall} for packages you have already
+installed. Select the highest available version for {\tx ming64-i686-gcc-core}.
+If you are looking ahead to trying all the \vsl{} examples you should also
+select {\tx mingw64-i686-gcc-g++}.
+
+Next clear the search box and use it to find {\tx make} and select it, and then
+{\tx subversion}. Each should be in the {\tx Devel} section.
+\begin{marginpar}
+{\em If you are a developer involved with the initial work on \vsl{}
+you also need to fetch {\tx unifdef} and all of the packages
+that are parts of {\tx texlive}. Well at least
+{\tx texlive-collections-latexextra}. I will suggest
+{\tx mingw64-i686-gcc-g++} and {\tx wget} too.}
+\end{marginpar}
+There are
+obviously an enormous range of other modules you could select, but it is not
+necessary to install all of them on your first try. You can just re-run
+{\tx setup} at any later stage and get the ones you have already installed
+updated and pick additional ones you find you might need. So click at the
+bottom of the window to let {\tx setup} install everything for you. It will
+download material (so just how long things take will depend on the speed
+of your internet connection) and you will see a series of progress bars
+as it installs everything. At the end it will offer to put an icon for
+cygwin on your desktop and in the start menu, and it might be a good idea
+to accept these suggestions.
+
+If all has gone well you will end up with a cygwin icon on your desktop.
+When you double-click it for the first time it does a little bit of
+final setting up and then presents you with a window running a terminal.
+There should (after a while) be a prompt visible there that ends in
+``{\tx \$}''. The terminal window starts off by default showing white letters
+on a black background in a rather small window. I generally like to
+click on the icon at its top left and select {\tx options} so I
+can change it to dark text on a light background using a font big enough that
+it fills a reasonable proportion of my screen. To check that things are
+working at all you might issue the command ``{\tx ls /usr/bin} ''. {\tx ls}
+is the command that displays a list of the files present in a directory, and
+{\tx /usr/bin} is where {\tx cygwin} keeps most of the commands it
+makes available to you (including {\tx ls}!). If you see a reasonably long
+list of cryptic names that includes {\tx ls} and {\tx make} all is well.
+Note that many of the names may show up with a suffix {\tx .exe} that is part
+of the full name that Windows knows them by -- this is expected and not
+a problem.
+If things do not work properly you may need to try {\tx setup} again.
+
+There is one more once-only step you need to take. What you have done so far
+installs an environment within which \vsl{} can be built and used. You now
+need to fetch \vsl{} itself. So go\footnote{The source listed here will
+NOT be the published one at all. As shown here it is just for
+collaborators!}
+{\small\begin{verbatim}
+   svn co http://subversion.assembla.com/svn/rpistuff rpi
+\end{verbatim}}
+{\tx svn} is a utility whose full name is {\tx subversion} that can be
+used by collaborating groups to manage projects that several people may
+contribute to. Here it is being used to {\em Check out} (using the
+abbreviation {\tx co}) the files associated with \vsl. You should see
+a series of messages as individual files are fetched, and end up
+so that if you go just {\tx ls} (without any specific location after the
+command) you are shown that you now have a directory called {\tx rpi}.
+You can navigate into this by saying {\tx cd~rpi/vsl} and now {\tx ls}
+should show a collection of files including ones called
+{\tx vsl.c} and {\tx Makefile}.
+
+Now try to build \vsl{} by issuing the command
+{\small\begin{verbatim}
+   cd rpi/vsl
+   make vsl
+   make vsl.img
+\end{verbatim}}
+The output from the first line using {\tx make} should be similar to
+{\small\begin{verbatim}
+$ make vsl
+i686-w64-mingw32-gcc -O2 -Wall vsl.c -lm -o vsl
+\end{verbatim}}
+with no obvious messages or complaints. The second use of {\tx make}
+digests the \vsl{} library and saves it in a state where it can be available
+by default in the future. Now as a quick test try:
+{\small\begin{verbatim}
+   ./vsl factorial.lsp
+\end{verbatim}}
+and if all has gone well you will see a table of factorials. If you manage
+to reach this stage you can be confident that you have a system ready
+to work with.
+
+\section{Macintosh}
+
+
+% @@@@@ incomplete
+
+
+

@@ -1,0 +1,220 @@
+\chapter{Storage management and Garbage Collection}
+
+
+% @@@@@ incomplete
+
+% Code to be explained...
+
+{\small\begin{verbatim}
+void allocateheap()
+{   void *pool = (void *)
+        malloc(ROUNDED_HEAPSIZE+BITMAPSIZE+ROUNDED_STACKSIZE+16);
+    if (pool == NULL)
+    {   printf("Not enough memory available: Unable to proceed\n");
+        exit(1);
+    }
+    heap1base = (LispObject)pool;
+    heap1base = (heap1base + 7) & ~7; // ensure alignment
+    heap1top = heap2base = heap1base + (ROUNDED_HEAPSIZE/2);
+    heap2top = heap2base + (ROUNDED_HEAPSIZE/2);
+    fringe1 = heap1base;
+    fpfringe1 = heap1top;
+    fringe2 = heap2base;
+    fpfringe2 = heap2top;
+    stackbase = heap2top;
+    stacktop = stackbase + ROUNDED_STACKSIZE;
+    bitmap = stacktop;
+}
+
+extern void reclaim();
+
+LispObject cons(LispObject a, LispObject b)
+{
+    if (fringe1 >= fpfringe1)
+    {   push2(a, b);
+        reclaim();
+        pop2(b, a);
+    }
+    qcar(fringe1) = a;
+    qcdr(fringe1) = b;
+    a = fringe1;
+    fringe1 += 2*sizeof(LispObject);
+    return a;
+}
+
+
+#define swap(a,b) w = (a); (a) = (b); (b) = w;
+
+extern LispObject copy(LispObject x);
+
+int gccount = 1;
+
+void reclaim()
+{
+// The strategy here is due to C J Cheyney ("A Nonrecursive List Compacting
+// Algorithm". Communications of the ACM 13 (11): 677-678, 1970).
+    LispObject *s, w;
+    printf("+++ GC number %d", gccount++);
+// I need to clear the part of the bitmap that could be relevant for floating
+// point values.
+    int o = (fpfringe1 - heap1base)/(8*8);
+    while (o < BITMAPSIZE) ((unsigned char *)bitmap)[o++] = 0;
+// Process everything that is on the stack.
+    for (s=(LispObject *)stackbase; s<sp; s++) *s = copy(*s);
+// I should also copy any other list base values here.
+    for (o=0; o<BASES_SIZE; o++) bases[o] = copy(bases[o]);
+    for (o=0; o<OBHASH_SIZE; o++)
+        obhash[o] = copy(obhash[o]);
+// Now perform the second part of Cheyney's algorithm, scanning the
+// data that has been put in the new heap.
+    s = (LispObject *)heap2base;
+    while ((LispObject)s != fringe2)
+    {   LispObject h = *s;
+        if (!isHDR(h)) // The item to be processed is a simple cons cell
+        {   *s++ = copy(h);
+            *s = copy(*s);
+            s++;
+        }
+        else              // The item is one that uses a header
+            switch (h & TYPEBITS)
+            {   case typeSYM:
+                    w = ((LispObject)s) + tagSYMBOL;
+                    // qflags(w) does not need adjusting
+                    qvalue(w) = copy(qvalue(w));
+                    qplist(w) = copy(qplist(w));
+                    qpname(w) = copy(qpname(w));
+                    // qdefn(w) does not need adjusting
+                    qlits(w)  = copy(qlits(w));
+                    s += 6;
+                    continue;
+                case typeSTRING:
+                case typeBIGNUM:
+// These only contain binary information, so none of their content needs
+// any more processing.
+                    w = (sizeof(LispObject) + veclength(h) + 7) & ~7;
+                    s += w/sizeof(LispObject);
+                    continue;
+                case typeVEC:
+                case typeEQHASH:
+                case typeEQHASHX:
+// These are to be processed the same way. They contain a bunch of
+// reference items.
+                    s++; // Past the header
+                    w = veclength(h);
+                    while (w > 0)
+                    {   *s = copy(*s);
+                        s++;
+                        w -= sizeof(LispObject);
+                    }
+                    w = (LispObject)s;
+                    w = (w + 7) & ~7;
+                    s = (LispObject *)w;
+                    continue;
+                default:
+                    // all the "spare" codes!
+                    disaster(__LINE__);
+            }
+    }
+// Finally flip the two heaps ready for next time.
+    swap(heap1base, heap2base);
+    swap(heap1top, heap2top);
+    fringe1 = fringe2;
+    fpfringe1 = fpfringe2;
+    fringe2 = heap2base;
+    fpfringe2 = heap2top;
+    if (fpfringe1 - fringe1 < 1000*sizeof(LispObject))
+    {   printf("\nRun out of memory.\n");
+        exit(1);
+    }
+    printf(" - collection complete\n");
+    fflush(stdout);
+}
+
+LispObject copy(LispObject x)
+{   LispObject h;
+    int o, b;
+    switch (x & TAGBITS)
+    {   case tagCONS:
+            if (x == 0) disaster(__LINE__);
+            h = *((LispObject *)x);
+            if (isFORWARD(h)) return (h - tagFORWARD);
+            qcar(fringe2) = h;
+            qcdr(fringe2) = qcdr(x);
+            h = fringe2;
+            qcar(x) = tagFORWARD + h;
+            fringe2 += 2*sizeof(LispObject);
+            return h;
+        case tagSYMBOL:
+            h = *((LispObject *)(x - tagSYMBOL));
+            if (isFORWARD(h)) return (h - tagFORWARD + tagSYMBOL);
+            if (!isHDR(h)) disaster(__LINE__);
+            h = fringe2 + tagSYMBOL;
+            qflags(h) = qflags(x);
+            qvalue(h) = qvalue(x);
+            qplist(h) = qplist(x);
+            qpname(h) = qpname(x);
+            qdefn(h)  = qdefn(x);
+            qlits(h)  = qlits(x);
+            fringe2 += 6*sizeof(LispObject);
+            qflags(x) = h - tagSYMBOL + tagFORWARD;
+            return h;
+        case tagATOM:
+            if (x == NULLATOM) return x; // special case!
+            h = qheader(x);
+            if (isFORWARD(h)) return (h - tagFORWARD + tagATOM);
+            if (!isHDR(h)) disaster(__LINE__);
+            switch (h & TYPEBITS)
+            {   case typeEQHASH:
+// When a hash table is copied its header is changes to EQHASHX, which
+// indicates that it will need rehashing before further use.
+                    h ^= (typeEQHASH ^ typeEQHASHX);
+                case typeEQHASHX:
+                case typeSTRING:
+                case typeVEC:
+                case typeBIGNUM:
+                    o = (int)veclength(h);  // number of bytes excluding the header
+                    *((LispObject *)fringe2) = h; // copy header word across
+                    h = fringe2 + tagATOM;
+                    *((LispObject *)(x - tagATOM)) = fringe2 + tagFORWARD;
+                    fringe2 += sizeof(LispObject);
+                    x = x - tagATOM + sizeof(LispObject);
+                    while (o > 0)
+                    {   *((LispObject *)fringe2) = *((LispObject *)x);
+                        fringe2 += sizeof(LispObject);
+                        x += sizeof(LispObject);
+                        o -= sizeof(LispObject);
+                    }
+                    fringe2 = (fringe2 + 7) & ~7;
+                    return h;
+                default:
+                    //case typeSYM:
+                    // also the spare codes!
+                    disaster(__LINE__);
+            }
+        case tagFLOAT:
+// every float is 8 bytes wide, regardless of what sort of machine I am on.
+            h = (x - tagFLOAT - heap1base)/8;
+            o = h/8;
+            b = 1 << (h%8);
+// now o is an offset and b a bit in the bitmap.
+            if ((((unsigned char *)bitmap)[o] & b) != 0) // marked already.
+                return *((LispObject *)(x-tagFLOAT));
+            else
+            {   ((unsigned char *)bitmap)[o] |= b; // mark it now.
+                fpfringe2 -= sizeof(double);
+                h = fpfringe2 + tagFLOAT;
+                qfloat(h) = qfloat(x);             // copy the float.
+                *((LispObject *)(x-tagFLOAT)) = h; // write in forwarding address.
+                return h;
+            }
+        case tagFIXNUM:
+            return x;
+        default:
+//case tagFORWARD:
+//case tagHDR:
+            disaster(__LINE__);
+            return 0;  // avoid GCC moans.
+    }
+}
+
+\end{verbatim}}

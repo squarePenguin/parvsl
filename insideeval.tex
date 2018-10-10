@@ -1,0 +1,304 @@
+\chapter{Evaluation}
+
+
+% @@@@@ incomplete
+
+% At present I just put in the C code that includes stuff Ii will need to
+% describe here.
+
+{\small\begin{verbatim}
+#define qflags(x) (((LispObject *)((x)-tagSYMBOL))[0])
+#define qvalue(x) (((LispObject *)((x)-tagSYMBOL))[1])
+#define qplist(x) (((LispObject *)((x)-tagSYMBOL))[2])
+#define qpname(x) (((LispObject *)((x)-tagSYMBOL))[3])
+#define qdefn(x)  (((void **)     ((x)-tagSYMBOL))[4])
+#define qlits(x)  (((LispObject *)((x)-tagSYMBOL))[5])
+
+// Bits within the flags field of a symbol. Uses explained later on.
+
+#define flagTRACED    0x080
+#define flagSPECFORM  0x100
+#define flagMACRO     0x200
+
+int unwindflag = 0;
+
+#define unwindNONE      0
+#define unwindERROR     1
+#define unwindBACKTRACE 2
+#define unwindGO        3
+#define unwindRETURN    4
+
+int backtraceflag = -1;
+#define backtraceHEADER 1
+#define backtraceTRACE  2
+
+LispObject error1(const char *msg, LispObject data)
+{   if ((backtraceflag & backtraceHEADER) != 0)
+    {   linepos = printf("\n+++ Error: %s: ", msg);
+        errprint(data);
+    }
+    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+                 unwindERROR;
+    return nil;
+}
+
+typedef LispObject specialform(LispObject data, LispObject x);
+typedef LispObject lispfn(LispObject data, int nargs, ...);
+
+LispObject applytostack(int n)
+{
+// Apply a function to n arguments.
+// Here the stack has first the function, and then n arguments. The code is
+// grim and basically repetitive, and to avoid it being even worse I will
+// expect that almost all Lisp functions have at most 4 arguments, so
+// if there are more than that I will pass the fifth and beyond all in a list.
+    LispObject f, w;
+    int traced = (qflags(sp[-n-1]) & flagTRACED) != 0;
+    if (traced)
+    {   int i;
+        linepos = printf("Calling: ");
+        errprint(sp[-n-1]);
+        for (i=1; i<=n; i++)
+        {   linepos = printf("Arg%d: ", i);
+            errprint(sp[i-n-1]);
+        }
+    }
+    if (n >= 5)
+    {   push(nil);
+        n++;
+        while (n > 5)
+        {   pop(w);
+            TOS = cons(TOS, w);
+            n--;
+        }
+    }
+    switch (n)
+    {   case 0: f = TOS;
+            w = (*(lispfn *)qdefn(f))(qlits(f), 0);
+            break;
+        case 1:
+        {   LispObject a1;
+            pop(a1);
+            f = TOS;
+            w = (*(lispfn *)qdefn(f))(qlits(f), 1, a1);
+            break;
+        }
+        case 2:
+        {   LispObject a1, a2;
+            pop(a2)
+            pop(a1);
+            f = TOS;
+            w = (*(lispfn *)qdefn(f))(qlits(f), 2, a1, a2);
+            break;
+        }
+        case 3:
+        {   LispObject a1, a2, a3;
+            pop(a3);
+            pop(a2)
+            pop(a1);
+            f = TOS;
+            w = (*(lispfn *)qdefn(f))(qlits(f), 3, a1, a2, a3);
+            break;
+        }
+        case 4:
+        {   LispObject a1, a2, a3, a4;
+            pop(a4);
+            pop(a3);
+            pop(a2)
+            pop(a1);
+            f = TOS;
+            w = (*(lispfn *)qdefn(f))(qlits(f), 4,
+                                      a1, a2, a3, a4);
+            break;
+        }
+        case 5:
+        {   LispObject a1, a2, a3, a4, a5andup;
+            pop(a5andup);
+            pop(a4);
+            pop(a3);
+            pop(a2)
+            pop(a1);
+            f = TOS;
+            w = (*(lispfn *)qdefn(f))(qlits(f), 5,
+                                      a1, a2, a3, a4, a5andup);
+            break;
+        }
+        default:disaster(__LINE__);
+            return nil;
+    }
+    pop(f);
+    if (unwindflag == unwindBACKTRACE)
+    {   linepos = printf("Calling: ");
+        errprint(f);
+    }
+    else if (traced)
+    {   push(w);
+        prin(f);
+        linepos += printf(" = ");
+        errprint(w);
+        pop(w);
+    }
+    return w;
+}
+
+LispObject interpret(LispObject def, int nargs, ...);
+LispObject Lgensym(LispObject lits, int nargs, ...);
+
+LispObject eval(LispObject x)
+{   while (isCONS(x) && isSYMBOL(qcar(x)) && (qflags(qcar(x)) & flagMACRO))
+    {   push2(qcar(x), x);
+        x = applytostack(1);  // Macroexpand before anything else.
+        if (unwindflag != unwindNONE) return nil;
+    }
+    if (isSYMBOL(x))
+    {   LispObject v = qvalue(x);
+        if (v == undefined) return error1("undefined variable", x);
+        else return v;
+    }
+    else if (!isCONS(x)) return x;
+// Now I have something of the form
+//     (f arg1 ... argn)
+// to process.
+    {   LispObject f = qcar(x);
+        if (isSYMBOL(f))
+        {   LispObject flags = qflags(f), aa, av;
+            int i, n = 0;
+            if (flags & flagSPECFORM)
+            {   specialform *fn = (specialform *)qdefn(f);
+                return (*fn)(qlits(f), qcdr(x));
+            }
+// ... else not a special form...
+            if (qdefn(f) == NULL) return error1("undefined function", f);
+            aa = qcdr(x);
+            while (isCONS(aa))
+            {   n++;             // Count number of args supplied.
+                aa = qcdr(aa);
+            }
+            aa = qcdr(x);
+            push(f);
+// Here I will evaluate all the arguments for the function, leaving the
+// evaluated results on the stack.
+            for (i=0; i<n; i++)
+            {   push(aa);
+                av = eval(qcar(aa));
+                if (unwindflag != unwindNONE)
+                {   while (i != 0)  // Restore the stack if unwinding.
+                    {   pop(aa);
+                        i--;
+                    }
+                    pop2(aa, aa);
+                    return nil;
+                }
+                aa = qcdr(TOS);
+                TOS = av;
+            }
+            return applytostack(n);
+        }
+        else if (isCONS(f) && qcar(f) == lambda)
+        {   LispObject w;
+            push(x);
+            w = Lgensym(nil, 0);
+            pop(x);
+            qdefn(w) = (void *)interpret;
+            qlits(w) = qcdr(qcar(x));
+            return eval(cons(w, qcdr(x)));
+        }
+        else return error1("invalid function", f);
+    }
+}
+
+LispObject interpretspecform(LispObject lits, LispObject x)
+{   // lits should be ((var) body...)
+    LispObject v;
+    if (!isCONS(lits)) return nil;
+    v = qcar(lits);
+    lits = qcdr(lits);
+    if (!isCONS(v) || !isSYMBOL(v = qcar(v))) return nil;
+    push2(qvalue(v), v);
+    qvalue(v) = x;
+    lits = Lprogn(nil, lits);
+    pop2(v, qvalue(v));
+    return lits;
+}
+
+// Special forms are things that do not have their arguments pre-evaluated.
+
+LispObject Lquote(LispObject lits, LispObject x)
+{   if (isCONS(x)) return qcar(x);
+    else return nil;
+}
+
+LispObject Lcond(LispObject lits, LispObject x)
+{
+//   Arg is in form
+//      ((predicate1 val1a val1b ...)
+//       (predicate2 val2a val2b ...)
+//       ...)
+    while (isCONS(x))
+    {   push(x);
+        x = qcar(x);
+        if (isCONS(x))
+        {   LispObject p = eval(qcar(x));
+            if (unwindflag != unwindNONE)
+            {   pop(x);
+                return nil;
+            }
+            else if (p != nil)
+            {   pop(x);
+                return Lprogn(nil, qcdr(qcar(x)));
+            }
+        }
+        pop(x);
+        x = qcdr(x);
+    }
+    return nil;
+}
+
+
+#define ARG0(name)              \
+    if (nargs != 0) return error1s("wrong number of arguments for", name)
+
+#define ARG1(name, x)           \
+    va_list a;                  \
+    LispObject x;               \
+    if (nargs != 1) return error1s("wrong number of arguments for", name); \
+    va_start(a, nargs);         \
+    x = va_arg(a, LispObject);  \
+    va_end(a)
+
+#define ARG2(name, x, y)        \
+    va_list a;                  \
+    LispObject x, y;            \
+    if (nargs != 2) return error1s("wrong number of arguments for", name); \
+    va_start(a, nargs);         \
+    x = va_arg(a, LispObject);  \
+    y = va_arg(a, LispObject);  \
+    va_end(a)
+
+#define ARG3(name, x, y, z)     \
+    va_list a;                  \
+    LispObject x, y, z;         \
+    if (nargs != 3) return error1s("wrong number of arguments for", name); \
+    va_start(a, nargs);         \
+    x = va_arg(a, LispObject);  \
+    y = va_arg(a, LispObject);  \
+    z = va_arg(a, LispObject);  \
+    va_end(a)
+
+#define ARG0123(name, x, y, z)                        \
+    va_list a;                                        \
+    LispObject x=NULLATOM, y=NULLATOM, z=NULLATOM;    \
+    if (nargs > 3) return error1s("wrong number of arguments for", name); \
+    va_start(a, nargs);                               \
+    if (nargs > 0) x = va_arg(a, LispObject);         \
+    if (nargs > 1) y = va_arg(a, LispObject);         \
+    if (nargs > 2) z = va_arg(a, LispObject);         \
+    va_end(a)
+
+LispObject Lcar(LispObject lits, int nargs, ...)
+{   ARG1("car", x);  // Note that this WILL take car of a bignum!
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+\end{verbatim}}

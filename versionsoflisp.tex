@@ -1,0 +1,148 @@
+\chapter{Versions of Lisp}
+The two most widely referenced Lisp-family dialects today are
+Common Lisp\cite{ANSILisp} and Scheme\cite{Scheme}. There are
+proper standards documents that define each of these. Common Lisp is
+huge and attempts to encompass absolutely everything, while Scheme is
+sometimes described as ``minimalist''. 
+
+Neither of these dialects is used here. That situation clearly needs
+justification. The short form of this is that Common Lisp has so many
+facilities that a subset short enough to explain will omit so much of
+what would make it ``Common'' as to be ridiculous.
+Scheme on the other hand is a fairly compact language, but it insists
+on ``correct'' treatment of various key features (notably variable scopes,
+tail recursion and continuations) that tend to make an implementation
+larger, slower and harder to explain.
+
+There have been many other Lisp dialects and implementations. Common Lisp
+can be seen as the successor to Maclisp and its variants embodied in various
+special-purpose Lisp computers built at MIT. HLISP\cite{hlisp} was developed
+\begin{wrapfigure}{r}{3.5in}
+{\centering
+\includegraphics[width=3.4in]{goto-and-flats.eps}}
+\caption{Eiichi Goto and the FLATS machine}
+\end{wrapfigure} by Eiichi Goto in Japan with a key feature that memory was saved by using
+hashing to implement the {\tx cons} operation so that as much data as
+possible could be shared. HLISP led to the development of the FLATS\cite{flats}
+computer which combined high performance for both Lisp-style symbolic
+computation with good numeric capability -- with hardware acceleration for
+hashing and associative operations that made HLISP special.
+
+At the other extreme of the size and performance scale, muLisp (in
+due course distributed by the Soft Warehouse Inc) started as a 2 Kbyte
+implementation manually toggled into the memory of a 4 Kbyte computer
+based on an 8080 processor\cite{Imsai}.
+
+
+
+One of the notable implementations of Common Lisp is {\tx gcl} (GNU Common
+Lisp). Its full source can be fetched via (for instance) the Free
+Software Foundation's website at
+{\tx http://www.gnu.org/software/gcl}. The source archive
+contains around 180,000 lines of Lisp code, as well as significant amounts
+of C code that among other things provide support for arbitrary precision
+arithmetic. The ``Visible'' Lisp used here (\vsl) has as its main
+source just over 3000 lines of C code, which is already quite enough to
+try to explain.
+
+Scheme is smaller, to the extent that some would claim that the basic
+version was only suitable for teaching not for real use. There are
+an enormous number of implementations of if: one list names 78. But the
+vast majority of these are also much bulkier than \vsl{} and hence would be
+harder to explain.
+
+The alternative approach used here has been to go a little further back in
+history and use the Standard Lisp dialect that originated at the University
+of Utah. There were two stages in its definition. 
+The report defining an initial version of it was by Tony Hearn in
+1969\cite{StdLisp1} and was his attempt to codify a Lisp dialect that
+could provide portability for his Reduce algebra system\cite{Reduce}. A
+decade later Marti, Hearn and Griss produced a substantial update\cite{StdLisp2}.
+Griss, Benson and Maguire released PSL\cite{PSL} as a Portable implementation
+of Standard Lisp a couple of years later, and others involved with the
+Reduce project followed on with at least Cambridge Lisp\cite{Camlisp},
+then CSL\cite{CSL} and a Java-coded version known as Jlisp\cite{Jlisp}. These
+days PSL, CSL and Jlisp can all be found on the website
+{\tx http://reduce-algebra.sourceforge.net} and all are both in use and
+continued development.
+
+By following Standard Lisp the code and explanations here steer a line between
+excess complexity and being so cut down and simple that they have no
+real relevance. The simplicity of \vsl can be assessed by just looking at
+the fairly small amount of C code that implemented it, and this code
+implements the most important facilities that any Lisp variant will require.
+The power of \vsl{} can be seen from the fact that it can be used to build
+the roughly 350,000 lines of code that make up the whole of the Reduce algebra
+system, with almost every part of that code working as expected. There are
+three key limitations that mean that Reduce built in top of \vsl{} may not
+be suitable for heavy use. The first is that \vsl{} only supports
+integers with values up to 9223372036854775807 in a tolerably
+efficient manner, while Reduce needs fully
+arbitrary precision arithmetic in many places. The second is that \vsl{}
+provides just an interpreter for Lisp, not a compiler, and as a result
+calculations performed using it will be somewhat slow. The third issue is that
+\vsl{} only supports very basic interaction with the user via the keyboard, and
+many of today's users would expect a much richer user-interface. But all those
+limitations admitted, it remains that \vsl{} can support Lisp applications
+that run up in to the hundreds of thousands of lines of source code!
+
+Despite the adoption of the Standard Lisp dialect for \vsl{} it has to be
+conceded that Common Lisp can not properly be ignored. It remains the fact that
+a full implementation would be much too large to explain, and indeed even
+full coverage of the language from the perspective of a user would need
+a seriously lengthy and probably rather dull book. So three things are
+done here to provide support for a move onward from \vsl{} into use of
+Common Lisp. First all the example programs are provided in Common Lisp
+for as part of the down-loadable resources to accompany this book. The
+code there has comments in it noting such special features of Common Lisp
+as appear. Secondly a modified version of \vsl{} that provides compatibility
+with the core of Common Lisp is also provided for download -- it is known
+as \vcl. \vcl{} is naturally far from complete as a Common Lisp, and its
+documentation here is much less complete than that for \vsl{}, but it can form
+a bridge to use of Big Lisp. Many of the features of \vsl{} are implemented
+as Lisp code that builds on a fairly small number of primitive operations.
+The final aspect of Common Lisp support is that the most interesting or
+important of these are described and explained as an extended set of
+fragments of Lisp sample code. This explanation can give both insight into
+some of the power of Common Lisp and some of the pain it gives any
+person trying to provide a high performance implementation.
+
+A definite stance taken with \vsl{} is that it is not intended to be
+viewed as a fully-finished Lisp system merely for use. It is more a starting
+point for project work that will extend it. Those who are convinced that
+Common Lisp or Scheme would be better can use much of the core technology
+within \vsl{} and adapt it to implement the dialect that they are keen on.
+It would be essentially trivial to just change the names that \vsl{} uses
+for the Lisp functions that it supplies. For instance Scheme uses the names
+{\tx set!} and {\tx equal?} where \vsl{} uses {\tx setq} and {\tx equal},
+and Common Lisp used {\tx defun} where \vsl{} used {\tx de}. Adding extra
+functions, and even data-types should be straightforward. Deeper semantic
+differences between the dialects would naturally lead to more challenging
+re-work.
+
+Anybody who became enthusiastic about using \vsl{} for algebraic computation
+might retrofit full-speed arbitrary prevision arithmetic. If they wanted to match the
+arithmetic capability of Common Lisp they would also need to add complex
+numbers and a full range of elementary functions working on them.
+
+Lisp is a very natural language for compiler-building, and a small and
+fairly tidy version like \vsl{} could provide a good starting point for
+a project to build one. One of the examples given later here may provide
+some sort of a start, but Appendix 3 in Berkeley and Bobrow\cite{BandB} (one
+of many important historical Lisp books now available on-line) includes
+a listing of a complete real Lisp compiler -- albeit for a machine now
+long defunct. There is no reason to believe that a compiler for \vsl{} would
+not transform it into a system speed-competitive with all other current
+Lisps. The compiler in Berkeley and Bobrow is maybe 1500 lines of
+code, and the key parts of if that do the central interesting bits of the work are maybe
+only around 500 lines. This is not an outrageously huge project.
+
+User-interface refinement is something that could generate an almost
+unlimited amount of activity. Before starting on a project in this area it
+would make sense to review what others have done. One possible
+place to start would be to investigate LispWorks\cite{LispWorks},
+which provides an integrated cross-platform development environment.
+
+
+
+

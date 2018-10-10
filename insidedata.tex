@@ -1,0 +1,411 @@
+\chapter{Inside Lisp: data representation}
+A Lisp system could be implemented in almost any programming language.
+In the very early days the core of the system would have been written directly
+in assembly code for the computer of interest. That could give ultimate
+flexible control of everything, but these days it feels too much like
+hard work. If you look at the Lisp 1.5 Programmer's manual\cite{Lisp15}
+you will find various aspects of Lisp's behaviour being explained by showing
+the assembly code that implements them. Even at that stage Lisp was
+a language that could see itself as ``visible''.
+
+A proper -- indeed perhaps {\em the} proper way to
+build a Lisp is to write the Lisp system in Lisp itself. That can
+work if you extend Lisp with names for a suitable range of low-level
+operations to use machine resources such as addresses, bytes and
+pointers. A Lisp compiler (naturally written in Lisp) can then
+convert this Lisp description into machine code that is then ready to
+work. The PSL\cite{PSL} system is an example of using this strategy.
+There is an obvious question about how you get started. If your Lisp
+system and its compiler is coded in Lisp then you need a working Lisp
+system before you can compile it. The practical solution is to
+use some existing Lisp the very first time, but then once you have
+got something reasonably workable you use the previous version of
+your system to build the next. If you decide to try to build
+a Lisp in this manner you could perfectly reasonably use \vsl{} as the
+initial launchpad to get you off the ground.
+
+A final option is to build your Lisp using some existing established
+programming language. That is what has been done with \vsl{}, with the
+existing language being C. The same path was taken for the CSL Lisp\cite{CSL}
+that \vsl{} is at least partly styled after. The view taken here is that
+C is a language that provides most of the flexibility and power of assembly
+code but that looks a lot neater. C works on the basis of ``You Asked For
+It So You Got It'' so even small errors in C code can lead to corrupted
+data and most obscure consequences. However by and large C code runs reasonably
+fast and there are certainly very high quality C compilers available for
+most sensible models of computer. It would have been possible to make a
+different selection (for instance Jlisp\cite{Jlisp} is all coded in Java).
+
+Once the implementation language has been selected
+a first challenge for a Lisp implementer is to decide how data will
+be represented. It is going to be necessary to have symbols, numbers,
+strings and lists (together with a few other oddities) and a key
+feature of Lisp is that a Lisp Object can be any one of these and
+it must be possible to have a run-time test to determine which sort
+it is.
+
+The choice made in \vsl{} is that every Lisp Object will be represented
+as a machine integer that is wide enough to double-up as a pointer.
+Modern implementations of C provide a type called {\tx intptr\_t} that
+is suitable. On some architectures (for instance the ARM processor
+in a Raspberry Pi) these integers are 32-bits wide, while on others
+(say a Macintosh) they are 64. The code in \vsl{} has been written so it
+will cope equally well in both cases.
+
+To arrange that machine integers can be used to stand for all the various
+Lisp data-types \vsl{} uses the bottom three bits of each value as
+tag-bits. A consequence of this design is that these bits are not available
+when the object is used as a pointer -- and when it represents
+a list or a symbol (or indeed a string, vector, floating point number\ldots)
+it has to. Fortunately that is not a disaster, because it is easy to arrange
+that every valid item that \vsl{} ever need to have a pointer gets
+allocated at an address that is a multiple of 8. The ``trickery'' of this
+is just the sort of thing that is possible in C but that many other
+languages protect you from being able to do.
+
+The important parts of the C code making up \vsl{} are all included
+and explained here. The full version is naturally available
+for download from the associated web-site. If you are not already
+an expert at C coding you should still be able to see what is going on,
+and as a side-effect of reading this you may well find you have learned
+quite a lot about C as well as Lisp!
+
+The start of the code merely introduces the various tag bits
+and provides facilities with name such as {\tx isCONS} that check
+for each case. The first few cases will already make sense, but the
+ones named {\tx tagATOM}, {\tx tagFORWARD} and {\tx tagHEADER} will be
+explained later.
+{\small\begin{verbatim}
+// A Lisp item is represented as an integer and the low
+// 3 bits contain tag information that specify how the
+// rest will be used.
+
+typedef intptr_t LispObject;
+
+#define TAGBITS    0x7
+
+#define tagCONS    0     // Traditional Lisp "cons" item.
+#define tagSYMBOL  1     // A symbol.
+#define tagFIXNUM  2     // An integer (29 or 61 bits).
+#define tagFLOAT   3     // A double-precision number.
+#define tagATOM    4     // Something with a header word.
+#define tagFORWARD 5     // Used by garbage collection.
+#define tagHDR     6     // Header word of an atom .
+#define tagSPARE   7     // Not used!
+
+// Note that in the above I could have used tagATOM to
+// include the case of symbols (aka identifiers) but as
+// an optimisation I choose to make that a special case.
+// I still have one spare code (tagSPARE) that could be
+// used to extend the system.
+
+// Now I provide macros that test the tag bits.
+// These are all rather obvious!
+
+#define isCONS(x)    (((x) & TAGBITS) == tagCONS)
+#define isSYMBOL(x)  (((x) & TAGBITS) == tagSYMBOL)
+#define isFIXNUM(x)  (((x) & TAGBITS) == tagFIXNUM)
+#define isFLOAT(x)   (((x) & TAGBITS) == tagFLOAT)
+#define isATOM(x)    (((x) & TAGBITS) == tagATOM)
+#define isFORWARD(x) (((x) & TAGBITS) == tagFORWARD)
+#define isHDR(x)     (((x) & TAGBITS) == tagHDR)
+\end{verbatim}}
+
+Each of these cases can be considered individually. The first is the
+one that is most fundamental to Lisp, and is used for the {\tx cons} cells
+that make up lists. A {\tx LispObject} that is tagged as {\tx tagCONS}
+is a bit pattern that can be used as C pointer to the two further
+{\tx LispObject}s that will be the {\tx car} and {\tx cdr} of the item.
+Accessing them is an exercise in telling C to ignore all the proper static
+type analysis that robust programming languages love. It converts the
+object into a pointer and accesses it as if it was a little array with
+two elements. That ``cheating'' is wrapped up in a pair of C macros
+so that throughout the rest of the code it looks neat and natural.
+{\small\begin{verbatim}
+// Macros the extract fields from LispObjects ...
+
+#define qcar(x) (((LispObject *)(x))[0])
+#define qcdr(x) (((LispObject *)(x))[1])
+\end{verbatim}}
+
+That is pretty well all that needs to be said about {\tx cons} cells and
+hence lists! Well we will need to have functions that can create them, but
+that comes later. What we can do already is test if we have one (using
+{\tx isCONS}) and access the {\tx car} and {\tx cdr} components. It is
+perhaps worth noting that a {\tx cons} cell will consist of two
+adjacent {\tx LispObject}s, and so on a 32-bit computer it will
+occupy 8 bytes and on a 64-bit one 16 bytes. In each case this size
+is a multiple of 8, and so laying {\tx cons} cells side by side will
+naturally maintain the 8-byte alignment that was required to make the
+tagging system in \vsl{} work.
+
+Something rather similar is done for symbols. However rather than having
+just two fields called {\tx car} and {\tx cdr} a symbol is implemented
+in \vsl{} with space for six sub-parts. These first of these will
+hold various flag bits. For instance one of these flags is used to mark
+the name as one subject to tracing. Then there are fields that store the
+current value associated with the symbol it is is viewed as a variable,
+its property list (as used with {\tx put} and {\tx get}) and a reference
+to the string that is the name of the symbol. The name is kept at arms-length
+in this way because the names of different symbols can be different sizes, and
+it is convenient to wrap the handling of that up in the mechanism used for
+strings. Then there are two fields that are to do with having a function
+definition associated with the symbol. {\tx qdefn} holds a C pointer, and
+when used it will be the entry-point of a C function to be used. {\tx qlits}
+is for Lisp data associated with any way the symbol is to be used as a
+function.
+{\small\begin{verbatim}
+#define qflags(x) (((LispObject *)((x)-tagSYMBOL))[0])
+#define qvalue(x) (((LispObject *)((x)-tagSYMBOL))[1])
+#define qplist(x) (((LispObject *)((x)-tagSYMBOL))[2])
+#define qpname(x) (((LispObject *)((x)-tagSYMBOL))[3])
+#define qdefn(x)  (((void **)     ((x)-tagSYMBOL))[4])
+#define qlits(x)  (((LispObject *)((x)-tagSYMBOL))[5])
+
+// Bits within the flags field of a symbol.
+
+#define flagTRACED    0x080
+#define flagSPECFORM  0x100
+#define flagMACRO     0x200
+// There are LOTS more bits available for flags here.
+\end{verbatim}}
+Observe that when accessing these the tag-bits ({\tx tagSYMBOL}) have to
+be removed to get something C will be happy interpreting as an
+little array. It should already be possible to see that a key part
+of evaluating a Lisp form could involve a line of code
+somewhat like
+{\small\begin{verbatim}
+   if (isSYMBOL(x)) return qvalue(x);
+\end{verbatim}}
+\noindent to detect the case of a symbol being used as a variable
+and return its value. In \vsl{} when a symbol is first created its
+value-cell is filled with a special value that marks it as not having
+a useful value. This is in fact a symbol with the deliberately
+unwieldy name {\tx \textasciitilde{}indefinite-value\textasciitilde{}} and in the C code a reference
+to that loves in a variable called {\tx undefined}. If this value is
+encountered it means that the user looked in the value of a variable
+without setting it first, and a diagnostic will be generated.
+
+Small integers are coped with by \vsl{} by using the part of the
+{\tx LispObject} not used by the tag bits to store the numeric value
+directly. This means that the term ``small'' is in fact not that
+limiting! C provides symbols like {\tx INTPRT\_MAX} that give the limiting
+size of its {\tx intptr\_t} data type, so getting a handle on the range
+for Lisp small numbers (known as ``fixnums'') is straightforward. Floating
+point numbers can not afford to have any bits stolen for use as tags, so go
+back to the pattern of using a pointer to memory where the value is stored.
+{\small\begin{verbatim}
+// Fixnums and Floating point numbers are  easy!
+
+#define qfixnum(x)     ((x) >> 3)
+#define packfixnum(n)  ((((LispObject)(n)) << 3) \
+                       + tagFIXNUM)
+
+#define MIN_FIXNUM     qfixnum(INTPTR_MIN)
+#define MAX_FIXNUM     qfixnum(INTPTR_MAX)
+
+#define qfloat(x)      (((double *)((x)-tagFLOAT))[0])
+\end{verbatim}}
+
+The next tag value shown is {\tx tagATOM} and this is used for
+strings, bigger integers and vectors. The data in this case is a
+pointer to a block of memory, which must be a multiple of 8 bytes
+long. To make it possible to have lots of different sorts of data
+collected together under this single tag value the first word of
+the memory pointed at will be tagged with {\tx tagHEADER} and additional
+bits in it will show both what sort of entity is involved and how
+long it is. The choice made in \vsl{} is to allow for up to 16 sorts of
+data. This means that a header word has 3 bits of tag (that confirm
+that it is a header) and 4 bits to explain what it is a header for. That
+leaves the rest of the word to contain length information. On a 32-bit
+computer and given that the length is recorded in bytes this means that
+the largest object is limited to around 32 Megabytes. For Lisp
+use this is really unlikely to be a problem -- especially for a small
+system such as \vsl. However whenever a limitation gets built into
+a system by some early design decision it can make sense to consider how it
+could be lifted. In this case the most obvious way out is to note that
+any user needing amazingly long strings, huge arrays or other data that
+could approach this limit should just move to a 64-bit computer where
+\vsl{} length-codes are 57 bits rather then 25: they should then not
+have troubles in the foreseeable future. If it was vital to change
+\vsl{} to cope with bigger items it would be possible to make a modest
+expansion by making the length-code count in words rather than bytes, or
+a big one my relocating length information to the word following the header
+so that nothing was lost via packing.
+
+The code-fragment the follows shows type-codes that go within headers
+and that identify Symbols, Strings, Vectors, Big numbers and some varieties
+of Hash table. And as the comments note there are quite a few codes left
+available for expansion, but perhaps not enough to allow coverage of all
+the various sorts of object a full version of Common Lisp would have
+required. The type-code for symbols exists so that the initial word
+of a symbol (previously just described as containing flags) can have mark
+bits that identify it as a header, and that helps the garbage collector.
+{\small\begin{verbatim}
+// In memory CONS cells and FLOATS exist as just 2-word
+// items with all their bits in use. All other sorts of
+// data have a header word at their start. This contains
+// extra information about the exact form of data present
+
+#define qheader(x) (((LispObject *)((x)-tagATOM))[0])
+
+#define TYPEBITS    0x78
+
+#define typeSYM     0x00
+#define typeSTRING  0x08
+#define typeVEC     0x10
+#define typeBIGNUM  0x18
+#define typeEQHASH  0x20
+#define typeEQHASHX 0x28
+// Codes 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
+// 0x70 and 0x78 spare!
+
+#define veclength(h)  (((uintptr_t)(h)) >> 7)
+#define packlength(n) (((LispObject)(n)) << 7)
+\end{verbatim}}
+
+When the length of a vector is unpacked from a header word it is shifted
+using the type {\tx uintptr\_t} which is a C type that is  ``unsigned''. This
+avoids any potential bad effects associated with large length values
+overflowing into a sign-bit and ending up appearing to be negative.
+
+Given the above, it is now easy to see how to represent strings and big
+numbers. Each live in memory as a header word followed by the sequence
+of bytes that make up their data. In the initial version of \vsl{} the
+numbers always just hold an {\tx int64\_t} value, so it makes sense to
+keep that data aligned at an 8-byte boundary. Access to the two varieties
+of data happens as follows:
+{\small\begin{verbatim}
+#define isBIGNUM(x) \
+   (isATOM(x) && ((qheader(x) & TYPEBITS) == \
+   typeBIGNUM))
+#define qint64(x) (*(int64_t *)((x) - tagATOM + 8))
+
+#define isSTRING(x) \
+   (isATOM(x) && ((qheader(x) & TYPEBITS) == \
+   typeSTRING))
+#define qstring(x) ((char *)((x) - tagATOM + \
+   sizeof(LispObject)))
+\end{verbatim}}
+
+All other data types are handled in very similar ways. The code presented
+so far is in fact just declarations and C macros that are there to bridge
+between the human and Lisp view of objects and the detailed bit-packing
+representations that \vsl{} has adopted. If somebody needed to change the
+representations then they could alter these macros and at least a great
+deal of the rest of the \vsl{} code could remain intact.
+
+The native \vsl{} representation of a big-number is as as atom that could
+hold an arbitrary amount of data, but as has been explained the code is
+kept simple by using just 64-bits. This means that the largest integer
+that can be handled is only 19 digits long - specifically it
+is 9223372036854775807. For a real Lisp system this is dreadfully
+limiting! But providing C code for higher precision arithmetic would
+have enlarged \vsl{} and distracted from its use in presenting aspects
+of Lisp implementation. As a compromise the code arranges to interpret
+a list structure of the form {\tx (!~bignum 000 000 000 ...)} as not quite
+a list, but as if it were a new special data-type. The number of places
+the code has to be aware of this is amazingly small! The code for the
+predicate {\tx atom} has a tiny adjustment that detects the special case,
+and the code to print things notices it and takes special action. Finally a
+special built-in function called {\tx bignump} checks if its argument is
+a list structure with the special tag at its head. With these very minor
+adjustments full support for unlimited precision arithmetic can be provided
+as Lisp code in the \vsl{} library. It is perhaps useful to have this
+arrangement in that it illustrates how easily an existing Lisp system can be
+extended to add new data types -- even if at first sight they would seem
+to need support at a really low level.
+
+To further illustrate how this C-based low-level way of representing data
+is being used it is worth showing what would be more natural to do in a
+stricter and more modern language. The example used here is Java where
+classes are used to represent each sort of Lisp object, and sub-classing
+to establish their hierarchy:
+{\small\begin{verbatim}
+class LispObject  // A base class
+{
+}
+
+class Pair extends LispObject
+{
+    LispObject car, cdr;
+}
+
+class LispFixNum extends LispObject
+{
+    int n;
+}
+
+class LispString extends LispObject
+{
+    String s;
+}
+
+class Symbol extends LispObject
+{
+    LispObject value, plist;
+    LispString pname;
+    ...
+}
+\end{verbatim}}
+
+The Java version is really a lot cleaner, and when in use Java will police
+access where that helps ensure system integrity. Furthermore methods relating
+to each sort of Lisp data can be put in as part of the class that describes
+the data. However Java will be needing to do some work behind the scenes to
+cope with its class hierarchy, and it is most unlikely that it will use
+the carefully designed hand-optimised assignments of bit-patterns that the
+C code uses to discriminate between types. You can expect a trade-off with
+the Java version looking nicer but the C version being able to make full
+use of machine resources.
+
+The C code that makes up \vsl{} continues to expose low level detail when it
+comes to allocating new {\tx cons} cells. It has a block of memory that
+starts at {\tx heap1base} and ends at {\tx heap1end}. It allocates
+{\tx cons} cells, symbols, strings and most other things sequentially up
+from the start and floating point values downwards from the top. It also
+has a block of memory it uses as a stack to save pointers to Lisp objects
+at some stages when that is necessary.
+
+{\small\begin{verbatim}
+#define push(x)        { *sp++ = (x); }
+#define TOS            (sp[-1])
+#define pop(x)         { (x) = *--sp; }
+#define push2(x, y)    { push(x); push(y); }
+#define pop2(y, x)     { pop(y); pop(x); }
+
+LispObject cons(LispObject a, LispObject b)
+{   if (fringe1 >= fpfringe1)
+    {   push2(a, b);
+        reclaim();
+        pop2(b, a);
+    }
+    qcar(fringe1) = a;
+    qcdr(fringe1) = b;
+    a = fringe1;
+    fringe1 += 2*sizeof(LispObject);
+    return a;
+}
+
+LispObject boxfloat(double a)
+{   LispObject r;
+    if (fringe1 >= fpfringe1) reclaim();
+    fpfringe1 -= sizeof(double);
+    r = fpfringe1 + tagFLOAT;
+    qfloat(r) = a;
+    return r;
+}
+It should be clear from the above that {\tx fringe1} records the upper
+limit of active material, and {\tx fpfringe1} the lower limit of allocated
+floating point data. When these collide the function {\tx reclaim} is
+called to tidy up memory recycling any that is no longer needed. The
+use of the macros {\tx push2} and {\tx pop2} arrange that the garbage
+collection process does not lose track of the values that are to be placed
+in the new {\tx cons}.
+
+Code rather similar in style to that for {\tx cons} allocates symbols, strings
+and the like, and so is not included here, but when you check it in the full
+\vsl{} sources it should be easy to understand.
+
+\end{verbatim}}
+

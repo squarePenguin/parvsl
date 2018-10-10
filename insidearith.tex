@@ -1,0 +1,429 @@
+% @@@@@ incomplete
+
+% Code that needs explaining...
+{\small\begin{verbatim}
+
+#define qfixnum(x)     ((x) >> 3)
+#define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
+
+#define MIN_FIXNUM     qfixnum(INTPTR_MIN)
+#define MAX_FIXNUM     qfixnum(INTPTR_MAX)
+
+#define qfloat(x)      (((double *)((x)-tagFLOAT))[0])
+
+#define isBIGNUM(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeBIGNUM))
+#define qint64(x) (*(int64_t *)((x) - tagATOM + 8))
+
+
+LispObject boxint64(int64_t a)
+{   LispObject r = allocateatom(16);
+    qheader(r) = tagHDR + typeBIGNUM + packlength(16);
+    qint64(r) = a;
+    return r;
+}
+
+// I will try to have a general macro that will help me with bringing
+// everything to consistent numeric types - ie I can start off with a
+// mix of fixnums, bignums and floats. The strategy here is that if either
+// args is a float then the other is forced to that, and then for all sorts
+// of pure integer work everything will be done as int64_t
+
+#define NUMOP(name, a, b)                                                \
+    if (isFLOAT(a))                                                      \
+    {   if (isFLOAT(b)) return FF(qfloat(a), qfloat(b));                 \
+        else if (isFIXNUM(b)) return FF(qfloat(a), (double)qfixnum(b));  \
+        else if (isBIGNUM(b)) return FF(qfloat(a), (double)qint64(b));   \
+        else return error1("Bad argument for " name, b);                 \
+    }                                                                    \
+    else if (isBIGNUM(a))                                                \
+    {   if (isFLOAT(b)) return FF((double)qint64(a), qfloat(b));         \
+        else if (isFIXNUM(b)) return BB(qint64(a), (int64_t)qfixnum(b)); \
+        else if (isBIGNUM(b)) return BB(qint64(a), qint64(b));           \
+        else return error1("Bad argument for " name, b);                 \
+    }                                                                    \
+    else if (isFIXNUM(a))                                                \
+    {   if (isFLOAT(b)) return FF((double)qfixnum(a), qfloat(b));        \
+        else if (isFIXNUM(b)) return BB((int64_t)qfixnum(a),             \
+                                        (int64_t)qfixnum(b));            \
+        else if (isBIGNUM(b)) return BB((int64_t)qfixnum(a), qint64(b)); \
+        else return error1("Bad argument for " name, b);                 \
+    }                                                                    \
+    else return error1("Bad argument for " name, a)
+
+#define UNARYOP(name, a)                                                 \
+    if (isFIXNUM(a)) return BB((int64_t)qfixnum(a));                     \
+    else if (isFLOAT(a)) return FF(qfloat(a));                           \
+    else if (isBIGNUM(a)) return BB(qint64(a));                          \
+    else return error1("Bad argument for " name, a)
+
+// Similar, but only supporting integer (not floating point) values
+
+#define INTOP(name, a, b)                                                \
+    if (isBIGNUM(a))                                                     \
+    {   if (isFIXNUM(b)) return BB(qint64(a), (int64_t)qfixnum(b));      \
+        else if (isBIGNUM(b)) return BB(qint64(a), qint64(b));           \
+        else return error1("Bad argument for " name, b);                 \
+    }                                                                    \
+    else if (isFIXNUM(a))                                                \
+    {   if (isFIXNUM(b)) return BB((int64_t)qfixnum(a),                  \
+                                   (int64_t)qfixnum(b));                 \
+        else if (isBIGNUM(b)) return BB((int64_t)qfixnum(a), qint64(b)); \
+        else return error1("Bad argument for " name, b);                 \
+    }                                                                    \
+    else return error1("Bad argument for " name, a)
+
+#define UNARYINTOP(name, a)                                              \
+    if (isFIXNUM(a)) return BB((int64_t)qfixnum(a));                     \
+    else if (isBIGNUM(a)) return BB(qint64(a));                          \
+    else return error1("Bad argument for " name, a)
+
+// This takes an arbitrary 64-bit integer and returns either a fixnum
+// or a bignum as necessary.
+
+LispObject makeinteger(int64_t a)
+{   if (a >= MIN_FIXNUM && a <= MAX_FIXNUM) return packfixnum(a);
+    else return boxint64(a);
+}
+
+#undef FF
+#undef BB
+#define FF(a) boxfloat(-(a))
+#define BB(a) makeinteger(-(a))
+
+LispObject Nminus(LispObject a)
+{   UNARYOP("minus", a);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) boxfloat((a) + (b))
+#define BB(a, b) makeinteger((a) + (b))
+
+LispObject Nplus2(LispObject a, LispObject b)
+{   NUMOP("plus", a, b);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) boxfloat((a) * (b))
+#define BB(a, b) makeinteger((a) * (b))
+
+LispObject Ntimes2(LispObject a, LispObject b)
+{   NUMOP("times", a, b);
+}
+
+#undef BB
+#define BB(a, b) makeinteger((a) & (b))
+
+LispObject Nlogand2(LispObject a, LispObject b)
+{   INTOP("logand", a, b);
+}
+
+#undef BB
+#define BB(a, b) makeinteger((a) | (b))
+
+LispObject Nlogor2(LispObject a, LispObject b)
+{   INTOP("logor", a, b);
+}
+
+#undef BB
+#define BB(a, b) makeinteger((a) ^ (b))
+
+LispObject Nlogxor2(LispObject a, LispObject b)
+{   INTOP("logxor", a, b);
+}
+
+#undef FF
+#undef BB
+
+
+#define NARY(x, base, combinefn)      \
+    LispObject r;                     \
+    if (!isCONS(x)) return base;      \
+    push(x);                          \
+    r = eval(qcar(x));                \
+    pop(x);                           \
+    if (unwindflag != unwindNONE)     \
+        return nil;                   \
+    x = qcdr(x);                      \
+    while (isCONS(x))                 \
+    {   LispObject a;                 \
+        push2(x, r);                  \
+        a = eval(qcar(x));            \
+        if (unwindflag != unwindNONE) \
+        {   pop2(r, x);               \
+            return nil;               \
+        }                             \
+        pop(r);                       \
+        r = combinefn(r, a);          \
+        pop(x);                       \
+        x = qcdr(x);                  \
+    }                                 \
+    return r
+
+LispObject Lplus(LispObject lits, LispObject x)
+{   NARY(x, packfixnum(0), Nplus2);
+}
+
+LispObject Ltimes(LispObject lits, LispObject x)
+{   NARY(x, packfixnum(1), Ntimes2);
+}
+
+LispObject Llogand(LispObject lits, LispObject x)
+{   NARY(x, packfixnum(-1), Nlogand2);
+}
+
+LispObject Llogor(LispObject lits, LispObject x)
+{   NARY(x, packfixnum(0), Nlogor2);
+}
+
+LispObject Llogxor(LispObject lits, LispObject x)
+{   NARY(x, packfixnum(0), Nlogxor2);
+}
+
+LispObject Lnumberp(LispObject lits, int nargs, ...)
+{   ARG1("numberp", x);
+    return (isFIXNUM(x) || isBIGNUM(x) || isFLOAT(x) ? lisptrue : nil);
+}
+
+LispObject Lfixp(LispObject lits, int nargs, ...)
+{   ARG1("fixp", x);
+    return (isFIXNUM(x) || isBIGNUM(x) ? lisptrue : nil);
+}
+
+LispObject Lfloatp(LispObject lits, int nargs, ...)
+{   ARG1("floatp", x);
+    return (isFLOAT(x) ? lisptrue : nil);
+}
+
+LispObject Lfix(LispObject lits, int nargs, ...)
+{   ARG1("fix", x);
+    return (isFIXNUM(x) || isBIGNUM(x) ? x :
+            isFLOAT(x) ? boxint64((int64_t)qfloat(x)) :
+            error1("arg for fix", x));
+}
+
+LispObject Lfloor(LispObject lits, int nargs, ...)
+{   ARG1("floor", x);
+    return (isFIXNUM(x) || isBIGNUM(x) ? x :
+            isFLOAT(x) ? boxint64((int64_t)floor(qfloat(x))) :
+            error1("arg for floor", x));
+}
+
+LispObject Lceiling(LispObject lits, int nargs, ...)
+{   ARG1("ceiling", x);
+    return (isFIXNUM(x) || isBIGNUM(x) ? x :
+            isFLOAT(x) ? boxint64((int64_t)ceil(qfloat(x))) :
+            error1("arg for ceiling", x));
+}
+
+LispObject Lfloat(LispObject lits, int nargs, ...)
+{   ARG1("float", x);
+    return (isFLOAT(x) ? x :
+            isFIXNUM(x) ? boxfloat((double)qfixnum(x)) :
+            isBIGNUM(x) ? boxfloat((double)qint64(x)) :
+            error1("arg for fix", x));
+}
+
+#define floatval(x)                   \
+   isFLOAT(x) ? qfloat(x) :           \
+   isFIXNUM(x) ? (double)qfixnum(x) : \
+   isBIGNUM(x) ? (double)qint64(x) :  \
+   0.0
+
+LispObject Lcos(LispObject lits, int nargs, ...)
+{   ARG1("cos", x);
+    return boxfloat(cos(floatval(x)));
+}
+
+LispObject Lsin(LispObject lits, int nargs, ...)
+{   ARG1("sin", x);
+    return boxfloat(sin(floatval(x)));
+}
+
+LispObject Lsqrt(LispObject lits, int nargs, ...)
+{   ARG1("sqrt", x);
+    return boxfloat(sqrt(floatval(x)));
+}
+
+LispObject Llog(LispObject lits, int nargs, ...)
+{   ARG1("log", x);
+    return boxfloat(log(floatval(x)));
+}
+
+LispObject Lexp(LispObject lits, int nargs, ...)
+{   ARG1("exp", x);
+    return boxfloat(exp(floatval(x)));
+}
+
+LispObject Latan(LispObject lits, int nargs, ...)
+{   ARG1("atan", x);
+    return boxfloat(atan(floatval(x)));
+}
+
+
+// Now some numeric functions
+
+#undef FF
+#undef BB
+#define FF(a, b) ((a) > (b) ? lisptrue : nil)
+#define BB(a, b) ((a) > (b) ? lisptrue : nil)
+
+LispObject Lgreaterp(LispObject lits, int nargs, ...)
+{   ARG2("greaterp", x, y);
+    NUMOP("greaterp", x, y);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) ((a) >= (b) ? lisptrue : nil)
+#define BB(a, b) ((a) >= (b) ? lisptrue : nil)
+
+LispObject Lgeq(LispObject lits, int nargs, ...)
+{   ARG2("geq", x, y);
+    NUMOP("geq", x, y);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) ((a) < (b) ? lisptrue : nil)
+#define BB(a, b) ((a) < (b) ? lisptrue : nil)
+
+LispObject Llessp(LispObject lits, int nargs, ...)
+{   ARG2("lessp", x, y);
+    NUMOP("lessp", x, y);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) ((a) <= (b) ? lisptrue : nil)
+#define BB(a, b) ((a) <= (b) ? lisptrue : nil)
+
+LispObject Lleq(LispObject lits, int nargs, ...)
+{   ARG2("leq", x, y);
+    NUMOP("leq", x, y);
+}
+
+LispObject Lminus(LispObject lits, int nargs, ...)
+{   ARG1("minus", x);
+    return Nminus(x);
+}
+
+LispObject Lminusp(LispObject lits, int nargs, ...)
+{   ARG1("minusp", x);
+// Anything non-numeric will not be negative!
+    if ((isFIXNUM(x) && x < 0) ||
+        (isFLOAT(x) && qfloat(x) < 0.0) ||
+        (isATOM(x) &&
+         (qheader(x) & TYPEBITS) == typeBIGNUM &&
+         qint64(x) < 0)) return lisptrue;
+    else return nil;
+}
+
+#undef BB
+#define BB(a) makeinteger(~(a))
+
+LispObject Llognot(LispObject lits, int nargs, ...)
+{   ARG1("lognot", x);
+    UNARYINTOP("lognot", x);
+}
+
+LispObject Lzerop(LispObject lits, int nargs, ...)
+{   ARG1("zerop", x);
+// Note that a bignum can never be zero! Because that is not "big".
+// This code is generous and anything non-numeric is not zero.
+    if (x == packfixnum(0) ||
+        (isFLOAT(x) && qfloat(x) == 0.0)) return lisptrue;
+    else return nil;
+}
+
+LispObject Lonep(LispObject lits, int nargs, ...)
+{   ARG1("onep", x);
+    if (x == packfixnum(1) ||
+        (isFLOAT(x) && qfloat(x) == 1.0)) return lisptrue;
+    else return nil;
+}
+
+#undef FF
+#undef BB
+#define FF(a) boxfloat((a) + 1.0)
+#define BB(a) makeinteger((a) + 1)
+
+LispObject Ladd1(LispObject lits, int nargs, ...)
+{   ARG1("add1", x);
+    UNARYOP("add1", x);
+}
+
+#undef FF
+#undef BB
+#define FF(a) boxfloat((a) - 1.0)
+#define BB(a) makeinteger((a) - 1)
+
+LispObject Lsub1(LispObject lits, int nargs, ...)
+{   ARG1("sub1", x);
+    UNARYOP("sub1", x);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) boxfloat((a) - (b))
+#define BB(a, b) makeinteger((a) - (b))
+
+LispObject Ldifference(LispObject lits, int nargs, ...)
+{   ARG2("difference", x, y);
+    NUMOP("difference", x, y);
+}
+
+#undef FF
+#undef BB
+#define FF(a, b) ((b) == 0.0 ? error1("division by 0.0", nil) : \
+                  boxfloat((a) / (b)))
+#define BB(a, b) ((b) == 0 ? error1("division by 0", nil) : \
+                  makeinteger((a) / (b)))
+
+LispObject Lquotient(LispObject lits, int nargs, ...)
+{   ARG2("quotient", x, y);
+    NUMOP("quotient", x, y);
+}
+
+#undef BB
+#define BB(a, b) ((b) == 0 ? error1("remainder by 0", nil) : \
+                  makeinteger((a) % (b)))
+
+LispObject Lremainder(LispObject lits, int nargs, ...)
+{   ARG2("remainder", x, y);
+    INTOP("remainder", x, y);
+}
+
+#undef BB
+#define BB(a, b) ((b) == 0 ? error1("division by 0", nil) : \
+                  cons(makeinteger((a) / (b)), makeinteger((a) % (b))))
+
+LispObject Ldivide(LispObject lits, int nargs, ...)
+{   ARG2("divide", x, y);
+    INTOP("divide", x, y);
+}
+
+#undef BB
+#define BB(a) makeinteger((a) << sh)
+
+LispObject Lleftshift(LispObject lits, int nargs, ...)
+{   int sh;
+    ARG2("leftshift", x, y);
+    if (!isFIXNUM(y)) return error1("Bad argument for leftshift", y);
+    sh = (int)qfixnum(y);
+    UNARYINTOP("leftshift", x);
+}
+
+#undef BB
+#define BB(a) makeinteger((a) >> sh)
+
+LispObject Lrightshift(LispObject lits, int nargs, ...)
+{   int sh;
+    ARG2("rightshift", x, y);
+    if (!isFIXNUM(y)) return error1("Bad argument for rightshift", y);
+    sh = (int)qfixnum(y);
+    UNARYINTOP("rightshift", x);
+}
+
+\end{verbatim}}

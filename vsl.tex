@@ -1,0 +1,56 @@
+% vsl.tex    A C Norman   2012
+
+
+\documentclass[a4paper,12pt]{book}
+\title{\Huge Visible Lisp \\ \vspace{4cm}\Large Language implementation for the
+Raspberry Pi and other small computers}
+\date{}
+\author{Arthur Norman}
+\usepackage{epsfig}
+\usepackage{amssymb,amsmath}
+\usepackage{url}
+\usepackage{times,latexsym}
+\usepackage{wrapfig}
+\makeindex
+\newcommand{\vsl}{{\ttfamily vsl}}
+\newcommand{\vcl}{{\ttfamily vcl}}
+\newcommand{\nil}{{\ttfamily nil}}
+\newcommand{\tx}{\ttfamily}
+\begin{document}
+\maketitle
+
+\tableofcontents
+
+\input purpose.tex
+\input whatislisp.tex
+\input versionsoflisp.tex
+\input afirstsession.tex
+\input nameslistsandvariables
+\input simpfndefs.tex
+\input testscomparisons.tex
+\input moredata.tex
+\input stylesoflisp.tex
+\input macros.tex
+\input funsasvalues.tex
+\input insidedata.tex
+\input insidereadprint.tex
+\input insideeval.tex
+\input insidearith.tex
+\input insidegarbage.tex
+\input insidecheckpoint.tex
+\input insidecompile.tex
+\input insidetricks.tex
+\input sampleprogs.tex
+
+\appendix
+
+\input fetching.tex
+\input functionlist.tex
+\input glossary.tex
+
+\bibliographystyle{plain}
+\bibliography{vsl}
+
+\input vsl.ind
+\end{document}
+

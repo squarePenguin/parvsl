@@ -1,0 +1,386 @@
+\chapter{What is Lisp?}
+In order to understand a programming language you need to know something of
+its history, and of the context in which it has developed. So you need to
+\begin{wrapfigure}{l}{2.5in}
+{\centering
+\includegraphics[width=2.4in]{john_mccarthy_by_null0_via_flickr.eps}}
+\caption{John McCarthy (photo courtesy null0 on flickr)}
+\end{wrapfigure} be aware of other languages it has been in competition with, and trace
+influences. In the case of Lisp this leads to a need to make an amazingly
+broad survey of the entire history of computers, since Lisp was one of the
+very earliest programming languages and its influence since has been huge.
+Lisp was invented by John McCarthy in the late 1950's
+and was originally envisaged for use in Artificial Intelligence. Indeed the very
+term ``Artificial Intelligence'' had been coined by McCarthy at about the
+time that his first thoughts the led to Lisp were arising. While AI and
+related areas have continued to be important for the language, it has
+found a new core area as an embedded scripting language to support
+various large programs, including editors, computer aided design packages,
+musical notation systems and accounting software! Serious widely used
+applications (for instance the Yahoo Store) run in Lisp, but of course
+their users just get to see their behaviour not their Lispy internals.
+
+The Wikipedia entry for Lisp gives a list of other programming languages
+derived from or influences by Lisp: CLU, Dylan, Falcon, Forth, Haskell,
+Io, Ioke, JavaScript, Logo, Lua, Mathematica, MDL, ML, Nu, OPS5, Perl,
+Python, Qi, Rebol, Racket, Ruby, Smalltalk and Tcl. Lisp enthusiasts will
+then wish to follow the references through to see what Lisp indirectly
+influenced. So for instance the languages that Smalltalk has had an
+impact on include Objective-C, Self, Java, PHP 5, Logtalk, Dylan,
+AppleScript, Lisaac, NewtonScript, Groovy, Scala, Perl 6,
+Common Lisp Object System, Fancy and Dart. Obviously many of these names
+will not be familiar, either because they are now defunct or because they
+are only used in specialist contexts, but there may be enough
+easily recognisable languages to show that the Lisp legacy has been
+truly broad.
+
+The language design for Lisp dates from 1958 and built on ideas that
+John McCarthy had been working on over the previous couple of years.
+The first implementation was completed 1959. This
+original work was done on an IBM 704 computer.
+\begin{figure}
+\begin{center}
+\includegraphics[width=4.5in]{ibm-704-columbia.eps}
+\end{center}
+\caption{and IBM 704 computer. This photo is from the Columbia University
+Archive.}
+\end{figure}
+It could execute
+up to 40,000 instructions per second. At the time of their introduction
+IBM 704 computers had 4K (36-bit) words of memory -- in other words
+18 Kbytes of memory. By the time that model was withdrawn, and transistorised
+computers took over, the available memory option had grown to 32K words
+(144 Kbytes). Most such computers were rented (possibly for ``under \$50000
+per month'') but to buy one would have set you back several million (1950s)
+dollars. Inflation since the mid 1950s means that any prices from then
+need to be multiplied by about 8 to get a realistic figure for today.
+
+% See  http://www.columbia.edu/cu/computinghistory/1965.html for
+% photos of IBM704 that might be readily licensable.
+
+If I compare the IBM 704 from 1957 with one of the cheapest options
+available in 2012\footnote{The Raspberry Pi model B} today's machine
+gas not far short of 2000 times as much memory, runs perhaps 15000 times
+faster and the cost has gone down by a factor of perhaps half a million!
+
+There are many variants on time-lines for the development of programming
+languages. Some people treat the ``idea'' as setting a date that
+establishes priority, some look at the initial reasonably complete
+implementation, while yet others view publication as the key milestone.
+But however you look at things you will find that FORTRAN came first, with
+Lisp and Algol almost in a tie for second place and COBOL third among
+languages that have in any sense lasted.
+
+These early languages have all obviously had influences on developments
+that have followed. However there is scope for disagreement and interpretation
+about just where the links have been Strong enough to be worth noting. So
+what indicate here is my view, slanted by the fact that I am wishing to
+promote Lisp at present.
+
+FORTRAN has as its linguistic successors FORTRAN IV, '66, '77, '90, '95 and
+now 200, 2003 and 2008. Each of those dates indicates a formal international
+standard, and the language has clearly remained vibrant and supported. However
+about the only language that can really be held to have been derived from
+or even dramatically influences by FORTRAN was PI/I (now no longer in use). It
+could perhaps be said that FORTRAN should take it share of the blame for
+BASIC. However even if the FORTRAN language has not proved influential its
+implementation has been. In particular there are two crucial legacies from
+it. The first is the concept of being able to compile bodies of code
+independently and form a library containing code that you can re-use with
+your next complete program. The second is the technology for seriously
+clever optimising compilers: ideas pioneered in FORTRAN form the basis
+of a large proportion of modern compilers.
+
+Algol was originally the International Algorithmic Language. Algol 58 was soon
+succeeded by Algol 60, which might reasonably be characterised as the
+first ``modern'' programming language. Algol as such has fallen out of
+use, but there is a rich stream of languages that are unambiguously
+successors. In one direction Pascal took Algol and emphasised particular
+structures styles of programming. Pascal has Modula and Delphi among its
+more obvious successors. In a parallel set of developments CPL extended
+Algol with a view to becoming a universal language capable of supporting
+all areas of computation. The CPL project spawned BCPL (a severe simplification
+of CPL initially mainly for use in writing the CPL compiler), and this
+let via B to the major language C. C++ builds on and extends C, and
+Java can be seen as a reaction to C++, and yet beyond that C\# and Scala
+are both reactions to Java. All in all Algol has been a truly major
+influence on program language syntax, and on the manner in which
+variables are declared and the scope within which they may be accessed.
+
+That leaves Lisp. As a language Lisp can be viewed as being
+something of a living fossil, inhabits niches and being used in slightly
+specialist areas. Well actually Lisp has always been something of a language
+for special purposes! With both Fortran and Algol there were substantial
+changes to syntax made between the original languages and the ones 
+that are their current descendants. Lisp on the other hand still looks
+very much as it did. Various dialects and variants have arisen (and in many
+cases then vanished) but they all share a truly distinctive syntax where
+programs are held together with lots of parentheses. A modern Lisp
+is liable to be bigger and meaner and have many more teeth than the
+primordial Lisp 1.5, but the family resemblance will be strong. One reason for
+this is that Lisp has never had much special syntax for anything -- it
+just uses its standard parenthesis-rich notation. This leads to huge
+flexibility in that adding new features will not conflict with existing
+notation. One way in which this has been described is attributed to
+Joel Moses and appears in the archives in a number of forms. There are
+also assertions that Moses denies having ever said it -- but that does not
+that seriously undermine its essential truth:
+{\em \begin{quotation}
+A language such as APL is like a diamond. It is perfectly symmetric,
+and shines brightly. However, if you wish to add a new feature to the
+language, the symmetry is smashed, and the diamond cracks and shatters.
+
+Lisp, on the other hand, is a ball of mud. Essentially shapeless,
+you can easily add new extensions and ideas, and all you get is a
+larger ball of mud ready and able to accept more and more.
+Lisp is infinitely extensible: you can add new functions that have
+exactly the same importance to the system as the built-in commands,
+or even redefine the built-in commands. You can, if you feel that
+way inclined, redefine the whole syntax. Imagine the possibilities
+if C allowed you to redefine the while loop, or Fortran let you
+introduce exactly that form of DO loop that you required
+for your application.
+\end{quotation}}
+The above is supposed to be alluded to in Steele and Gabriel's paper
+on Lisp Evolution\cite{Evolution}, but it is not visible in the copies
+I have located to date! The version quoted comes via Padget\cite{Padget}.
+
+The key features that make Lisp what it is are
+\begin{description}
+\item[Primitive syntax:] In Lisp pretty well the only syntax used is
+one where the name of a function and the sequence of its arguments are
+enclosed in parentheses. Thus $3*x + 5$ is expressed as
+{\tx (plus~(times~3~x)~5)}. This scheme favours consistency over
+conciseness. When Lisp was first being invented it was imagined that
+a more conventional human-friendly notation would be provided, but the
+``all brackets'' notation caught on and has remained basically
+unchanged.
+\item[Lists as data:] The sorts of data you can work with in Lisp include
+numbers and strings, but also symbols and lists of items. Lists can be nested
+arbitrarily. List structures are used to model records, trees and pretty
+well any other sort of data you might find in a more modern language. This
+means that to get started with Lisp you only have to think about a few simple
+sorts of data. Alan Perlis\cite{perlis} suggested that ``It is better to have 100
+functions operate on one data structure than 10 functions on 10
+data structures'' and Lisp follows this recommendation.
+\item[Code can be treated as data:] It goes beyond coincidence that the syntax
+of Lisp uses parentheses and its notation for list data is the same: Lisp code
+can be regarded as Lisp data and vice versa. Thus the language makes it
+easy for programmers to think about code analysis or synthesis. Modern
+languages such as Java have introduces standard ways in which one piece
+of code can inspect another (calling if {\em reflection}): Lisp has
+always made that not just possible but natural and easy.
+\item[Types only matter at run-time:] Lisp will complain if you try to
+add a number to a string, or to otherwise breach good taste as regards the
+use of its data-types. But this complaint only happens when you run your code.
+There is typically no checking made at the time you define functions or
+otherwise present your code to the system. Depending on your point of view
+this either gives you a lot of flexibility or represents a serious risk of
+allowing bugs to remain undetected. If you are using Lisp as the inner basis
+for the implementation of a new programming language the flexibility
+arguments can really win.
+\item[Mostly Functional:] A complete Lisp program is created by defining
+a collection of little functions. A tradition and style in Lisp has grown
+up where often all of these really behave as functions in the mathematical
+sense of that word. They accept arguments and deliver a result, and that
+result only depends on the arguments not on any context or history.
+This style of programming has been found useful by those who wish to
+formalise things to the level of producing mathematical proofs of their
+code, but along with the use of recursion it turns out to lead to
+nice human-comprehensible ways of expressing the solution to many
+programming tasks.
+\item[Automatic storage management:] Lisp programs create new lists,
+process them and eventually move on such that they do not need that data
+any more. It is fundamental to Lisp that the system takes care of recycling
+discarded data and hence the programmer never needs to worry about it. This
+is an arrangement that has only rather recently found its way into
+other widely-used languages.
+\item[An extensible language:] When you start up Lisp and define a collection
+of new functions they take their place alongside all the existing ones that
+were built into the system from the start. If you have a fragment of Lisp
+code such as {\tx(obscure\_function\_name~argument\_1)} you are just using
+the standard Lisp notation for a function invocation. There is no distinction
+at all made as to whether {\tx obscure\_function\_name} was a built-in function
+or one you had defined yourself. So as you define new functions you can often
+think of what you are doing as extending the language. If you need new
+capabilities from the operating system you can often merely implement
+a function in Lisp to access them, and again once it is there its status is
+just the same as that of all other Lisp functions. Compare this with other
+typical programming languages where for instance characters such
+as ``{\tx +}'' and words such as ``{\tx while}'' probably have rather
+special status.
+\end{description}
+
+There are some things that Lisp perhaps does not emphasise. Well on saying
+that it will perhaps be safer to say ``Lisp as discussed here does not
+emphasise'' since there can be particular Lisp implementations with all sorts
+of specialisms! The topics listed here could sometimes be represented
+as disadvantages or limitations of Lisp, and so in each case I will
+indicate the way in which a dedicated Lisp fanatic turns the point on its head
+to reveal a silver lining.
+
+\begin{description}
+\item[Human-readable syntax:] There are some who believe that the Lisp notation
+is at best antiquated and could reasonably be described as barbaric. Valid
+Lisp code can end up looking really bad. For instance and as a very small
+example here is a factorial function written first in Lisp and them
+in the tidy language SML\cite{SML}.
+{\small\begin{verbatim}
+   (de factorial (x) (cond ((equal x 0) 1) (t (times
+   x (factorial (difference x 1))))))
+\end{verbatim}}
+\noindent and then
+{\small\begin{verbatim}
+   fun factorial 0 = 1
+     | factorial n = n * factorial(n-1);
+\end{verbatim}}
+The Lisp version is bulkier, it uses long-winded names for
+even basic arithmetic operations and ensuring that you get exactly
+the right number of close brackets (six in this case) at the end could
+confuse almost anybody.
+
+There are several responses that a Lisp fanatic will give to this. The
+first is that Lisp code should be properly laid out, and that a competent
+text editor can help with both indentation and bracket matching so that
+neither are a real burden on any serious user. There will be shorter
+functions to cover some common cases, so the Lisp code should have been
+shown as
+{\small\begin{verbatim}
+   (de factorial (x)
+      (cond
+         ((zerop x) 1)
+         (t (times x (factorial (sub1 x))))))
+\end{verbatim}}
+This is still perhaps bulky, buts its structure is now easy to see. Indentation
+and bracket counting are so easy to mechanise that it is silly to fuss about
+them -- but anybody who can not cope with the bracketed notation could layer
+a parser on top of Lisp so that their favourite syntax gets mapped onto
+Lisp's internal form. Almost any compiler will have an internal form
+of parse-trees that is essentially very much like native Lisp code anyway
+so this is not a big deal. As a concrete example of a case where this
+approach has been taken, the Reduce algebra system\cite{Reduce} has its
+own language, known as {\tx rlisp}, used in exactly this way -- here is our
+factorial example written in {\tx rlisp}.
+{\small\begin{verbatim}
+   symbolic procedure factorial x;
+      if x = 0 then 1
+      else x * factorial(x-1);
+\end{verbatim}}
+
+\item[Absolute code portability:] There are many programming languages
+where if you write a program you can expect (or at least hope!) it will
+run everywhere without modification. Java is a fine example of a language
+where this virtue was made a key marketing point. With Lisp there is
+an international standard -- Common Lisp\cite{ANSILisp} -- but if
+you fetch and install an implementation of Common Lisp you will find that
+at some stage you will need to find out about the limitations and the
+extensions applicable to the version you selected. The earlier and
+perhaps more primitive Standard Lisp\cite{StdLisp1}\cite{StdLisp2} are the
+basis for the \vsl system used here. Lisp is used as an embedded extension
+language for the widely-used {\tx emacs} editor, and a web-search will
+easily reveal a number of other versions with subtly or crudely differing
+capabilities.
+
+The Lisp fanatic response to this is that the exact names that a Lisp system
+uses for some operation is very much a secondary issue. A few Lisp
+definitions can provide whatever {\em name} you need provided that the
+underpinning capability is present. So for instance (and as an approximation
+to what would really be needed) you could go
+{\small\begin{verbatim}
+   (de + (a b) (plus a b))
+\end{verbatim}}
+\noindent and subsequently use ``{\tx +}'' rather then ``{\tx plus}'' to
+add numbers. If you thing of building Lisp code as extending Lisp then
+if you start from a slightly different Lisp dialect then you merely
+start with a few definitions that are there to provide whatever compatibility
+you need. This attitude then reduces the whole discussion to merely a stand-off
+between those who believe that a ``proper'' Lisp should have almost every
+capability that is in any way supportable by your computer and those who
+prefer a smaller simpler system that just provides enough for the application
+area that interests them.
+\item[Strong data types:] Software Engineers will emphasis the benefits of
+strict compile-time type checking as a crucial aid to the construction of
+reasonably reliable code. A Lisp fanatic\footnote{There are some languages
+that tend to breed or collect fanatics, and Lisp is undoubtedly one such.}
+responds by citing the convenience of Lisp for rapid prototyping. They can
+point out that Lisp's natural ability to inspect Lisp code (because code and
+data share a single representation) leads to ease in creating custom tools to
+analyse code, and that at least sometimes that has been deployed to help
+with code robustness. And finally they will point to the way in which
+all Lisp data has a printed representation, and so tracing and debugging
+Lisp code will be so much nicer than the corresponding experience when
+using other languages -- so a few extra bugs may not matter that much!
+\item[Performance:] Is Lisp a ``fast'' programming language? Well one thing
+is unquestionably the case: The \vsl implementation is {\em slow} compared
+to most other languages you might use -- but that is a consequence of it
+emphasising conciseness over almost everything else. If Lisp code is written
+without regard to performance it will probably not run especially fast,
+but masters of the language using top-end Lisp implementations can coax
+benchmarks in Lisp to beat almost any other language. Looking at the
+raw power of even the cheapest computers today it seems reasonable to
+accept the Lisp realist's view that most Lisp code will run somewhat slower
+than code written in C or Fortran, but that these days it will be truly
+rate to find a situation where this matters.
+\item[Linguistic correctness:] From the very start Lisp has been a pragmatic
+language providing capabilities to let people ``get the job done''. In its
+early days it was towards the forefront of adhering to principles of
+correctness. One early illustration of this attitude was the Ph.D. work
+of Michael Gordon\cite{MJCG} who noted that a relatively obscure
+feature ({\tx label}) in Lisp 1.5 had a semantically inconvenient (and
+so arguably incorrect) definition. However mainstream Lisps have continued
+to include various imperative and destructive capabilities, and to varying
+extents have left in ugliness. Scheme\cite{Scheme} is a spin-off language
+that made a serious attempt to tidy things up, and Common Lisp insists (for
+instance) that interpreted and compiled code should behave in exactly the
+same way -- while other systems accept incompatibilities over this and over
+the dynamic scoping of variable bindings so as to achieve simpler or
+faster implementations.
+\item[Object Orientation:] The Common Lisp Object System is a part of ANSI
+Common Lisp, however it is rather substantially different from the Object
+models present in other programming languages. Lisp fanatics naturally
+view it is greatly superior! Perhaps the most specific claims for it will
+be that its meta-object protocol provides exceptional flexibility when
+developing and them maintaining code. To others its support for multiple
+inheritance and the fact that it does not enforce encapsulation mean that
+many of the features that could make Object Orientation a foundation for
+reliable code and missing from it. So on the spirit of Lisp being a ball
+of mud, many versions of it have embraced object orientation, but it still
+seems fair to suggest that the core ways of using Lisp are closer to being
+Functional then Object Oriented. 
+\item[Real-time and Windowed:] Some (but not all) implementations of Common Lisp
+support the Common Lisp Interface Manager which is a window managing
+library allowing programmers to create modern user interfaces. Other systems
+may have their own support for events and windows. Again in the spirit of the
+ball of mud one can never say that Lisp is incapable of anything! However
+historically this is not one of the areas of Lisp key competence, and
+even more not one where smooth portability from one Lisp to another can
+be guaranteed. In the early years Lisp was heavily used in Artificial
+Intelligence work, specifically including the control of robots. For these
+any pause in its working could be extremely visible as a pause or judder
+in the robot's movements. This led to severe concern about real-time
+responsiveness, and some Lisp implementations put much effort into
+achieving it. As computers have become (much) faster most of the worries
+on this front have faded, but it is still the case that if you need
+strict real-time responses you will need not only a specialist Lisp
+implementation but a specialist real-time operating system for it to run
+on top of.
+\end{description}
+
+Lisp was originally envisaged as a notation for writing programs in the
+area of Artificial Intelligence. While its use spread some way
+beyond that, it is still the case that some of the most striking
+examples of big programs written in Lisp have been to manipulate
+algebraic formulae, perform logical reasoning, control autonomous
+robots and analyse natural language. Since then it has been applied in
+almost all areas. As a final characterisation of its status and importance
+consider Greenspun's Tenth Rule of Programming\cite{greenspun}:
+{\em \begin{quotation}
+Any sufficiently complicated C or Fortran program contains an ad hoc,
+informally-specified, bug-ridden, slow implementation of half of Common Lisp. 
+\end{quotation}}
+so understanding Lisp makes sense for when you end up needing to write
+or maintain that complicated other program that is notionally written
+in a quite different language. And \vsl certainly contains a slow
+implementation of at least parts of Common Lisp.
+
+
