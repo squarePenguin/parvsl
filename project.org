@@ -1,0 +1,153 @@
+#+TITLE: Parallelism in Lisp
+#+AUTHOR: Andrei Vlad Badelita
+
+DISCLAIMER: This document will be used as a scratchpad for documenting
+my work on the project. It will be quite erratic and disorganised.
+
+* Progress
+
+*** TODO Write proposal
+*** TODO write first draft
+
+
+A lisp implementation with multi-threading support. To be used
+in REDUCE to implement parallel numerical algorithms.
+
+<2018-09-30 Sun 12:47>
+
+Looks like I am going to use VSL, the lightweight implementation.
+It is lighter(4k lines of code) and interpreted, but also slower.
+Still it allows benchmarks etc. 
+
+It already provides a conservative GC. I will augment that to support
+multiple-threads, using a stop-the-world approach. 
+
+* Proposal
+
+Subject: Phase 1 - Badelita: Implementing Parallelism in Lisp for REDUCE
+
+Phase 1 Project Selection Status Report
+
+Name: Andrei-Vlad Badelita                                                      
+
+College: Trinity                                       
+
+User Identifier: avb40                                             
+
+Director of Studies: Dr. Arthur Norman, Prof. Frank Stajano                                          
+
+Please complete 1, 2 and 3 below.
+
+1. Please write 100 words on your current project ideas.
+                                                                 
+The aim of the project is to add multi-threading support to a
+Lisp implementation used by the REDUCE Algebra System. 
+Currently Lisp is used as a backend, however it offers no
+support for parallel algorithms. The particular Lisp implementation 
+consists of about 4000 lines of C code. I will augment this code 
+in C++11, which offers native multi-threading support, making it 
+relatively easy to keep cross-platform compatibility. The current 
+code will require  modifications to ensure it is thread-safe, 
+the garbage collector being a particularly interesting case. 
+I will attempt to make these modifications without adding a 
+noticable overhead to existing sequential code, using the current 
+REDUCE tests as regression tests and benchmarks. Then I will rewrite 
+a few of the numberical algorithms that are inherently parallelisable 
+and perform further testing to assess the improvements in performance. 
+
+2. Please list names of potential project supervisors.
+                                                                 
+Dr. Arthur Norman has agreed to supervise me on this project.           
+
+3. Is there any chance that your project will involve any
+computing resources other than the Computing Service's MCS and
+software that is already installed there, for example: your own
+machine, machines in College, special peripherals, imported
+software packages, special hardware, network access, substantial
+extra disc space on the MCS.
+
+If so indicate below what, and what it is needed for.
+                                                                 
+I will not require any additional resources. I will prepare
+and compile the project on my laptop.
+  
+* First draft
+
+1. Setting up the project
+  a. Setup build and test environment
+  b. Run tests on starting version of the code
+  c. Check code thread-unsafe patterns
+2. Reimplement garbage collector
+  a. work in chunks
+  b. make sure sequential code still works 
+3. Implement multi-threading primitives
+  a. Functions to start a thread, wait for one etc
+  b. Write simple tests to check that they work
+  c. NB: at this point the code is still not thread-safe
+4. Wrap up and test against old tests
+  a. Check benchmark and optimise etc
+5. Implement primitives
+  a. Mutexes, condition variables
+  b. These will be pass-through to C++ function
+6. Read about computer algaebra algorithms
+  a. Need to check existing algortihms and which ones
+  can be improved with multi-threaded versions
+  b. Write new tests and see how they perform
+7. More testing 
+8. 
+9. 
+10. Finishing the project report
+
+* Arthur
+
+Computer algebra should benefit from parallel algorithm.
+SO far:
+SPecial purpose program for a calculation
+- some course grained parallelism on clusters of machine
+today every computer is multicore
+Commercial: Mathematica, Maple
+Special purpose: 
+General: Maxima, Axiom and Reduce
+
+Lispy bit is just a kernel(for all of them)
+
+THe other two don't support threading
+Common Lisp supports it and CLisp, but neither is used by the other two
+
+Two add cocnurency to the big lisp is difficult
+BUt it turns out it can run on VSL. which has historically been used for
+experiments
+
+VSL can bootstrap PSL.
+
+Proof of concept.
+
+1. Arrange concurrency at lisp level
+2. See how it's reflected in reduce for CAS
+
+Evaluation can be a succession of things:
+Demonstration  that storage can be done in parallel
+Test storage allocation without actually running lisp; from C
+
+Then the program is in Lisp not in C. BUt no inter-process
+
+THen add inter-process and see if it works. Use example from concurrency course.
+
+Implement a work queue with several concurrent workers.
+
+Later I can see interesting things to put in.
+
+In CAS:
+1. Polynomial factorisation
+take all but one of the variables and substitute int values
+now you have one univariate polynomial over finite field with p elements
+use linear algebra algorithm (berlikamp's)
+from the factors that are correct md p
+get too many factors
+combinatorial search to find correct way of sticking them together
+2. Groebner basis
+string rewrtites(replace parts of string)
+but rewrites are not confluent
+you can always* add some rewrites so that sequence is confluent
+add some rules to complete it 
+knuth bendix completion
