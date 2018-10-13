@@ -1,6 +1,16 @@
 # Tex files
 _region_*
 
+*.aux
+*.log
+
+vsl
+*.idx
+*.img
+*.ind
+*.toc
+*.gz
+
 # Prerequisites
 *.d
 
