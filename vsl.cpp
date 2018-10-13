@@ -259,10 +259,10 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 #define isEQHASH(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH))
 #define isEQHASHX(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX))
 
-// The Lisp heap will have fixed size. Here I make it 8192 Mbytes.
+// The Lisp heap will have fixed size.
 
 #ifndef MEM
-#define MEM 8192
+#define MEM 64
 #endif // MEM
 
 #define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))

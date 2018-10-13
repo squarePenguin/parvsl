@@ -1,8 +1,7 @@
 # Makefile for vsl
 
-#CFLAGS = -O0 -g -Wall -static
-#CFLAGS = -O3 -Wall -static
-CFLAGS = -O3 -Wall
+CFLAGS = -O0 -g -Wall
+#CFLAGS = -O3 -Wall
 
 ifeq ($(shell uname -o),Cygwin)
 LIBS=-lm -lz -ledit -lncurses
@@ -26,6 +25,23 @@ reduce:	vsl
 	./vsl -z -ireduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
+
+# rcore is a core of Reduce and I can get this far with a 64M heap
+# without triggering a disaster...
+
+rcore:	vsl
+	mkdir -p rcore.img.modules
+	rm -f rcore.img.modules/* rcore.img inline-defs.dat
+	./vsl -z -ircore.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildrcore.lsp | tee rcore.log
+
+step2:	vsl
+	cp rcore.img step2.img
+	cp -r rcore.img.modules step2.img.modules
+	./vsl -istep2.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		step2.red | tee step2.log
 
 testlogs/%.log:
 	./test.sh $@
