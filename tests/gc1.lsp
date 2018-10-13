@@ -1,0 +1,7 @@
+(reclaim)
+(print "first done")
+(reclaim)
+(print "second done")
+(reclaim)
+(print "finishing")
+(stop 0)
