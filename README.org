@@ -1,3 +1,13 @@
-# parvsl
+* parvsl
 
-Nothing here yet, other than the draft.
+* Setup
+
+While this project can be compiled stand-alone
+
+#+BEGIN_SRC bash
+svn checkout https://svn.code.sf.net/p/reduce-algebra/code/trunk reduce-algebra-code
+cd reduce-algebra
+git clone https://github.com/squarePenguin/parvsl.git
+make vsl
+./vsl -z
+#+END_SRC

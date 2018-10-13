@@ -1,7 +1,8 @@
 # Makefile for vsl
 
 #CFLAGS = -O0 -g -Wall -static
-CFLAGS = -O3 -Wall -static
+#CFLAGS = -O3 -Wall -static
+CFLAGS = -O3 -Wall
 
 ifeq ($(shell uname -o),Cygwin)
 LIBS=-lm -lz -ledit -lncurses

@@ -1824,6 +1824,7 @@ void wrch(int c)
 static bool stdin_tty = false;
 static EditLine *el_struct;
 static History *el_history;
+static HistEvent el_history_event;
 
 #define INPUT_LINE_SIZE 256
 static char input_line[INPUT_LINE_SIZE];
@@ -1846,6 +1847,8 @@ int rdch()
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s = el_gets(el_struct, &n);
+                // Need to manually enter line to history.
+                history(el_history, &el_history_event, H_ENTER, s);
                 if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
                 strncpy(input_line, s, n);
@@ -6070,26 +6073,33 @@ void write_image(gzFile f)
     }
 }
 
-static void el_tidy()
-{   el_end(el_struct);
+static void el_tidy() {
+    el_end(el_struct);
     history_end(el_history);
 }
 
-char the_prompt[40] = "> ";
+char the_prompt[] = "> ";
 
 static char *get_prompt(EditLine *el)
 {   return the_prompt;
 }
 
-int main(int argc, char *argv[])
-{   stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
-    if (stdin_tty)
-    {   el_struct = el_init("vsl", stdin, stdout, stderr);
+void setup_prompt() {
+    stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
+    if (stdin_tty) {
+        el_struct = el_init("vsl", stdin, stdout, stderr);
         el_history = history_init();
+
         atexit(el_tidy);
+        history(el_history, &el_history_event, H_SETSIZE, 1000);
         el_set(el_struct, EL_PROMPT, get_prompt);
         el_set(el_struct, EL_HIST, history, el_history);
     }
+}
+
+int main(int argc, char *argv[])
+{
+    setup_prompt();
     const char *inputfilename = NULL;
     void *pool;
 //@@#ifdef DEBUG
