@@ -6094,6 +6094,7 @@ void setup_prompt() {
         history(el_history, &el_history_event, H_SETSIZE, 1000);
         el_set(el_struct, EL_PROMPT, get_prompt);
         el_set(el_struct, EL_HIST, history, el_history);
+        el_set(el_struct, EL_EDITOR, "emacs"); // perhaps more intuitive than vim
     }
 }
 
