@@ -26,6 +26,13 @@ reduce:	vsl
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
 
+debug_reduce:	vsl
+	mkdir -p reduce.img.modules
+	rm -f reduce.img.modules/* reduce.img inline-defs.dat
+	cgdb --args ./vsl -z -ireduce.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce.lsp | tee reduce.log
+
 # rcore is a core of Reduce and I can get this far with a 64M heap
 # without triggering a disaster...
 

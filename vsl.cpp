@@ -1,4 +1,4 @@
-// Things to work on...
+// Things to think about
 
 
 //    heap allocated in segments hence dynamically expandable.
@@ -242,6 +242,7 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 // Fixnums and Floating point numbers are rather easy!
 
 #define qfixnum(x)     (((intptr_t)(x)) >> 3)
+// NB that C++ makes this undefined if there is overflow!
 #define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
 
 #define MIN_FIXNUM     qfixnum(INTPTR_MIN)
@@ -262,7 +263,7 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-#define MEM 64
+#define MEM 128
 #endif // MEM
 
 #define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))
@@ -498,7 +499,7 @@ static inline int inheap2(uintptr_t x)
 //    0     1    [while in GC] used to be a float, but now has been
 //               copied to the second heap, so a cell containing a
 //               floating point forwarding address.
-//    0     0    unused space, or one of the non-inital calls of a
+//    0     0    unused space, or one of the non-inital cells of a
 //               cons, symbol or vector.
 
 static inline void setheapstarts(uintptr_t x)
@@ -1211,6 +1212,7 @@ printf("n = %" PRIxPTR " base = %" PRIxPTR " end = %" PRIxPTR "\n", n, mem_base,
 
 
 extern void ensureheap2space(uintptr_t len);
+static uintptr_t space_used = 0;
 
 void inner_reclaim(LispObject *C_stack)
 {
@@ -1223,8 +1225,8 @@ void inner_reclaim(LispObject *C_stack)
     uintptr_t i;
     uint32_t *wmap;
     LispObject pp;
-    npins = heap2_pads = 0;
-    printf("+++ GC number %d", gccount++);
+    npins = heap2_pads = space_used = 0;
+    printf("+++ GC number %d ", gccount++);
     for (i=0; i<nblocks; i++)
     {   block_header *b = (block_header *)blocks[i];
         clearpinned(b);
@@ -1243,11 +1245,7 @@ void inner_reclaim(LispObject *C_stack)
     fringe2 = ((block_header *)blocks_by_age[0])->h2base;
     limit2 = ((block_header *)blocks_by_age[0])->h2top;
     heap2_freechain = packfixnum(0);
-// I will not want to treat anything in the private data structure
-// heap2_pinchains as a candidate for pinning, since it will want to
-// be discarded at the end of this garbage collection. I can arrange that
-// by temporarily removing the "object starts" flags on each cell.
-    for (pp=heap2_pinchain; isCONS(pp); pp=qcdr(pp)) resetheapstarts(pp);
+//
 // Now scan the stack (ie the ambiguous bases) looking for a reference
 // to the start of an object in heap1 that has not alread been pinned.
 // When I find one I pin it and add it to heap2_pinchain.
@@ -1264,11 +1262,21 @@ void inner_reclaim(LispObject *C_stack)
 // secure in the knowledge that program counters and return addresses
 // that reference into it will be coped with gracefully.
         if (inheap1(a))
-        {   a &= ~(LispObject)TAGBITS;
-// The next lne is goingto assume that the very first location in any heap
+        {
+            a &= ~(LispObject)TAGBITS;
+// The next line is going to assume that the very first location in any heap
 // section has its "starts" bit set, and so the loop can never zoom down and
 // drop beyond the bottom of a segment.
-            while (!getheapstarts(a)) a -= 8;
+            block_header *block_a = find_block(a);
+            LispObject initial_a = a;
+            while (!getheapstarts(a))
+            {
+                a -= 8;
+                block_header *block_b = find_block(a);
+                assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
+                assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
+            }
+if (initial_a == 123456) printf("ook\n"); // to get it used.
             if (!getpinned(a))
             {   LispObject h;
 // ensureheapspace is here to arrange to skip past any of the pinned items
@@ -1297,14 +1305,13 @@ void inner_reclaim(LispObject *C_stack)
             }
         }
     }
-//-- // Now as a matter of being tidy I will re-instate the "object start"
-//-- // information for cells in heap2_pinchain. Actually since I will
-//-- // not attempting any linear scan of heap1 I do not think I need to
-//-- // do this. However it is fairly cheap and it gives me the advantage
-//-- // that I could do better diagnostic consistency checking on heap1
-//-- // if debugging called for it.
-//--     for (pp=heap2_pinchain; isCONS(pp); pp=qcdr(pp)) setheapstarts(pp);
-//    
+// I will not want to treat anything in the private data structure
+// heap2_pinchains as a candidate for pinning, since it will want to
+// be discarded at the end of this garbage collection. Well it may have
+// just been pinned, so here I will go through an unpin it!
+//-    for (pp=heap2_pinchain; isCONS(pp); pp=qcdr(pp))
+//-    {   resetpinned(pp);
+//-    }
 // Now all pinned items are recorded in heap1_pinchain or heap2_pinchain.
 // Ones in heap1 can be identified because they have a pinned bit. Those
 // in heap2 can be identified just on the basis of having a start bit.
@@ -1393,7 +1400,11 @@ void inner_reclaim(LispObject *C_stack)
 // expand the heap, in a way that will typically double its size.
 // The choice of a target of keeping the half-space between (1/4) and
 // (1/2) full is a policy that could be tuned if need be,
-        if (used > avail/2 && nblocks < 16)
+
+//
+// @@@ Well I will disable this just for now...
+//
+        if (false && used > avail/2 && nblocks < 16)
         {   uint64_t w, w1;
             b = (block_header *)blocks_by_age[nblocks-1];
             w = b->halfbitmapsize;
@@ -1449,11 +1460,11 @@ void inner_reclaim(LispObject *C_stack)
             }
         } 
     }
-    printf(" - collection complete\n");
+    printf("- collection complete\n");
     printf("Pins = %" PRIuPTR
            " heap1_pads = %" PRIuPTR
-           " heap2_pads = %" PRIuPTR "\n",
-           npins, heap1_pads, heap2_pads);
+           " heap2_pads = %" PRIuPTR " total used = %" PRIuPTR "\n",
+           npins, heap1_pads, heap2_pads, space_used);
     heap1_pads = 0;
     fflush(stdout);
 }
@@ -1475,6 +1486,7 @@ void check_space(int len, int line)
         {   reclaim(line);
             continue;
         }
+// here fringe1+len < limit1
         for (i=0; i<len; i+=8)
             if (getheapstarts(fringe1+i)) break;
         if (i >= len) return; // success
@@ -1620,6 +1632,7 @@ static inline LispObject copy(LispObject x)
 //          if (heap2_freechain != packfixnum(0))
 //              @@@@
             ensureheap2space(2*sizeof(LispObject));
+            space_used += 2*sizeof(LispObject);
             setheapstarts(fringe2);
             qcar(fringe2) = h;
             qcdr(fringe2) = qcdr(x);
@@ -1632,6 +1645,7 @@ static inline LispObject copy(LispObject x)
             if (isFORWARD(h)) return (h - tagFORWARD + tagSYMBOL);
             assert(isHDR(h));
             ensureheap2space(SYMSIZE*sizeof(LispObject));
+            space_used += SYMSIZE*sizeof(LispObject);
             setheapstarts(fringe2);
             h = fringe2 + tagSYMBOL;
             qflags(h) = qflags(x);
@@ -1661,6 +1675,7 @@ static inline LispObject copy(LispObject x)
             assert(isHDR(h));
             o = ALIGN8(sizeof(LispObject) + veclength(h));
             ensureheap2space(o);
+            space_used += o;
             setheapstarts(fringe2);
             o -= sizeof(LispObject); // space used by header word
             switch (h & TYPEBITS)
@@ -1696,6 +1711,7 @@ static inline LispObject copy(LispObject x)
             else
             {   resetheapstarts(x);
                 ensureheap2space(8);
+                space_used += 8;
                 setheapstartsandfp(fringe2);
                 h = fringe2 + tagFLOAT;
                 fringe2 += 8;
@@ -1725,6 +1741,11 @@ static inline LispObject copycontent(LispObject s)
 // be forwarding pointers there. The only case where I call copycontent
 // on something in heap1 is when it is pinned, and in that case it should
 // not be forwarded either.
+// @@@ But if I had allowed the old pinchain there to get itself pinned
+// I could be in trouble and find a forwarding pointer, so in the degenerate
+// case I see that I will suppose I can "do nothing" and set the wild location
+// to nil..
+    if (isFORWARD(h)) return nil;
     assert(!isFORWARD(h));
     if (!isHDR(h)) // The item to be processed is a simple cons cell
     {   qcar(s) = copy(h);
@@ -1976,6 +1997,8 @@ void internalprint(LispObject x)
 #undef RAWSTRING
                         return;
                     case typeBIGNUM:
+// At present the case typeBIGNUM is merely a fixed-precision 64-bit case,
+// which is not very adventurous!
                         sprintf(printbuffer, "%" PRId64, qint64(x));
                         checkspace(len = strlen(printbuffer));
                         for (i=0; i<len; i++) wrch(printbuffer[i]);
@@ -1983,8 +2006,23 @@ void internalprint(LispObject x)
                     case typeVEC:
                     case typeEQHASH:
                     case typeEQHASHX:
+                        if ((qheader(x) & TYPEBITS) == typeEQHASH)
+                        {   checkspace(3);
+                            wrch('#');
+                            wrch('H');
+                        }
+                        else if ((qheader(x) & TYPEBITS) == typeEQHASHX)
+                        {   checkspace(3);
+                            wrch('#');
+                            wrch('h');
+                        }
                         sep = '[';
-                        for (i=0; i<veclength(qheader(x))/sizeof(LispObject); i++)
+                        len = veclength(qheader(x))/sizeof(LispObject);
+                        if (len==0)
+                        {   checkspace(1);
+                            wrch('[');
+                        }
+                        else for (i=0; i<len; i++)
                         {   checkspace(1);
                             wrch(sep);
                             sep = ' ';
@@ -2641,9 +2679,13 @@ LispObject evlis(LispObject x)
 
 LispObject eval(LispObject x)
 {
-//- if (isCONS(x))
-//- {  printf("eval: "); print(qcar(x)); // Eek! @@@@
-//- }
+#ifdef TRACEALL
+    if (isCONS(x))
+    {  printf("eval: "); print(qcar(x)); // Eek! @@@@
+    }
+#endif
+    const char *fname = "unknown";
+    if (isCONS(x) && isSYMBOL(qcar(x))) fname = qstring(qpname(qcar(x)));
     while (isCONS(x) && isSYMBOL(qcar(x)) && (qflags(qcar(x)) & flagMACRO))
     {   LispObject fn = qcar(x);
         int traced = qflags(fn) & flagTRACED;
@@ -2667,13 +2709,7 @@ LispObject eval(LispObject x)
         }
     }
     if (isSYMBOL(x))
-    {
-// This is GRIM debugging!
-if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
-{  printf("x = %" PRIxPTR "\n", (uintptr_t)x);
-   return error1("Invalid address for variable", nil);
-}
-        LispObject v = qvalue(x);
+    {   LispObject v = qvalue(x);
         if (v == undefined)
         {   backtraceflag |= backtraceHEADER | backtraceTRACE; // @@@
             return error1("undefined variable", x);
@@ -2699,8 +2735,6 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
             }
             aa = qcdr(x);
 // Here I will evaluate all the arguments for the function.
-// @@@ need to respond to trace requests here... on both entry to
-// @@@ and return from functions.
             switch (n)
             {
             case 0:
@@ -2728,6 +2762,14 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
             case 1:
                 x = eval(qcar(aa));
                 if (unwindflag != unwindNONE) return nil;
+                if (flags & flagTRACED)
+                {   linepos += printf("Calling: ");
+                    errprint(f);
+                    if (unwindflag != unwindNONE) return nil;
+                    linepos += printf("Arg1: ");
+                    errprint(x);
+                    if (unwindflag != unwindNONE) return nil;
+                }
                 x = (*qdefn1(f))(qlits(f), x);
                 if (unwindflag == unwindBACKTRACE)
                 {   linepos += printf("Call to ");
@@ -2749,10 +2791,21 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                 if (unwindflag != unwindNONE) return nil;
                 aa = eval(qcar(qcdr(aa)));
                 if (unwindflag != unwindNONE) return nil;
+                if (flags & flagTRACED)
+                {   linepos += printf("Calling: ");
+                    errprint(f);
+                    if (unwindflag != unwindNONE) return nil;
+                    linepos += printf("Arg1: ");
+                    errprint(x);
+                    if (unwindflag != unwindNONE) return nil;
+                    linepos += printf("Arg2: ");
+                    errprint(aa);
+                    if (unwindflag != unwindNONE) return nil;
+                }
                 x = (*qdefn2(f))(qlits(f), x, aa);
                 if (unwindflag == unwindBACKTRACE)
                 {   linepos += printf("Call to ");
-                    errprint(f);
+                    errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
@@ -2773,6 +2826,20 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                     if (unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
+                    if (flags & flagTRACED)
+                    {   linepos += printf("Calling: ");
+                        errprint(f);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg1: ");
+                        errprint(x);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg2: ");
+                        errprint(a2);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg3: ");
+                        errprint(aa);
+                        if (unwindflag != unwindNONE) return nil;
+                    }
                     x = (*qdefn3(f))(qlits(f), x, a2, aa);
                     if (unwindflag == unwindBACKTRACE)
                     {   linepos += printf("Call to ");
@@ -2801,6 +2868,23 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                     if (unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
+                    if (flags & flagTRACED)
+                    {   linepos += printf("Calling: ");
+                        errprint(f);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg1: ");
+                        errprint(x);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg2: ");
+                        errprint(a2);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg3: ");
+                        errprint(a3);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg4: ");
+                        errprint(aa);
+                        if (unwindflag != unwindNONE) return nil;
+                    }
                     x = (*qdefn4(f))(qlits(f), x, a2, a3, aa);
                     if (unwindflag == unwindBACKTRACE)
                     {   linepos += printf("Call to ");
@@ -2832,6 +2916,26 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                     if (unwindflag != unwindNONE) return nil;
                     aa = evlis(qcdr(aa));
                     if (unwindflag != unwindNONE) return nil;
+                    if (flags & flagTRACED)
+                    {   linepos += printf("Calling: ");
+                        errprint(f);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg1: ");
+                        errprint(x);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg2: ");
+                        errprint(a2);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg3: ");
+                        errprint(a3);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg4: ");
+                        errprint(a4);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg5...: ");
+                        errprint(aa);
+                        if (unwindflag != unwindNONE) return nil;
+                    }
                     x = (*qdefn5up(f))(qlits(f), x, a2, a3, a4, aa);
                     if (unwindflag == unwindBACKTRACE)
                     {   linepos += printf("Call to ");
@@ -3758,6 +3862,15 @@ LispObject Lnull(LispObject lits, LispObject x)
     return (x == nil ? lisptrue : nil);
 }
 
+LispObject Llength(LispObject lits, LispObject a)
+{   size_t n = 0;
+    while (isCONS(a))
+    {   n++;
+        a = qcdr(a);
+    }
+    return packfixnum(n);
+}
+
 LispObject Leq(LispObject lits, LispObject x, LispObject y)
 {
     return (x == y ? lisptrue : nil);
@@ -3866,6 +3979,24 @@ LispObject Ldate(LispObject lits)
     today1[8] = today[23];
     today1[9] = 0;             // Now as in 03-Apr-09
     return makestring(today1, 10);
+}
+
+LispObject Llist2string(LispObject lits, LispObject a)
+{   size_t len = 0;
+    for (LispObject w=a; isCONS(w); w=qcdr(w)) len++;
+    LispObject r = allocateatom(len);
+    char *p = qstring(r);
+    while (isCONS(a))
+    {   int c;
+        LispObject w = qcar(a);
+        if (isFIXNUM(w)) c = qfixnum(w);
+        else if (isSYMBOL(w)) c = *qstring(qpname(w));
+        else if (isSTRING(w)) c = *qstring(w);
+        else c = '?';
+        *p++ = c;
+        a = qcdr(a);
+    }
+    return r;
 }
 
 LispObject Loblist(LispObject lits)
@@ -4071,6 +4202,7 @@ void rehash(LispObject x)
             b = cd;
         }
     }
+    if (isEQHASHX(x)) qheader(x) ^= (typeEQHASH ^ typeEQHASHX);
 }
 
 LispObject Lputhash(LispObject lits, LispObject x, LispObject y, LispObject z)
@@ -4618,10 +4750,17 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
+printf("Try to open <%s> mode %d:<%s>\n", filename, how,
+        how==3 ? "pipe" : how==1 ? "r" : "w");
     if (how == 3) f = popen(filename, "w");
     else f = fopen(filename, (how == 1 ? "r" : "w"));
-    if (f == NULL) return error1("file could not be opened", x);
+    if (f == NULL)
+    {   printf("errno = %d\n", errno);
+        return error1("file could not be opened", x);
+    }
+printf("file opened!\n");
     for (n=4; n<MAX_LISPFILES && lispfiles[n]!=NULL; n++);
+printf("use file slot %d (max=%d)\n", n, MAX_LISPFILES);
     if (n<MAX_LISPFILES)
     {   lispfiles[n] = f;
         if (y != input) file_direction |= (1 << n);
@@ -4888,6 +5027,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
+    SETUP_TABLE_SELECT("length",            Llength),           \
+    SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
     SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \

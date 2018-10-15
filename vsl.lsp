@@ -232,11 +232,6 @@
       ((atom a) b)
       (t (cons (car a) (append (cdr a) b)))))
 
-(de length (l)                  % Find length of a list.
-   (cond
-      ((atom l) 0)
-      (t (iadd1 (length (cdr l))))))
-
 (de last (l)                    % Last element of a (non-empty) list.
    (cond
       ((atom l) (error 1 "last on emtpy list"))
@@ -1721,16 +1716,6 @@ top (cond ((atom a) (return (reversip r))))
 (de prin1 (x) (prin x))
 
 (de iequal (x y) (equal x y))
-
-(de escape_quotes (a b)
-  (cond
-    ((null a) b)
-    ((eq (car a) '!") (cons '!" (cons '!" (escape_quotes (cdr a) b))))
-    (t (cons (car a) (escape_quotes (cdr a) b)))))
-
-(de list2string (x)
-  (prog (!*raise !*lower)
-    (return (compress (cons '!" (escape_quotes x '(!")))))))
 
 (de string2list (x) (explodecn x))
 
