@@ -2798,7 +2798,7 @@ LispObject eval(LispObject x)
                     linepos += printf("Arg1: ");
                     errprint(x);
                     if (unwindflag != unwindNONE) return nil;
-                    linepos += printf("Arg2: );
+                    linepos += printf("Arg2: ");
                     errprint(aa);
                     if (unwindflag != unwindNONE) return nil;
                 }
@@ -2833,10 +2833,10 @@ LispObject eval(LispObject x)
                         linepos += printf("Arg1: ");
                         errprint(x);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg2: );
+                        linepos += printf("Arg2: ");
                         errprint(a2);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg3: );
+                        linepos += printf("Arg3: ");
                         errprint(aa);
                         if (unwindflag != unwindNONE) return nil;
                     }
@@ -2875,13 +2875,13 @@ LispObject eval(LispObject x)
                         linepos += printf("Arg1: ");
                         errprint(x);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg2: );
+                        linepos += printf("Arg2: ");
                         errprint(a2);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg3: );
+                        linepos += printf("Arg3: ");
                         errprint(a3);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg4: );
+                        linepos += printf("Arg4: ");
                         errprint(aa);
                         if (unwindflag != unwindNONE) return nil;
                     }
@@ -2923,16 +2923,16 @@ LispObject eval(LispObject x)
                         linepos += printf("Arg1: ");
                         errprint(x);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg2: );
+                        linepos += printf("Arg2: ");
                         errprint(a2);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg3: );
+                        linepos += printf("Arg3: ");
                         errprint(a3);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg4: );
+                        linepos += printf("Arg4: ");
                         errprint(a4);
                         if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg5...: );
+                        linepos += printf("Arg5...: ");
                         errprint(aa);
                         if (unwindflag != unwindNONE) return nil;
                     }
