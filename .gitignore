@@ -10,6 +10,7 @@ vsl
 *.ind
 *.toc
 *.gz
+*.img.modules
 
 # Prerequisites
 *.d
