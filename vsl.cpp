@@ -1,4 +1,4 @@
-// Things to work on...
+// Things to think about
 
 
 //    heap allocated in segments hence dynamically expandable.
@@ -242,6 +242,7 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 // Fixnums and Floating point numbers are rather easy!
 
 #define qfixnum(x)     (((intptr_t)(x)) >> 3)
+// NB that C++ makes this undefined if there is overflow!
 #define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
 
 #define MIN_FIXNUM     qfixnum(INTPTR_MIN)
@@ -2678,9 +2679,13 @@ LispObject evlis(LispObject x)
 
 LispObject eval(LispObject x)
 {
-//- if (isCONS(x))
-//- {  printf("eval: "); print(qcar(x)); // Eek! @@@@
-//- }
+#ifdef TRACEALL
+    if (isCONS(x))
+    {  printf("eval: "); print(qcar(x)); // Eek! @@@@
+    }
+#endif
+    const char *fname = "unknown";
+    if (isCONS(x) && isSYMBOL(qcar(x))) fname = qstring(qpname(qcar(x)));
     while (isCONS(x) && isSYMBOL(qcar(x)) && (qflags(qcar(x)) & flagMACRO))
     {   LispObject fn = qcar(x);
         int traced = qflags(fn) & flagTRACED;
@@ -2704,13 +2709,7 @@ LispObject eval(LispObject x)
         }
     }
     if (isSYMBOL(x))
-    {
-// This is GRIM debugging!
-if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
-{  printf("x = %" PRIxPTR "\n", (uintptr_t)x);
-   return error1("Invalid address for variable", nil);
-}
-        LispObject v = qvalue(x);
+    {   LispObject v = qvalue(x);
         if (v == undefined)
         {   backtraceflag |= backtraceHEADER | backtraceTRACE; // @@@
             return error1("undefined variable", x);
@@ -2736,8 +2735,6 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
             }
             aa = qcdr(x);
 // Here I will evaluate all the arguments for the function.
-// @@@ need to respond to trace requests here... on both entry to
-// @@@ and return from functions.
             switch (n)
             {
             case 0:
@@ -2765,6 +2762,14 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
             case 1:
                 x = eval(qcar(aa));
                 if (unwindflag != unwindNONE) return nil;
+                if (flags & flagTRACED)
+                {   linepos += printf("Calling: ");
+                    errprint(f);
+                    if (unwindflag != unwindNONE) return nil;
+                    linepos += printf("Arg1: ");
+                    errprint(x);
+                    if (unwindflag != unwindNONE) return nil;
+                }
                 x = (*qdefn1(f))(qlits(f), x);
                 if (unwindflag == unwindBACKTRACE)
                 {   linepos += printf("Call to ");
@@ -2786,10 +2791,21 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                 if (unwindflag != unwindNONE) return nil;
                 aa = eval(qcar(qcdr(aa)));
                 if (unwindflag != unwindNONE) return nil;
+                if (flags & flagTRACED)
+                {   linepos += printf("Calling: ");
+                    errprint(f);
+                    if (unwindflag != unwindNONE) return nil;
+                    linepos += printf("Arg1: ");
+                    errprint(x);
+                    if (unwindflag != unwindNONE) return nil;
+                    linepos += printf("Arg2: );
+                    errprint(aa);
+                    if (unwindflag != unwindNONE) return nil;
+                }
                 x = (*qdefn2(f))(qlits(f), x, aa);
                 if (unwindflag == unwindBACKTRACE)
                 {   linepos += printf("Call to ");
-                    errprint(f);
+                    errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
@@ -2810,6 +2826,20 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                     if (unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
+                    if (flags & flagTRACED)
+                    {   linepos += printf("Calling: ");
+                        errprint(f);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg1: ");
+                        errprint(x);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg2: );
+                        errprint(a2);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg3: );
+                        errprint(aa);
+                        if (unwindflag != unwindNONE) return nil;
+                    }
                     x = (*qdefn3(f))(qlits(f), x, a2, aa);
                     if (unwindflag == unwindBACKTRACE)
                     {   linepos += printf("Call to ");
@@ -2838,6 +2868,23 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                     if (unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
+                    if (flags & flagTRACED)
+                    {   linepos += printf("Calling: ");
+                        errprint(f);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg1: ");
+                        errprint(x);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg2: );
+                        errprint(a2);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg3: );
+                        errprint(a3);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg4: );
+                        errprint(aa);
+                        if (unwindflag != unwindNONE) return nil;
+                    }
                     x = (*qdefn4(f))(qlits(f), x, a2, a3, aa);
                     if (unwindflag == unwindBACKTRACE)
                     {   linepos += printf("Call to ");
@@ -2869,6 +2916,26 @@ if ((uintptr_t)x < (uintptr_t)mem_base || (uintptr_t)x >= (uintptr_t)mem_end)
                     if (unwindflag != unwindNONE) return nil;
                     aa = evlis(qcdr(aa));
                     if (unwindflag != unwindNONE) return nil;
+                    if (flags & flagTRACED)
+                    {   linepos += printf("Calling: ");
+                        errprint(f);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg1: ");
+                        errprint(x);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg2: );
+                        errprint(a2);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg3: );
+                        errprint(a3);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg4: );
+                        errprint(a4);
+                        if (unwindflag != unwindNONE) return nil;
+                        linepos += printf("Arg5...: );
+                        errprint(aa);
+                        if (unwindflag != unwindNONE) return nil;
+                    }
                     x = (*qdefn5up(f))(qlits(f), x, a2, a3, a4, aa);
                     if (unwindflag == unwindBACKTRACE)
                     {   linepos += printf("Call to ");
@@ -3795,6 +3862,15 @@ LispObject Lnull(LispObject lits, LispObject x)
     return (x == nil ? lisptrue : nil);
 }
 
+LispObject Llength(LispObject lits, LispObject a)
+{   size_t n = 0;
+    while (isCONS(a))
+    {   n++;
+        a = qcdr(a);
+    }
+    return packfixnum(n);
+}
+
 LispObject Leq(LispObject lits, LispObject x, LispObject y)
 {
     return (x == y ? lisptrue : nil);
@@ -3903,6 +3979,24 @@ LispObject Ldate(LispObject lits)
     today1[8] = today[23];
     today1[9] = 0;             // Now as in 03-Apr-09
     return makestring(today1, 10);
+}
+
+LispObject Llist2string(LispObject lits, LispObject a)
+{   size_t len = 0;
+    for (LispObject w=a; isCONS(w); w=qcdr(w)) len++;
+    LispObject r = allocateatom(len);
+    char *p = qstring(r);
+    while (isCONS(a))
+    {   int c;
+        LispObject w = qcar(a);
+        if (isFIXNUM(w)) c = qfixnum(w);
+        else if (isSYMBOL(w)) c = *qstring(qpname(w));
+        else if (isSTRING(w)) c = *qstring(w);
+        else c = '?';
+        *p++ = c;
+        a = qcdr(a);
+    }
+    return r;
 }
 
 LispObject Loblist(LispObject lits)
@@ -4656,10 +4750,17 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
+printf("Try to open <%s> mode %d:<%s>\n", filename, how,
+        how==3 ? "pipe" : how==1 ? "r" : "w");
     if (how == 3) f = popen(filename, "w");
     else f = fopen(filename, (how == 1 ? "r" : "w"));
-    if (f == NULL) return error1("file could not be opened", x);
+    if (f == NULL)
+    {   printf("errno = %d\n", errno);
+        return error1("file could not be opened", x);
+    }
+printf("file opened!\n");
     for (n=4; n<MAX_LISPFILES && lispfiles[n]!=NULL; n++);
+printf("use file slot %d (max=%d)\n", n, MAX_LISPFILES);
     if (n<MAX_LISPFILES)
     {   lispfiles[n] = f;
         if (y != input) file_direction |= (1 << n);
@@ -4926,6 +5027,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
+    SETUP_TABLE_SELECT("length",            Llength),           \
+    SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
     SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
