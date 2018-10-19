@@ -16,6 +16,18 @@ vsl:	vsl.cpp
 		vsl.cpp $(LIBS) -o vsl \
 		2>&1 | tee vsl.log
 
+bvsl:	vsl.cpp
+	g++ -fno-diagnostics-color $(CFLAGS) \
+		-I./bigint-2010.04.30 -DVSL=1 \
+		vsl.cpp \
+		bigint-2010.04.30/BigInteger.cc \
+		bigint-2010.04.30/BigIntegerAlgorithms.cc \
+		bigint-2010.04.30/BigIntegerUtils.cc \
+		bigint-2010.04.30/BigUnsigned.cc \
+		bigint-2010.04.30/BigUnsignedInABase.cc\
+		$(LIBS) -o bvsl \
+		2>&1 | tee bvsl.log
+
 vsl.img:	vsl library.lsp vsl.lsp
 	./vsl -z library.lsp | tee vsl.img.log
 
