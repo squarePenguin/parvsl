@@ -242,7 +242,7 @@ item_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
 {   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
-    return p;
+    return &p[1];
 }
 
 // In this implementationm I just let malloc sort itself out.
@@ -251,7 +251,7 @@ item_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 {   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
-    return p;
+    return &p[1];
 }
 
 #endif
