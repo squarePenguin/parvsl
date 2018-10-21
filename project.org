@@ -21,3 +21,14 @@ Still it allows benchmarks etc.
 
 It already provides a conservative GC. I will augment that to support
 multiple-threads, using a stop-the-world approach. 
+
+<2018-10-20 Sat>
+
+1. Need to implement some sort of thread local blocks
+2. Learning to use thread-local
+3. Things like fringe should be thread-local.
+4. Will have a segment_fringe and segment_limit within the block
+*** TODO these segment limit allocation. what if we need more memory than a segment?
+**** Have multiple segments?
+*** TODO need a way to tell all threads a reclaim is done
+**** Vector of bool, one per thread

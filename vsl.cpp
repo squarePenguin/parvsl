@@ -88,6 +88,13 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <zlib.h>
+
+#include <vector>
+
+// Multi-threading support
+#include <mutex>
+#include <thread>
+
 // I want libedit for local editing and history.
 #include <histedit.h>
 #ifdef __WIN32__
@@ -339,6 +346,11 @@ void my_exit(int n)
 uintptr_t heap1_pinchain = packfixnum(0), heap2_pinchain = packfixnum(0);
 uintptr_t block1, fringe1, limit1, block2, block2s, fringe2, limit2;
 uintptr_t heap2_freechain;
+
+// CR VB: Should this be defined in therms of LispObject?
+constexpr int SEGMENT_SIZE = 65536; // 64KB per segment
+// VB: use these as the segment we can write on.
+thread_local uintptr_t segment_fringe = -1, segment_limit = -1;
 
 // I will maintain some information about how much space might be
 // consumed by items that are pinned by the conservative garbage collector.
@@ -710,51 +722,51 @@ LispObject wrongnumber5up(LispObject env, LispObject a, LispObject a2,
 static inline LispObject cons(LispObject a, LispObject b)
 {
     check_space(2*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    qcar(fringe1) = a;
-    qcdr(fringe1) = b;
-    a = fringe1;
-    fringe1 += 2*sizeof(LispObject);
+    setheapstarts(segment_fringe);
+    qcar(segment_fringe) = a;
+    qcdr(segment_fringe) = b;
+    a = segment_fringe;
+    segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject list2star(LispObject a, LispObject b, LispObject c)
 {   // (cons a (cons b c))
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    qcar(fringe1) = a;
-    qcdr(fringe1) = fringe1 + 2*sizeof(LispObject);
-    a = fringe1;
-    fringe1 += 2*sizeof(LispObject);
-    setheapstarts(fringe1);
-    qcar(fringe1) = b;
-    qcdr(fringe1) = c;
-    fringe1 += 2*sizeof(LispObject);
+    setheapstarts(segment_fringe);
+    qcar(segment_fringe) = a;
+    qcdr(segment_fringe) = segment_fringe + 2*sizeof(LispObject);
+    a = segment_fringe;
+    segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(segment_fringe);
+    qcar(segment_fringe) = b;
+    qcdr(segment_fringe) = c;
+    segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject acons(LispObject a, LispObject b, LispObject c)
 {   // (cons (cons a b) c)
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    qcar(fringe1) = fringe1 + 2*sizeof(LispObject);
-    qcdr(fringe1) = c;
-    c = fringe1;
-    fringe1 += 2*sizeof(LispObject);
-    setheapstarts(fringe1);
-    qcar(fringe1) = a;
-    qcdr(fringe1) = b;
-    fringe1 += 2*sizeof(LispObject);
+    setheapstarts(segment_fringe);
+    qcar(segment_fringe) = segment_fringe + 2*sizeof(LispObject);
+    qcdr(segment_fringe) = c;
+    c = segment_fringe;
+    segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(segment_fringe);
+    qcar(segment_fringe) = a;
+    qcdr(segment_fringe) = b;
+    segment_fringe += 2*sizeof(LispObject);
     return c;
 }
 
 static inline LispObject boxfloat(double a)
 {   LispObject r;
     check_space(8, __LINE__);
-    setheapstartsandfp(fringe1);
-    r = fringe1 + tagFLOAT;
+    setheapstartsandfp(segment_fringe);
+    r = segment_fringe + tagFLOAT;
     qfloat(r) = a;
-    fringe1 += 8;
+    segment_fringe += 8;
     return r;
 }
 
@@ -764,8 +776,8 @@ static inline LispObject boxfloat(double a)
 static inline LispObject allocatesymbol(LispObject pname)
 {   LispObject r;
     check_space(SYMSIZE*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    r = fringe1 + tagSYMBOL;
+    setheapstarts(segment_fringe);
+    r = segment_fringe + tagSYMBOL;
     qflags(r) = tagHDR + typeSYM;
     qvalue(r) = undefined;
     qplist(r) = nil;
@@ -778,7 +790,7 @@ static inline LispObject allocatesymbol(LispObject pname)
     qdefn4(r) = undefined4;
     qdefn5up(r) = undefined5up;
     qlits(r)  = r;
-    fringe1 += SYMSIZE*sizeof(LispObject);
+    segment_fringe += SYMSIZE*sizeof(LispObject);
     return r;
 }
 
@@ -791,11 +803,11 @@ static inline LispObject allocateatom(int n)
 // header and must then be rounded up to be a multiple of 8.
     int nn = ALIGN8(sizeof(LispObject) + n);
     check_space(nn, __LINE__);
-    setheapstarts(fringe1);
-    r = fringe1 + tagATOM;
+    setheapstarts(segment_fringe);
+    r = segment_fringe + tagATOM;
 // I mark the new vector as being a string so that it is GC safe
     qheader(r) = tagHDR + typeSTRING + packlength(n);
-    fringe1 += nn;
+    segment_fringe += nn;
     return r;
 }
 
@@ -1471,8 +1483,62 @@ if (initial_a == 123456) printf("ook\n"); // to get it used.
 
 volatile int volatile_variable = 12345;
 
+// VB: For now I naively lock this. Will probably very slow.
+std::mutex check_space_mutex;
+
+
+namespace par {
+// TODO VB: find a better name for the namespace
+
+// Segments are a way of splitting the memory into further chunks
+// such that every thread is only writing to a chunk at a time.
+
+// At the beginning a thread has not segment. This is indicated by
+// `segment_allocations[thread_index] == -1`
+// The first time that thread calls `check_space`, it will be
+// allocated a segment, indicated by `segment_fringe` and `segment_limit`
+// Whenever the GC kicks in, it will reset all these segments allocations,
+// so threads have to ask for new segments.
+
+std::vector<bool> segment_allocations;
+thread_local int thread_index = -1;
+
+/**
+ * check_thread_index is meant to handle the time a thread first asks
+ * for space. It will be assigned a thread index that it can use to check
+ * if it has a segment available.
+ * */
+inline
+void check_thread_index() {
+    // VB: for now assume it is called within a mutex
+    if (thread_index == -1) {
+        thread_index = segment_allocations.size();
+        segment_allocations.push_back(false);
+    }
+}
+
+inline
+void clear_segment_stati() {
+    std::fill(segment_allocations.begin(), segment_allocations.end(), false);
+}
+
+inline
+void set_segment_status(bool status) {
+    check_thread_index();
+    segment_allocations[thread_index] = status;
+}
+
+inline
+bool get_segment_status() {
+    check_thread_index();
+    return segment_allocations[thread_index];
+}
+
+} // namespace par
+
 void check_space(int len, int line)
 {
+    std::lock_guard<std::mutex> lock(check_space_mutex);
 // The value passed will always be a multiple of 8. Ensure that that
 // many bytes are available at fringe1, calling the garbage collector if
 // necessary. This has to allow for the obstruction that pinned items
@@ -1480,35 +1546,53 @@ void check_space(int len, int line)
 // the garbage collector while copying into heap2. The treatment of large
 // memory blocks here will be a little tedious and coule be improved by
 // checking the bitmap word at a time not bit at a time.
+    assert(len <= SEGMENT_SIZE); // TODO VB: how to fix this?
+    // VB: Maybe allocate multiple segments at once
+
     intptr_t i;
     for (;;) // loop for when pinned items intrude.
-    {   if (fringe1+len >= limit1)
-        {   reclaim(line);
-            continue;
+    {
+        // Check if we can just fit in the current segment
+        if (!par::get_segment_status() || segment_fringe + len >= segment_limit) {
+            if (fringe1 + SEGMENT_SIZE >= limit1)
+            {   reclaim(line);
+                continue;
+            } else {
+                segment_fringe = fringe1;
+                segment_limit = segment_fringe + SEGMENT_SIZE;
+                fringe1 += SEGMENT_SIZE;
+                par::set_segment_status(true);
+            }
         }
-// here fringe1+len < limit1
+
+        // printf("%lld %lld %lld %lld\n", segment_fringe, fringe1, segment_limit, limit1);
+        // VB: if a segment has been assigned we make these assertions
+        assert(segment_fringe < segment_limit);
+        assert(segment_limit <= limit1);
+
+// here segment_fringe+len < segment_limit
         for (i=0; i<len; i+=8)
-            if (getheapstarts(fringe1+i)) break;
+            if (getheapstarts(segment_fringe+i)) break;
         if (i >= len) return; // success
 // a block that looks like a string will serve as a padder...
         if (i > 0)
-        {   qcar(fringe1) =
+        {   qcar(segment_fringe) =
                 tagHDR + typeSTRING + packlength(i-sizeof(LispObject));
-            setheapstarts(fringe1);
-            fringe1 += i;
+            setheapstarts(segment_fringe);
+            segment_fringe += i;
             heap1_pads += i;
         }
-        while (getheapstarts(fringe1))
+        while (getheapstarts(segment_fringe))
         {   LispObject h;
 // I now need to skip over the pinned item. If it is floating point,
 // a cons cell or a symbol I have to detect that, otherwise its
 // header gives its length explicitly.
-            if (getheapfp(fringe1)) fringe1 += 8;
-            else if (!isHDR(h = qcar(fringe1)))
-                fringe1 += 2*sizeof(LispObject);
+            if (getheapfp(segment_fringe)) segment_fringe += 8;
+            else if (!isHDR(h = qcar(segment_fringe)))
+                segment_fringe += 2*sizeof(LispObject);
             else if ((h & TYPEBITS) == typeSYM)
-                 fringe1 += SYMSIZE*sizeof(LispObject);
-            else fringe1 += ALIGN8(sizeof(LispObject) + veclength(h));
+                 segment_fringe += SYMSIZE*sizeof(LispObject);
+            else segment_fringe += ALIGN8(sizeof(LispObject) + veclength(h));
         }
     }
 }
@@ -1526,6 +1610,7 @@ void middle_reclaim()
         middle_reclaim();     // never executed!
     }
     inner_reclaim((LispObject *)((intptr_t)&w & -sizeof(LispObject)));
+    par::clear_segment_stati();
 }
 
 void reclaim(int line)
