@@ -167,6 +167,14 @@ static inline LispObject boxfloat(double a)
 
 typedef LispObject item_representation;
 
+size_t item_size(item_representation a)
+{   return veclength(qheader(a))/sizeof(uint64_t);
+}
+
+uint64_t *item_data(item_representation a)
+{   return (uint64_t)qstring(a);
+}
+
 #define MEMORY_SIZE 1000000
 static uint64_t memory[MEMORY_SIZE];
 static size_t memory_used = 0;
@@ -181,12 +189,15 @@ uint64_t *preallocate(size_t n)
 }
 
 LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
-{   if (final_n == 1)
+{
+#ifdef SUPPORT_FIXNUMS
+    if (final_n == 1)
     {   memory_used =- (n+1);
         int64_t v = (int64_t)p[0];
         if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
             return packfixnum(v);
     }
+#endif
     memory_used -= (n - final_n);
     p[-1] = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
     return (LispObject)&p[-1] + tagATOM;
@@ -195,12 +206,15 @@ LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
 // I insert an item with typeGAP as a filler...
 
 LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{   if (final_n == 1)
+{
+#ifdef SUPPORT_FIXNUMS
+    if (final_n == 1)
     {   p[-1] = tagHDR + typeGAP + packlength(n*sizeof(uint64_t));
         int64_t v = (int64_t)p[0];
         if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
             return packfixnum(v);
     }
+#endif
     p[-1] = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
     p[final_n] = tagHDR + typeGAP + packlength((n-final_n)*sizeof(uint64_t));
     return (LispObject)&p[-1] + tagATOM;
@@ -209,6 +223,14 @@ LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 #else
 
 typedef uint64_t *item_representation;
+
+size_t item_size(item_representation a)
+{   return a[-1];
+}
+
+uint64_t *item_data(item_representation a)
+{   return a;
+}
 
 uint64_t *preallocate(size_t n)
 {   uint64_t *r = (uint64_t *)malloc((n+1)*sizeof(uint64_t));
@@ -285,6 +307,82 @@ static inline uint64_t add_with_carry(uint64_t a1, uint64_t a2, uint64_t &r)
     return (w < a1 ? 1 : 0);
 }
 
+// I want code that will multiply two 64-bit values and yield a 128-bit
+// result. The result must be expressed as a pair of 64-bit integers.
+// If I have a type "__int128", as will often be the case when using gcc,
+// this is very easy to express. Otherwise I split the two inputs into
+// 32-bit halves, do 4 multiplications and some additions to construct
+// the result. At least I can keep the code portable, even if I can then
+// worry about performance a bit.
+
+
+static inline void multiply64(uint64_t a, uint64_t b,
+                              uint64_t &hi, uint64_t &lo)
+{
+#ifdef __SIZEOF_INT128__
+    unsigned __int128 r = (__int128)a*(__int128)b;
+    hi = (uint64_t)(r >> 64);
+    lo = (uint64_t)r;
+#else
+    uint64_t a1 = a >> 32,           // top half
+             a0 = a & 0xFFFFFFFFU;   // low half
+    uint64_t b1 = b >> 32,           // top half
+             b0 = b & 0xFFFFFFFFU;   // low half
+    uint64_t u1 = a1*b1,             // top of result
+             u0 = a0*b0;             // bottom of result
+// Now I need to add in the two "middle" bits a0*b1 and a1*b0
+    uint64_t w = a0*b1;
+    u1 += w >> 32;
+    w <<= 32;
+    u0 += w;
+    if (u0 < w) u1++;
+// a0*b1 done
+    w = a1*b0;
+    u1 += w >> 32;
+    w <<= 32;
+    u0 += w;
+    if (u0 < w) u1++;
+    hi = u1;
+    lo = u0;
+#endif
+}
+
+// Now much the same but forming a*b+c. Note that this can not overflow
+// the 128-bit result. Both hi and lo are only updated at the end
+// of this, and so they are allowed to be the same as other arguments.
+
+static inline void multiply64(uint64_t a, uint64_t b, uint64_t c,
+                              uint64_t &hi, uint64_t &lo)
+{
+#ifdef __SIZEOF_INT128__
+    unsigned __int128 r = (__int128)a*(__int128)b + (__int128_t)c;
+    hi = (uint64_t)(r >> 64);
+    lo = (uint64_t)r;
+#else
+    uint64_t a1 = a >> 32,           // top half
+             a0 = a & 0xFFFFFFFFU;   // low half
+    uint64_t b1 = b >> 32,           // top half
+             b0 = b & 0xFFFFFFFFU;   // low half
+    uint64_t u1 = a1*b1,             // top of result
+             u0 = a0*b0;             // bottom of result
+// Now I need to add in the two "middle" bits a0*b1 and a1*b0
+    uint64_t w = a0*b1;
+    u1 += w >> 32;
+    w <<= 32;
+    u0 += w;
+    if (u0 < w) u1++;
+// a0*b1 done
+    w = a1*b0;
+    u1 += w >> 32;
+    w <<= 32;
+    u0 += w;
+    if (u0 < w) u1++;
+    u0 += c;                         // add in C.
+    if (u0 < c) u1++; 
+    hi = u1;
+    lo = u0;
+#endif
+}
 
 // While my arithmetic is all done in uint64_t (and that is important so
 // that in C++ the consequences of overflow are defined) I need to treat
@@ -359,10 +457,69 @@ static inline void int_to_bignum(int64_t n, uint64_t *r)
 {   r[0] = (uint64_t)n;
 }
 
+// The functions that are not static and that return an item_representation
+// are the ones intended for external use.
+
 item_representation int_to_bignum(int64_t n)
 {   uint64_t *r = preallocate(1);
     int_to_bignum(n, r);
     return confirm_size(r, 1, 1);
+}
+
+static const uint64_t ten19 = UINT64_C(10000000000000000000);
+
+item_representation string_to_bignum(const char *s)
+{   bool sign = false;
+    if (*s == '-')
+    {   sign = true;
+        s++;
+    }
+    size_t chars = strlen(s);
+    size_t words = 1 + (267*chars+5143)/5144;
+// I have predicted the number of 64-bit digits that will be needed to
+// represent an s-digit (decimal) number based on rounding up from a
+// rational approximation 267/5144 for log(10)/log(2^64). The rational
+// approximation is an over-estimate. In a rather small number of cases
+// this will lead to the bignum ending up with one more 64-bit word than
+// is needed, but I can trim that off at the end.
+    uint64_t *r = preallocate(words);
+    for (size_t i=0; i<words; i++) r[i] = 0;
+// Now for each chunk of digits NNNN in the input I want to go in effect
+//     r = 10^19*r + NNNN;
+// where the number 19 is used because 10^19 is the largest power of 10
+// that fits in a 64-bit word.
+    size_t next = 19*((chars-1)/19);
+    while (chars != 0)
+    {   uint64_t d = 0;
+        while (chars != next)
+        {   d = 10*d + (*s++ - '0');
+            chars--;
+        }
+        next -= 19;
+// now try r = 10^19*r + d.
+        for (size_t i=0; i<words; i++)
+        {   uint64_t hi, lo;
+            multiply64(r[i], ten19, d, hi, lo);
+            r[i] = lo;
+            d = hi;
+        }
+    }
+    size_t n1 = words;
+// Here I will be negating a positive number, and in 2s complement that
+// can never lead to a number growing in length.
+    if (sign)
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<words; i++)
+        {   uint64_t w = r[i] = ~r[i] + carry;
+            carry = (w < carry ? 1 : 0);  
+        }
+        while (r[n1-1]==allbits && n1>1 && negative(r[n1-2])) n1--;
+    }
+// However I could not have been precisely certain how many 64-bit words were
+// needed and I arranged that any error was conservative - ie allocating
+// more that would eventually be used.
+    else while (r[n1-1]==0 && n1>1 && positive(r[n1-2])) n1--; 
+    return confirm_size(r, words, n1);
 }
 
 // Negation. Note that because I am using 2s complement the result could be
@@ -370,7 +527,7 @@ item_representation int_to_bignum(int64_t n)
 // [0x8000000000000000] (a negative value) you get [0,0x8000000000000000],
 // and vice versa.
 
-void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
+static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 {   uint64_t carry = 1;
     for (size_t i=0; i<lena; i++)
     {   carry = ~a[i] + carry;
@@ -388,16 +545,32 @@ void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-
+item_representation bignegate(item_representation a)
+{   size_t n = item_size(a);
+    uint64_t *p = preallocate(n+1);
+    size_t final_n;
+    bignegate(item_data(a), n, p, final_n);
+    return confirm_size(p, n, final_n);
+}
 
 // The "bitnot" operation is simple and length can not change.
 
-void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
+static void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 {   for (size_t i=0; i<lena; i++)
     {   r[i] = ~a[i];
     }
     lenr = lena;
 }
+
+item_representation biglognot(item_representation a)
+{   size_t n = item_size(a);
+    uint64_t *p = preallocate(n+1);
+    size_t final_n;
+    biglognot(item_data(a), n, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+// The "bitnot" operation is simple and length can not change.
 
 // logand
 
@@ -592,44 +765,6 @@ void bigsubtract(const uint64_t *a, size_t lena,
     else return ordered_bigrevsubtract(b, lenb, a, lena, r, lenr);
 }
 
-// I want code that will multiply two 64-bit values and yield a 128-bit
-// result. The result must be expressed as a pair of 64-bit integers.
-// If I have a type "__int128", as will often be the case when using gcc,
-// this is very easy to express. Otherwise I split the two inputs into
-// 32-bit halves, do 4 multiplications and some additions to construct
-// the result. At least I can keep the code portable, even if I can then
-// worry about performance a bit.
-
-static inline void multiply64(uint64_t a, uint64_t b, uint64_t &hi, uint64_t &lo)
-{
-#ifdef __SIZEOF_INT128__
-    unsigned __int128 r = (__int128)a*(__int128)b;
-    hi = (uint64_t)(r >> 64);
-    lo = (uint64_t)r;
-#else
-    uint64_t a1 = a >> 32,           // top half
-             a0 = a & 0xFFFFFFFFU;   // low half
-    uint64_t b1 = b >> 32,           // top half
-             b0 = b & 0xFFFFFFFFU;   // low half
-    uint64_t u1 = a1*b1,             // top of result
-             u0 = a0*b0;             // bottom of result
-// Now I need to add in the two "middle" bits a0*b1 and a1*b0
-    uint64_t w = a0*b1;
-    u1 += w >> 32;
-    w <<= 32;
-    u0 += w;
-    if (u0 < w) u1++;
-// a0*b1 done
-    w = a1*b0;
-    u1 += w >> 32;
-    w <<= 32;
-    u0 += w;
-    if (u0 < w) u1++;
-    hi = u1;
-    lo = u0;
-#endif
-}
-
 void bigmultiply(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
                  uint64_t *r, size_t &lenr)
@@ -663,21 +798,22 @@ void display(const char *label, uint64_t *a, size_t lena)
     printf("\n");
 }
 
+void display(const char *label, item_representation a)
+{   printf("%s: [%d]", label, (int)item_size(a));
+    uint64_t *d = item_data(a);
+    size_t len = item_size(a);
+    for (size_t i=0; i<len; i++)
+        printf(" %.16" PRIx64, d[len-i-1]);
+    printf("\n");
+}
+
 uint64_t a[100], b[100], c[100];
 size_t lena, lenb, lenc;
 
 int main(int argc, char *argv[])
 {
-    int_to_bignum(allbuttop, a);
-    display("a", a, 1);
-    int_to_bignum(1, b);
-    display("b", b, 1);
-    bigadd(a, 1, b, 1, c, lenc);
-    display("c", c, lenc);
-    int_to_bignum(-1, b);
-    display("b", b, 1);
-    bigadd(c, lenc, b, 1, a, lena);
-    display("a", a, lena);
+    item_representation ten = string_to_bignum("100");
+    display("a", ten);
     return 0;    
 }
 
