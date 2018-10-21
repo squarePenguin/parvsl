@@ -128,6 +128,43 @@ static inline LispObject boxfloat(double a)
 
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
+// Storage management for bignums is sort of delicate because at the
+// start of an operation one normally has just an upper bound on how much
+// space will be needed - the exact number of words to be used only emerges
+// at the end. So the protocol I support is based on thee calls:
+//   uint64_t *preallocate(size_t n)
+//      This returns a pointer to n words (and it may have allocated a
+//      space for a header in front of that).
+//   uintptr_t confirm_size(uintptr_t *p, size_t n)
+//      The pointer p was as returned by preallocate, but it is now known
+//      that just n words will be needed (this must be no larger than the
+//      number originally given. The effect can be somewhat as if a call
+//      to realloc was given. Very often this will also write the length (n)
+//      into a header tha preceeds the stored digits of the number. It would
+//      be able to detect (eg) a special case of small numbers are return
+//      them in a different way, and add any other tag or marker bits that
+//      are required. When confirm_size() is called the system can be
+//      confident that no other calls to preallocate() have been made - this
+//      can help because it then "knows" that the memory involved is right
+//      at the fringe of active memory.
+//   uintptr_t confirm_size_x(uintptr_t *p, size_t n)
+//      This behave just like confirm_size apart from the fact that it is to
+//      used in a context where two (or more) regions of memory have been
+//      preallocated. This must be used on all but the last allocated one
+//      when their length is confirmed. The thought behind this is that
+//      when a block shrinks or is discarded and it is not the most recent one
+//      allocated it may be necessary to put some padding material in the
+//      gap that is left, or it may be possible to place that released
+//      space on a free-chain for future re-use.
+//      As a special case if two blocks are preallocated and the second
+//      has its size confirmed as zero then the first one may use
+//      confirm_size rather than needing confirm_size_x.
+
+
+
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
 // I am going to represent bignums as arrays of 64-bit digits.
 // Overall the representation will use 2s complement, and so all but the
 // top digit will be treated as unsigned, while the top one is signed
@@ -191,6 +228,58 @@ static inline bool positive(uint64_t a)
 static inline bool negative(uint64_t a)
 {   return ((int64_t)a) < 0;
 }
+
+// At times it may be helpful to treat the array of digits as
+// being a row of 32-bit values rather than 64-bit ones. gcc at least
+// has predefined symbols that can tell me when I am little-endian and
+// that helps. But to be secure against the strict aliasing rules I need
+// to access memory using (nominally) character-at-a-time operations.
+
+#if defined __BYTE_ORDER__ && \
+    defined __ORDER_LITTLE_ENDIAN__\
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+
+static inline uint32_t read_u32(const uint64_t *v, size_t n)
+{   uint32_t r;
+    memcpy(&r, (const char *)v + 4*n, sizeof(uint32_t));
+    return r;
+}
+
+static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
+{   memcpy((const char *)v + 4*n, &r, sizeof(uint32_t));
+}
+
+#elif defined __BYTE_ORDER__ && \
+    defined __ORDER_BIG_ENDIAN__\
+    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+
+static inline uint32_t read_u32(const uint64_t *v, size_t n)
+{   uint32_t r;
+    memcpy(&r, (const char *)v + 4*(n^1), sizeof(uint32_t));
+    return r;
+}
+
+static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
+{   memcpy((const char *)v + 4*(n^1), &r, sizeof(uint32_t));
+}
+
+#else // endianness known at compile time
+
+static inline uint32_t read_u32(const uint64_t *v, size_t n)
+{   uint64_t r = v[n/2];
+    if ((n & 1) != 0) r >>= 32;
+    return (uint32_t)r;
+}
+
+static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
+{   uint64_t w = v[n/2];
+    if ((n & 1) != 0) w = ((uint32_t)w) | ((uint64_t)r << 32);
+    else w = (w & ((uint64_t)(-1)<<32)) | r;
+    v[n/2] = w;
+}
+
+#endif // endianness
+
 
 // Conversion from a simple int64_t value.
 
@@ -422,6 +511,66 @@ void bigsubtract(const uint64_t *a, size_t lena,
                  uint64_t *r, size_t &lenr)
 {   if (lena >= lenb) return ordered_bigsubtract(a, lena, b, lenb, r, lenr);
     else return ordered_bigrevsubtract(b, lenb, a, lena, r, lenr);
+}
+
+// I want code that will multiply two 64-bit values and yield a 128-bit
+// result. The result must be expressed as a pair of 64-bit integers.
+// If I have a type "__int128", as will often be the case when using gcc,
+// this is very easy to express. Otherwise I split the two inputs into
+// 32-bit halves, do 4 multiplications and some additions to construct
+// the result. At least I can keep the code portable, even if I can then
+// worry about performance a bit.
+
+static inline void multiply64(uint64_t a, uint64_t b, uint64_t &hi, uint64_t &lo)
+{
+#ifdef __SIZEOF_INT128__
+    unsigned __int128 r = (__int128)a*(__int128)b;
+    hi = (uint64_t)(r >> 64);
+    lo = (uint64_t)r;
+#else
+    uint64_t a1 = a >> 32,           // top half
+             a0 = a & 0xFFFFFFFFU;   // low half
+    uint64_t b1 = b >> 32,           // top half
+             b0 = b & 0xFFFFFFFFU;   // low half
+    uint64_t u1 = a1*b1,             // top of result
+             u0 = a0*b0;             // bottom of result
+// Now I need to add in the two "middle" bits a0*b1 and a1*b0
+    uint64_t w = a0*b1;
+    u1 += w >> 32;
+    w <<= 32;
+    u0 += w;
+    if (u0 < w) u1++;
+// a0*b1 done
+    w = a1*b0;
+    u1 += w >> 32;
+    w <<= 32;
+    u0 += w;
+    if (u0 < w) u1++;
+    hi = u1;
+    lo = u0;
+#endif
+}
+
+void bigmultiply(const uint64_t *a, size_t lena,
+                 const uint64_t *b, size_t lenb,
+                 uint64_t *r, size_t &lenr)
+{   for (size_t i=0; i<lena+lenb; i++)
+        r[i] = 0;
+// As coded at present I only cope with +ve inputs.
+    for (size_t i=0; i<lena; i++)
+    {   uint64_t prev_hi = 0, carry = 0;
+        for (size_t j=0; j<lenb; j++)
+        {   uint64_t hi, lo, w;
+            multiply64(a[i], b[j], hi, lo);
+            uint64_t c1 = add_with_carry(lo, r[i+j], w);
+            uint64_t c2 = add_with_carry(w, prev_hi, r[i+j]);
+            prev_hi = hi + c1;  // can never overflow
+            carry = c2;
+        }
+        r[i+j] = prev_hi + carry;
+    }
+    lenr = lena + lenb;
+// The actual value may be 1 word shorter than this.
 }
 
 // @@@@@@@@@@@@@@@@@@@@@@@@@@@@
