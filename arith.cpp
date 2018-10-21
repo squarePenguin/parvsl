@@ -6,9 +6,11 @@
 #define __STDC_LIMIT_MACROS 1
 
 #include <stdio.h>
+#include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
-
+#include <assert.h>
+#include <stdlib.h>
 
 // A Lisp item is represented as an integer and the low 3 bits
 // contain tag information that specify how the rest will be used.
@@ -54,7 +56,8 @@ typedef intptr_t LispObject;
 #define typeBIGNUM  0x18
 #define typeEQHASH  0x20
 #define typeEQHASHX 0x28
-// Codes 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
+#define typeGAP     0x30
+// Codes 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
 // 0x70 and 0x78 spare!
 
 #define veclength(h)  (((uintptr_t)(h)) >> 7)
@@ -135,11 +138,11 @@ static inline LispObject boxfloat(double a)
 //   uint64_t *preallocate(size_t n)
 //      This returns a pointer to n words (and it may have allocated a
 //      space for a header in front of that).
-//   uintptr_t confirm_size(uintptr_t *p, size_t n)
+//   uintptr_t confirm_size(uintptr_t *p, size_t n, size_t final_n)
 //      The pointer p was as returned by preallocate, but it is now known
-//      that just n words will be needed (this must be no larger than the
-//      number originally given. The effect can be somewhat as if a call
-//      to realloc was given. Very often this will also write the length (n)
+//      that just final_n words will be needed (this must be no larger than
+//      the number originally given. The effect can be somewhat as if a call
+//      to realloc was given. Very often this will also write the final_n
 //      into a header tha preceeds the stored digits of the number. It would
 //      be able to detect (eg) a special case of small numbers are return
 //      them in a different way, and add any other tag or marker bits that
@@ -147,7 +150,7 @@ static inline LispObject boxfloat(double a)
 //      confident that no other calls to preallocate() have been made - this
 //      can help because it then "knows" that the memory involved is right
 //      at the fringe of active memory.
-//   uintptr_t confirm_size_x(uintptr_t *p, size_t n)
+//   uintptr_t confirm_size_x(uintptr_t *p, size_t n, size_t final_n)
 //      This behave just like confirm_size apart from the fact that it is to
 //      used in a context where two (or more) regions of memory have been
 //      preallocated. This must be used on all but the last allocated one
@@ -160,6 +163,76 @@ static inline LispObject boxfloat(double a)
 //      has its size confirmed as zero then the first one may use
 //      confirm_size rather than needing confirm_size_x.
 
+#ifdef FOR_VSL
+
+typedef LispObject item_representation;
+
+#define MEMORY_SIZE 1000000
+static uint64_t memory[MEMORY_SIZE];
+static size_t memory_used = 0;
+
+uint64_t *preallocate(size_t n)
+{   uint64_t *r = &memory[memory_used+1];
+    memory_used += n + 1;
+// No attempt at garbage collection here - I will just allocate
+// bignums linearly in memory until I run out of space. And I do not
+// provide any scheme for the user to release them.
+    assert(memory_used <= MEMORY_SIZE);
+}
+
+LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
+{   if (final_n == 1)
+    {   memory_used =- (n+1);
+        int64_t v = (int64_t)p[0];
+        if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
+            return packfixnum(v);
+    }
+    memory_used -= (n - final_n);
+    p[-1] = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
+    return (LispObject)&p[-1] + tagATOM;
+}
+
+// I insert an item with typeGAP as a filler...
+
+LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
+{   if (final_n == 1)
+    {   p[-1] = tagHDR + typeGAP + packlength(n*sizeof(uint64_t));
+        int64_t v = (int64_t)p[0];
+        if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
+            return packfixnum(v);
+    }
+    p[-1] = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
+    p[final_n] = tagHDR + typeGAP + packlength((n-final_n)*sizeof(uint64_t));
+    return (LispObject)&p[-1] + tagATOM;
+}
+
+#else
+
+typedef uint64_t *item_representation;
+
+uint64_t *preallocate(size_t n)
+{   uint64_t *r = (uint64_t *)malloc((n+1)*sizeof(uint64_t));
+    assert(r != NULL);
+    return &r[1];
+}
+
+item_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
+{   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+    assert(p != NULL);
+    p[0] = final_n;
+    return p;
+}
+
+// In this implementationm I just let malloc sort itself out.
+
+item_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
+{   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+    assert(p != NULL);
+    p[0] = final_n;
+    return p;
+}
+
+#endif
 
 
 
@@ -236,7 +309,7 @@ static inline bool negative(uint64_t a)
 // to access memory using (nominally) character-at-a-time operations.
 
 #if defined __BYTE_ORDER__ && \
-    defined __ORDER_LITTLE_ENDIAN__\
+    defined __ORDER_LITTLE_ENDIAN__ && \
     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
@@ -245,12 +318,12 @@ static inline uint32_t read_u32(const uint64_t *v, size_t n)
     return r;
 }
 
-static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
-{   memcpy((const char *)v + 4*n, &r, sizeof(uint32_t));
+static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
+{   memcpy((char *)v + 4*n, &r, sizeof(uint32_t));
 }
 
 #elif defined __BYTE_ORDER__ && \
-    defined __ORDER_BIG_ENDIAN__\
+    defined __ORDER_BIG_ENDIAN__ && \
     __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
@@ -259,11 +332,11 @@ static inline uint32_t read_u32(const uint64_t *v, size_t n)
     return r;
 }
 
-static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
-{   memcpy((const char *)v + 4*(n^1), &r, sizeof(uint32_t));
+static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
+{   memcpy((char *)v + 4*(n^1), &r, sizeof(uint32_t));
 }
 
-#else // endianness known at compile time
+#else // endianness not known at compile time
 
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
 {   uint64_t r = v[n/2];
@@ -271,7 +344,7 @@ static inline uint32_t read_u32(const uint64_t *v, size_t n)
     return (uint32_t)r;
 }
 
-static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
+static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
 {   uint64_t w = v[n/2];
     if ((n & 1) != 0) w = ((uint32_t)w) | ((uint64_t)r << 32);
     else w = (w & ((uint64_t)(-1)<<32)) | r;
@@ -280,12 +353,16 @@ static inline void write u32(const uint64_t *v, size_t n, uint32_t r)
 
 #endif // endianness
 
+// Convert a 64-bit integer to a bignum.
 
-// Conversion from a simple int64_t value.
-
-void int_to_bignum(int64_t n, uint64_t *r, size_t &lenr)
+static inline void int_to_bignum(int64_t n, uint64_t *r)
 {   r[0] = (uint64_t)n;
-    lenr = 1;                     // Always of length 1
+}
+
+item_representation int_to_bignum(int64_t n)
+{   uint64_t *r = preallocate(1);
+    int_to_bignum(n, r);
+    return confirm_size(r, 1, 1);
 }
 
 // Negation. Note that because I am using 2s complement the result could be
@@ -310,6 +387,8 @@ void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     else if (r[lena-1]==0 && lena>1 && positive(r[lena-2])) lena--; 
     lenr = lena;
 }
+
+
 
 // The "bitnot" operation is simple and length can not change.
 
@@ -567,7 +646,7 @@ void bigmultiply(const uint64_t *a, size_t lena,
             prev_hi = hi + c1;  // can never overflow
             carry = c2;
         }
-        r[i+j] = prev_hi + carry;
+        r[i+lenb] = prev_hi + carry;
     }
     lenr = lena + lenb;
 // The actual value may be 1 word shorter than this.
@@ -589,15 +668,15 @@ size_t lena, lenb, lenc;
 
 int main(int argc, char *argv[])
 {
-    int_to_bignum(allbuttop, a, lena);
-    display("a", a, lena);
-    int_to_bignum(1, b, lenb);
-    display("b", b, lenb);
-    bigadd(a, lena, b, lenb, c, lenc);
+    int_to_bignum(allbuttop, a);
+    display("a", a, 1);
+    int_to_bignum(1, b);
+    display("b", b, 1);
+    bigadd(a, 1, b, 1, c, lenc);
     display("c", c, lenc);
-    int_to_bignum(-1, b, lenb);
-    display("b", b, lenb);
-    bigadd(c, lenc, b, lenb, a, lena);
+    int_to_bignum(-1, b);
+    display("b", b, 1);
+    bigadd(c, lenc, b, 1, a, lena);
     display("a", a, lena);
     return 0;    
 }
