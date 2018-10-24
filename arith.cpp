@@ -1,5 +1,13 @@
 // A sketch of simple bignum arithmetic using 64-bit digits
 
+// TODO:
+//   eqn, greaterp, geq, lessp, leq
+//   gcdn, lcmn
+//   float, floor, ceil, fix
+//   quotient, remainder
+//   expt, isqrt
+//   bitlength, findfirst-bit, findlast-bit
+
 
 #define __STDC_FORMAT_MACROS 1
 #define __STDC_CONST_MACROS 1
@@ -11,6 +19,8 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <stdlib.h>
+
+#ifdef VSL
 
 // A Lisp item is represented as an integer and the low 3 bits
 // contain tag information that specify how the rest will be used.
@@ -100,7 +110,7 @@ static inline LispObject *heapaddr(LispObject x)
 #define qfloat(x)      (((double *)((x)-tagFLOAT))[0])
 
 #define isBIGNUM(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeBIGNUM))
-#define qint64(x) (*(int64_t *)((x) - tagATOM + 8))
+#define qbignum(x) ((char *)((x) - tagATOM + sizeof(uint64_t)))
 
 #define isSTRING(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeSTRING))
 #define qstring(x) ((char *)((x) - tagATOM + sizeof(LispObject)))
@@ -121,24 +131,18 @@ static inline LispObject boxfloat(double a)
     return 0;
 }
 
-//static LispObject error0(const char *msg)
-//{   return 0;
-//}
-
-//static LispObject error1(const char *msg, LispObject a)
-//{   return 0;
-//}
+#endif // VSL
 
 //@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
 // Storage management for bignums is sort of delicate because at the
 // start of an operation one normally has just an upper bound on how much
 // space will be needed - the exact number of words to be used only emerges
-// at the end. So the protocol I support is based on thee calls:
+// at the end. So the protocol I support is based on the calls:
 //   uint64_t *preallocate(size_t n)
-//      This returns a pointer to n words (and it may have allocated a
-//      space for a header in front of that).
-//   uintptr_t confirm_size(uintptr_t *p, size_t n, size_t final_n)
+//      This returns a pointer to n 64-bit words (and it may have allocated
+//      a space for a header in front of that).
+//   number_representation_t confirm_size(uint64_t *p, size_t n, size_t final_n)
 //      The pointer p was as returned by preallocate, but it is now known
 //      that just final_n words will be needed (this must be no larger than
 //      the number originally given. The effect can be somewhat as if a call
@@ -150,7 +154,7 @@ static inline LispObject boxfloat(double a)
 //      confident that no other calls to preallocate() have been made - this
 //      can help because it then "knows" that the memory involved is right
 //      at the fringe of active memory.
-//   uintptr_t confirm_size_x(uintptr_t *p, size_t n, size_t final_n)
+//   number_representation_t confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 //      This behave just like confirm_size apart from the fact that it is to
 //      used in a context where two (or more) regions of memory have been
 //      preallocated. This must be used on all but the last allocated one
@@ -162,17 +166,72 @@ static inline LispObject boxfloat(double a)
 //      As a special case if two blocks are preallocated and the second
 //      has its size confirmed as zero then the first one may use
 //      confirm_size rather than needing confirm_size_x.
+//   void free_bignum(number_representation p)
+//      Release memory. In a Lisp system this will be a no-op because garbage
+//      collection will do the job. In a freestanding application this
+//      can use free().
+//
+// For strings (as returned when I want to prepare a bignum for printing)
+// I will use preallocate as before and an effect is that the string will
+// be built up within a block of memory that is a multiple of 8 bytes long.
+// Again there MAY be space left for a header. When I know exactly how many
+// characters are present I will confirm the exact size required:
+//
+//   string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
+//       In this call n is the original size as used with preallocate, so it
+//       measures in units of sizeof(uint64_t), while final_size is measured
+//       in bytes and is the number of characters present. For native style
+//       strings this will add a '\0' as a terminator and use realloc to
+//       trim the size down to include just that.
+//   void free_string(string_representation s)
+//       Release memory for the string.
 
-#ifdef FOR_VSL
 
-typedef LispObject item_representation;
+#ifdef VSL
 
-size_t item_size(item_representation a)
+// Within Lisp all values are kept using type "LispObject" which involves
+// all values having a tag in their low 3 bits and all non-trivial objects
+// (apart from cons cells) in memory having a header field that contains
+// detailed type information plus the length of the object. The code here
+// maps this representation onto the one needed within the bignum code.
+
+typedef LispObject number_representation;
+typedef LispObject string_representation;
+
+size_t number_size(number_representation a)
 {   return veclength(qheader(a))/sizeof(uint64_t);
 }
 
-uint64_t *item_data(item_representation a)
-{   return (uint64_t)qstring(a);
+// Here strings DO NOT have a terminating nul character - their end is
+// indicated by the leader word that preceeds them having a length
+// field in it.
+
+size_t string_size(number_representation a)
+{   return veclength(qheader(a));
+}
+
+uint64_t *number_data(number_representation a)
+{   return (uint64_t)qbignum(a);
+}
+
+const char *string_data(string_representation a)
+{   return (const char *)qstring(a);
+}
+
+// My representation has a header word that is an intptr_t stored 8 bytes
+// ahead of the start of the data that represents bignum digits. On a 64-bit
+// machine this is thoroughly natural. On a 32-bit machine it will leave a
+// 32-bit gap so that everything end up nicely aligned.
+
+uintptr_t &bignum_header(uint64_t *a)
+{   return *(uintptr_t)((char *)a - sizeof(uint64_t)));
+}
+
+// For strings the data does not need to end up doubleword aligned, and so
+// the string data starts just an uintptr_t size along.
+
+uintptr_t &string_header(uint64_t *a)
+{   return *(uintptr_t)((char *)a - sizeof(uintptr_t));
 }
 
 #define MEMORY_SIZE 1000000
@@ -191,6 +250,9 @@ uint64_t *preallocate(size_t n)
 LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
 {
 #ifdef SUPPORT_FIXNUMS
+// WHile doing some initial testing I will represent ALL integers as
+// bignums, but for real use within the Lisp I will have a cheaper way
+// of representing small values.
     if (final_n == 1)
     {   memory_used =- (n+1);
         int64_t v = (int64_t)p[0];
@@ -199,11 +261,9 @@ LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
     }
 #endif
     memory_used -= (n - final_n);
-    p[-1] = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
-    return (LispObject)&p[-1] + tagATOM;
+    bignum_header(p) = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
+    return (LispObject)&bignum_header(p) + tagATOM;
 }
-
-// I insert an item with typeGAP as a filler...
 
 LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 {
@@ -215,20 +275,77 @@ LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
             return packfixnum(v);
     }
 #endif
-    p[-1] = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
+    bignum_header(p) = tagHDR + typeBIGNUM + packlength(final_n*sizeof(uint64_t));
+// I insert an item with typeGAP as a filler...
     p[final_n] = tagHDR + typeGAP + packlength((n-final_n)*sizeof(uint64_t));
-    return (LispObject)&p[-1] + tagATOM;
+    return (LispObject)&bignum_header(p) + tagATOM;
 }
 
-#else
+LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
+{
+// The array (p), whose size (n) is expressed in 64-bit chunks, was allocated
+// and laid out as for a bignum. That means it has a header in memory just
+// ahead of it. Both p and the address of the header were kept 8-byte aligned.
+// The size of the header is sizeof(uintptr_t). That means that on a 32-bit
+// platform there is an unused 4-byte gap.
+// When the data is to be arranged as a string there is no longer any need
+// for the string data to remain 8-byte alogned, and so the gap can be
+// filled by shuffling data down. This then lets me reduce the final size
+// a little (typically by 4 bytes).
+    if (sizeof(uint64_t) != sizeof(intptr_t))
+    {   char *p1 = (char *)&p[-1];
+        memmove(p1+sizeof(uintptr_t), p, final_n);
+        final_n -= (sizeof(uint64_t) - sizeof(intptr_t));
+    }
+// In my Lisp world I allocate memory in units of 8 bytes and when a string
+// does not completely fill the final unit I like to pad with NULs. Doing so
+// makes it possible to compare strings by doing word-at-a-time operations
+// rather than byte-at-a-time and similarly compute hash values fast (that is
+// provided I am willing to ignore concerns about strict aliasing!).
+    size_t n1 = final_n;
+    while ((n1%8) != 0) (char *)p[n1++] = 0;
+    memory_used -= (n - n1/sizeof(uint64_t));
+// The next two lines may look as if they should use string_header, but
+// in fact they are still needing to recognize that p had been a pointer
+// into a bignum not a string!
+    bignum_header(p) = tagHDR + typeSTRING + packlength(final_n);
+    return (LispObject)&bignum_header(p) + tagATOM;
+}
 
-typedef uint64_t *item_representation;
+void free_bignum(number_representation p)
+{
+}
 
-size_t item_size(item_representation a)
+void free_string(string_representation p)
+{
+}
+
+#else // VSL
+
+// For a free-standing bignum application (including my test code for the
+// stuff here, bignums are represented as blocks of memory (allocated using
+// malloc) where the pointer that is used points to the start of the
+// array of bignum digits, and the word in memory before that contains
+// the length (in words) of the block.
+// Strings are returned to the user as freshly malloced memory holding a
+// native-style C++ string with a terminating NUL character at the end.
+
+typedef uint64_t *number_representation;
+typedef const char *string_representation;
+
+size_t number_size(number_representation a)
 {   return a[-1];
 }
 
-uint64_t *item_data(item_representation a)
+size_t string_size(string_representation a)
+{   return strlen(a);
+}
+
+uint64_t *number_data(number_representation a)
+{   return a;
+}
+
+const char *string_data(string_representation a)
 {   return a;
 }
 
@@ -238,27 +355,58 @@ uint64_t *preallocate(size_t n)
     return &r[1];
 }
 
-item_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
+number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
 {   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
 }
 
-// In this implementationm I just let malloc sort itself out.
+// In this implementation I just let malloc sort itself out.
 
-item_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
+number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 {   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
 }
 
-#endif
+// The string data has been built up in a block of memory that was suited
+// to be a bignum, so it was preceeded by a header word that could have
+// been used to store its length. I copy the characters down to start at the
+// very start of the allocated block. Remember agaiin that n measures
+// the number of data words in a bignum (not including the header) and
+// final_n measures the string in characters.
 
+string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
+{   char *c = (char *)&p[-1];
+// When a string is returned it will not need a preceeding header word, so
+// I memmove() the data down to the start of the memory block. This has
+// a cost and perhaps keeping the length information elsewhere would have
+// avoided that, but the scheme used here keeps the representation of
+// big numbers nice and tidy ans self-contained, and the linear cost of this
+// memort move tends to be associated with a quadratic cost convertion from
+// internal to character form so it is really not liable to dominate overall
+// timings.
+    memmove(c, (char *)p, final_n);
+    c[final_n] = 0; // write in terminator
+// Remember to allow for the terminator when adjusting the size! Well
+// there will always have been space for it because we are losing the header
+// word.
+    const char *cc = (const char *)realloc(c, final_n+1);
+    assert(cc != NULL);
+    return cc;
+}
 
+void free_bignum(number_representation p)
+{   free((void *)&p[-1]);
+}
 
-//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+void free_string(string_representation p)
+{   free((void *)p);
+}
+
+#endif // VSL
 
 // I am going to represent bignums as arrays of 64-bit digits.
 // Overall the representation will use 2s complement, and so all but the
@@ -320,7 +468,7 @@ static inline void multiply64(uint64_t a, uint64_t b,
                               uint64_t &hi, uint64_t &lo)
 {
 #ifdef __SIZEOF_INT128__
-    unsigned __int128 r = (__int128)a*(__int128)b;
+    unsigned __int128 r = (unsigned __int128)a*(unsigned __int128)b;
     hi = (uint64_t)(r >> 64);
     lo = (uint64_t)r;
 #else
@@ -355,7 +503,8 @@ static inline void multiply64(uint64_t a, uint64_t b, uint64_t c,
                               uint64_t &hi, uint64_t &lo)
 {
 #ifdef __SIZEOF_INT128__
-    unsigned __int128 r = (__int128)a*(__int128)b + (__int128_t)c;
+    unsigned __int128 r = (unsigned __int128)a*(unsigned __int128)b +
+                          (unsigned __int128_t)c;
     hi = (uint64_t)(r >> 64);
     lo = (uint64_t)r;
 #else
@@ -405,6 +554,11 @@ static inline bool negative(uint64_t a)
 // has predefined symbols that can tell me when I am little-endian and
 // that helps. But to be secure against the strict aliasing rules I need
 // to access memory using (nominally) character-at-a-time operations.
+//
+// The behaviour here depends on byte-ordering: on some systems I will
+// have predefined macros that let me know what happens on the platform
+// I am on. Specifically gcc and clang seem to define symbols as tested
+// for here... which let me use code that is pretty clean and fast.
 
 #if defined __BYTE_ORDER__ && \
     defined __ORDER_LITTLE_ENDIAN__ && \
@@ -436,6 +590,9 @@ static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
 
 #else // endianness not known at compile time
 
+// If I am uncertain about endianness I can extract or insert data
+// using shift operations. It is not actually TOO bad.
+
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
 {   uint64_t r = v[n/2];
     if ((n & 1) != 0) r >>= 32;
@@ -457,10 +614,10 @@ static inline void int_to_bignum(int64_t n, uint64_t *r)
 {   r[0] = (uint64_t)n;
 }
 
-// The functions that are not static and that return an item_representation
+// The functions that are not static and that return an number_representation
 // are the ones intended for external use.
 
-item_representation int_to_bignum(int64_t n)
+number_representation int_to_bignum(int64_t n)
 {   uint64_t *r = preallocate(1);
     int_to_bignum(n, r);
     return confirm_size(r, 1, 1);
@@ -468,20 +625,25 @@ item_representation int_to_bignum(int64_t n)
 
 static const uint64_t ten19 = UINT64_C(10000000000000000000);
 
-item_representation string_to_bignum(const char *s)
+number_representation string_to_bignum(const char *s)
 {   bool sign = false;
     if (*s == '-')
     {   sign = true;
         s++;
     }
     size_t chars = strlen(s);
-    size_t words = 1 + (267*chars+5143)/5144;
+// If I do the 
+    size_t words = 1 + (108853*(uint64_t)chars)/0x2000000;
 // I have predicted the number of 64-bit digits that will be needed to
-// represent an s-digit (decimal) number based on rounding up from a
-// rational approximation 267/5144 for log(10)/log(2^64). The rational
-// approximation is an over-estimate. In a rather small number of cases
-// this will lead to the bignum ending up with one more 64-bit word than
-// is needed, but I can trim that off at the end.
+// represent an s-digit (decimal) number based an approximation
+// 108853/2^21 for log(10)/log(2^64). In 64-bit arithmetic the numerator
+// here will not overflow until you have an improbable string of length
+// 2^47 as input! The division by a power of 2 should be done very
+// rapidly as a shift. I rather expect this calculation to give a rather
+// good measure of how many 64-bit words will be needed! It must never be an
+// overestimate so that the vector that I allocate never overflows. Somewhat
+// rarely it will be and overestimate and it will be necessary to trim the
+// vector at the end.
     uint64_t *r = preallocate(words);
     for (size_t i=0; i<words; i++) r[i] = 0;
 // Now for each chunk of digits NNNN in the input I want to go in effect
@@ -491,12 +653,13 @@ item_representation string_to_bignum(const char *s)
     size_t next = 19*((chars-1)/19);
     while (chars != 0)
     {   uint64_t d = 0;
+// assemble 19 digit blocks from the input into a value (d).
         while (chars != next)
         {   d = 10*d + (*s++ - '0');
             chars--;
         }
         next -= 19;
-// now try r = 10^19*r + d.
+// now perform r = 10^19*r + d to consolidate into the evential result.
         for (size_t i=0; i<words; i++)
         {   uint64_t hi, lo;
             multiply64(r[i], ten19, d, hi, lo);
@@ -505,7 +668,7 @@ item_representation string_to_bignum(const char *s)
         }
     }
     size_t n1 = words;
-// Here I will be negating a positive number, and in 2s complement that
+// Here I may be negating a positive number, and in 2s complement that
 // can never lead to a number growing in length.
     if (sign)
     {   uint64_t carry = 1;
@@ -520,6 +683,114 @@ item_representation string_to_bignum(const char *s)
 // more that would eventually be used.
     else while (r[n1-1]==0 && n1>1 && positive(r[n1-2])) n1--; 
     return confirm_size(r, words, n1);
+}
+
+// The next functions are a key one for printing values. They convert a
+// bignum so that it is still stored as a sequence of digits each within
+// a 64-bit work, but now each digit will be be in the range 0 - (10^19-1)
+// so that the value is in effect represented base 10^19. From that state
+// printing it in decimal becomes easy!
+
+
+// This first one takes a number represented base 2^64 with digits
+// 0 to n-1 and divides it by 10^19, returning the remainder and
+// setting both the digits and its length suitably to be the quotient.
+// The number is POSITIVE here.
+
+static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
+{   uint64_t hi = 0;
+printf("short divide (%d):", (int)n);
+for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, r[i]);
+printf("\n");
+    for (size_t i = n-1; i!=0; i--)
+    {   unsigned __int128 p = ((unsigned __int128)hi << 64) | r[i];
+        uint64_t q = (uint64_t)(p / ten19);
+        hi = (uint64_t)(p % ten19);
+        r[i] = q;
+    }
+    unsigned __int128 p = ((unsigned __int128)hi << 64) | r[0];
+    uint64_t q = (uint64_t)(p / ten19);
+    hi = (uint64_t)(p % ten19);
+    r[0] = q;
+    if (r[n-1] == 0) n--;
+printf("=> %.16" PRIx64 "  (%d):", hi, (int)n);
+for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, r[i]);
+printf("\n");
+    return hi;
+}
+
+string_representation bignum_to_string(number_representation aa)
+{   size_t n = number_size(aa);
+    uint64_t *a = number_data(aa);
+printf("convert to base 10^19: [%d]", (int)n);
+for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, a[i]);
+printf("\n");
+// The size (m) for the block of memory that I put my result in is
+// such that it could hold the string representation of my input, ie
+// enough space using each uint64_t to hold values up to 99999999. This
+// leave more than ample space to convert the input to base 10^19. I use
+// this higher number in the conversion because the radix conversion
+// part has quadratic code and using a larger radix thus should speed
+// things up. I then do a linear sweep expanding from radix 10^19 to
+// radix 10.
+    uint64_t m = 1 + (525*n + 217)/218;
+printf("Will build result in a vector of length %d\n", (int)m);
+// I am going to build up (decimal) digits of the converted number by
+// repeatedly dividing by 10^19. Each time I do that the remainder I
+// amd left with is the next low 19 decimal digits of my number. Doing the
+// divisions needs a vector to store the number I am dividing by 10^19 and
+// to put the quotient, and I do not want to corrupt my original input, so
+// I will copy my input into a fresh vector. And I will force it to be
+// positive. The made-positive version might have a leading digit with
+// its top bit set - that will not worry me because I view it as unsigned.
+    uint64_t *r = preallocate(m);
+    size_t i;
+    for (i=0; i<n; i++) r[i] = a[i];
+    for (; i<m; i++) r[i] = 0;
+// Make it positive
+    bool sign = false;
+    if (negative(r[n-1]))
+    {   sign = true;
+        uint64_t carry = 1;
+        for (i=0; i<n; i++)
+        {   uint64_t w = r[i] = ~r[i] + carry;
+            carry = (w < carry ? 1 : 0);
+        }
+    }
+printf("made positive: [%d]", (int)n);
+for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, r[i]);
+printf("\n");
+// Now my number is positive and is of length n, but the vector it is
+// stored in is length m with m usefully larger than n. I will repeatedly
+// divide by 10^19 and each time I do that I can store the remainder working
+// down from the top of the vector. That should JUST keep up so that I
+// never overwrite digits of the reducing part! I will stop when the
+// number I have been working with end up < 10^19.
+    size_t p = m-1; // indicates where to put next output digit
+    while (n > 1 || r[0] > ten19)
+    {   uint64_t d = short_divide_ten_19(r, n);
+        r[p--] = d;
+printf("next digit is %.16" PRIx64 "\n", d);
+    }
+    r[p--] = r[0];
+printf("end of radix conversion: [%d]", (int)p);
+for (size_t q=0; q<m; q++) printf(" %.19" PRIu64, r[q]);
+printf("\n");
+// Now I have the data that has to go into my result as a sequence of
+// digits base 10^19, with the most significant one first. Convert
+// to character data. I write in the string data just over what has been
+// digits data, and I have arranged to position everything to (just)
+// avoid overwriting myself.
+    char *p1 = (char *)r;
+    int len = 0;
+    if (sign)
+    {   *p1++ = '-';
+        len = 1;
+    }
+    len += sprintf(p1, "%" PRId64, r[++p]);
+    p1 += len;
+    assert(len < m*sizeof(uint64_t));
+    return confirm_size_string(r, m, len);
 }
 
 // Negation. Note that because I am using 2s complement the result could be
@@ -545,11 +816,11 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-item_representation bignegate(item_representation a)
-{   size_t n = item_size(a);
+number_representation bignegate(number_representation a)
+{   size_t n = number_size(a);
     uint64_t *p = preallocate(n+1);
     size_t final_n;
-    bignegate(item_data(a), n, p, final_n);
+    bignegate(number_data(a), n, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -562,11 +833,11 @@ static void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-item_representation biglognot(item_representation a)
-{   size_t n = item_size(a);
+number_representation biglognot(number_representation a)
+{   size_t n = number_size(a);
     uint64_t *p = preallocate(n+1);
     size_t final_n;
-    biglognot(item_data(a), n, p, final_n);
+    biglognot(number_data(a), n, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -798,22 +1069,21 @@ void display(const char *label, uint64_t *a, size_t lena)
     printf("\n");
 }
 
-void display(const char *label, item_representation a)
-{   printf("%s: [%d]", label, (int)item_size(a));
-    uint64_t *d = item_data(a);
-    size_t len = item_size(a);
+void display(const char *label, number_representation a)
+{   printf("%s: [%d]", label, (int)number_size(a));
+    uint64_t *d = number_data(a);
+    size_t len = number_size(a);
     for (size_t i=0; i<len; i++)
         printf(" %.16" PRIx64, d[len-i-1]);
     printf("\n");
 }
 
-uint64_t a[100], b[100], c[100];
-size_t lena, lenb, lenc;
-
 int main(int argc, char *argv[])
 {
-    item_representation ten = string_to_bignum("100");
-    display("a", ten);
+    number_representation ten = string_to_bignum("100");
+    display("ten", ten);
+    const char *s = bignum_to_string(ten);
+    printf("ten = <%s>\n", s);
     return 0;    
 }
 
