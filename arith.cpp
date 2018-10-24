@@ -349,8 +349,9 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // In my Lisp world I allocate memory in units of 8 bytes and when a string
 // does not completely fill the final unit I like to pad with NULs. Doing so
 // makes it possible to compare strings by doing word-at-a-time operations
-// rather than byte-at-a-time and similarly compute hash values fast (that is
-// provided I am willing to ignore concerns about strict aliasing!).
+// rather than byte-at-a-time and similarly compute hash values fast. And
+// because I am using byte access here that should not lead to strict aliasing
+// worried when I then access the data using wider data types. I think!
     size_t n1 = final_n;
     while ((n1%8) != 0) (char *)p[n1++] = 0;
     memory_used -= (n - n1/sizeof(uint64_t));
@@ -693,7 +694,6 @@ number_representation string_to_bignum(const char *s)
 // rarely it will be and overestimate and it will be necessary to trim the
 // vector at the end.
     uint64_t *r = preallocate(words);
-printf("%d chars -> %d words\n", (int)chars, (int)words);
     for (size_t i=0; i<words; i++) r[i] = 0;
 // Now for each chunk of digits NNNN in the input I want to go in effect
 //     r = 10^19*r + NNNN;
@@ -714,15 +714,11 @@ printf("%d chars -> %d words\n", (int)chars, (int)words);
             multiply64(r[i], ten19, d, hi, lo);
             r[i] = lo;
             d = hi;
-printf("carry forward %.16" PRIx64, d);
         }
     }
     size_t n1 = words;
-printf("at end of assembly words = %d\n", (int)words);
 // Here I may be negating a positive number, and in 2s complement that
 // can never lead to a number growing in length.
-for (size_t i=0; i<n1; i++) printf(" %.16" PRIx64, r[i]);
-printf("\n");
     if (sign)
     {   uint64_t carry = 1;
         for (size_t i=0; i<words; i++)
@@ -735,8 +731,6 @@ printf("\n");
 // needed and I arranged that any error was conservative - ie allocating
 // more that would eventually be used.
     else while (r[n1-1]==0 && n1>1 && positive(r[n1-2])) n1--; 
-for (size_t i=0; i<n1; i++) printf(" %.16" PRIx64, r[i]);
-printf("\n");
     return confirm_size(r, words, n1);
 }
 
@@ -754,9 +748,6 @@ printf("\n");
 
 static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
 {   uint64_t hi = 0;
-printf("short divide (%d):", (int)n);
-for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, r[i]);
-printf("\n");
     for (size_t i = n-1; i!=0; i--)
     {   unsigned __int128 p = ((unsigned __int128)hi << 64) | r[i];
         uint64_t q = (uint64_t)(p / ten19);
@@ -768,28 +759,66 @@ printf("\n");
     hi = (uint64_t)(p % ten19);
     r[0] = q;
     if (r[n-1] == 0) n--;
-printf("=> %.16" PRIx64 "  (%d):", hi, (int)n);
-for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, r[i]);
-printf("\n");
     return hi;
 }
+
+#ifdef __GNUC__
+
+// Note that __GNUC__ also gets defined by clang on the Macintosh, so
+// this code is probably optimized there too. Because bignums never have
+// a zero leading digit I should never call this with a zero argument,
+// which is just as well because its behaviour in that case is undefined!
+
+static inline int nlz(uint64_t x)
+{   return __builtin_clzll(x);  // Must use the 64-bit version of clz.
+}
+
+#else // __GNUC__
+
+static inline int nlz(uint64_t x)
+{   int n = 0;
+    if (x <= 0x00000000FFFFFFFFU) {n = n +32; x = x <<32;}
+    if (x <= 0x0000FFFFFFFFFFFFU) {n = n +16; x = x <<16;}
+    if (x <= 0x00FFFFFFFFFFFFFFU) {n = n + 8; x = x << 8;}
+    if (x <= 0x0FFFFFFFFFFFFFFFU) {n = n + 4; x = x << 4;}
+    if (x <= 0x3FFFFFFFFFFFFFFFU) {n = n + 2; x = x << 2;}
+    if (x <= 0x7FFFFFFFFFFFFFFFU) {n = n + 1;}
+    return n;
+}
+
+#endif // __GNUC__
+
+// I want an estimate of the number of bytes that it will take to
+// represent a number when I convert it to a string.
+
+static size_t predict_size_in_bytes(uint64_t *a, size_t n)
+{   uint64_t r;
+// I am first going to estimate the size in BITS and then I will
+// see how that maps onto bytes.
+    uint64_t top = a[n-1];  // top digit.
+    if (negative(top))
+    {   top = -top;
+        r = 8;       // 8 bits for a "-" sign.
+    }
+    else r = 0;
+    r = r + 64*(n-1) + (64-nlz(top));
+// This risks overflow if the string was going to be over 2^51 bytes long!
+    return (617*r)/2048;
+} 
 
 string_representation bignum_to_string(number_representation aa)
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
-printf("convert to base 10^19: [%d]", (int)n);
-for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, a[i]);
-printf("\n");
+// Making the value zero a special case simplifies things later on!
+    if (n == 1 && a[0] == 0)
+    {   uint64_t *r = preallocate(1);
+        strcpy((char *)r, "0");
+        return confirm_size_string(r, 1, 1);
+    }
 // The size (m) for the block of memory that I put my result in is
-// such that it could hold the string representation of my input, ie
-// enough space using each uint64_t to hold values up to 99999999. This
-// leave more than ample space to convert the input to base 10^19. I use
-// this higher number in the conversion because the radix conversion
-// part has quadratic code and using a larger radix thus should speed
-// things up. I then do a linear sweep expanding from radix 10^19 to
-// radix 10.
-    uint64_t m = 1 + (525*n + 217)/218;
-printf("Will build result in a vector of length %d\n", (int)m);
+// such that it could hold the string representation of my input, and
+// I estimate that via predict_size_in_bytes().
+    uint64_t m = (7 + predict_size_in_bytes(a, n))/8;
 // I am going to build up (decimal) digits of the converted number by
 // repeatedly dividing by 10^19. Each time I do that the remainder I
 // amd left with is the next low 19 decimal digits of my number. Doing the
@@ -812,9 +841,6 @@ printf("Will build result in a vector of length %d\n", (int)m);
             carry = (w < carry ? 1 : 0);
         }
     }
-printf("made positive: [%d]", (int)n);
-for (size_t i=0; i<n; i++) printf(" %.16" PRIx64, r[i]);
-printf("\n");
 // Now my number is positive and is of length n, but the vector it is
 // stored in is length m with m usefully larger than n. I will repeatedly
 // divide by 10^19 and each time I do that I can store the remainder working
@@ -825,12 +851,8 @@ printf("\n");
     while (n > 1 || r[0] > ten19)
     {   uint64_t d = short_divide_ten_19(r, n);
         r[p--] = d;
-printf("next digit is %.16" PRIx64 "\n", d);
     }
-    r[p--] = r[0];
-printf("end of radix conversion: [%d]", (int)p);
-for (size_t q=0; q<m; q++) printf(" %.19" PRIu64, r[q]);
-printf("\n");
+    r[p] = r[0];
 // Now I have the data that has to go into my result as a sequence of
 // digits base 10^19, with the most significant one first. Convert
 // to character data. I write in the string data just over what has been
@@ -842,16 +864,66 @@ printf("\n");
     {   *p1++ = '-';
         len = 1;
     }
-    len += sprintf(p1, "%" PRId64, r[++p]);
+    len += sprintf(p1, "%" PRId64, r[p++]);
     p1 += len;
     assert(len < m*sizeof(uint64_t));
     while (p < m)
-    {   sprintf(p1, "%.19" PRId64, r[++p]);
-        p += 19;
+    {   sprintf(p1, "%.19" PRId64, r[p++]);
+        p1 += 19;
         len += 19;
         assert(len <= m*sizeof(uint64_t));
     }
     return confirm_size_string(r, m, len);
+}
+
+string_representation bignum_to_string_hex(number_representation aa)
+{   size_t n = number_size(aa);
+    uint64_t *a = number_data(aa);
+// Making the value zero a special case simplifies things later on!
+    if (n == 1 && a[0] == 0)
+    {   uint64_t *r = preallocate(1);
+        strcpy((char *)r, "0");
+        return confirm_size_string(r, 1, 1);
+    }
+// printing in hexadecimal should be way easier!
+    size_t m = 16*n;
+    uint64_t top = a[n-1];
+    bool sign = negative(top);
+    if (sign)
+    {   m += 2; // for "~f"
+        while ((top>>60) == 0xf)
+        {   top = top << 4;
+            m--;
+        }
+    }
+    else
+    {   while ((top>>60) == 0)
+        {   top = top << 4;
+            m--;
+        }
+    }
+    size_t nn = (m + 7)/8;
+    uint64_t *r = preallocate(nn);
+    char *p = (char *)r;
+    top = a[n-1];
+    if (sign)
+    {   *p++ = '~';
+        *p++ = 'f';
+    }
+    bool started = false;
+    for (size_t i=0; i<n; i++)
+    {   uint64_t v = a[n-i-1];
+        for (int j=0; j<16; j++)
+        {   int d = (int)(v >> (60-4*j)) & 0xf;
+            if (!started)
+            {   if ((sign && d==0xf) ||
+                    (!sign && d==0)) continue;
+                started = true;
+            }
+            *p++ = "0123456789abcdef"[d];
+        }
+    }   
+    return confirm_size_string(r, nn, m);
 }
 
 // Negation. Note that because I am using 2s complement the result could be
@@ -1148,13 +1220,22 @@ int main(int argc, char *argv[])
     display("ten", ten);
     const char *s = bignum_to_string(ten);
     printf("ten = <%s>\n", s);
-    ten = string_to_bignum("100000000000000000000000000000000000000000");
+    ten = string_to_bignum("123456789012345678901234567890123456789012345");
     display("ten", ten);
     s = bignum_to_string(ten);
     printf("ten = <%s>\n", s);
+    for (int i=0; i<20; i++)
+    {   char ti[30];
+        sprintf(ti, "%d", -i);
+        number_representation k = string_to_bignum(ti);
+        const char *l = bignum_to_string_hex(k);
+        printf("%d : %s\n", i, l);
+    }
+
     return 0;    
 }
 
 #endif // TEST
 
 // end of arith.cpp
+
