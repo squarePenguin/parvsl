@@ -62,6 +62,9 @@ step2:	vsl
 		-Dnoinlines=t \
 		step2.red | tee step2.log
 
+arith:	arith.cpp
+	g++ -O0 -g -DTEST=1 arith.cpp -o arith
+
 testlogs/%.log:
 	./test.sh $@
 

@@ -1,4 +1,53 @@
-// A sketch of simple bignum arithmetic using 64-bit digits
+// Big-number arithmetic.                                  A C Norman, 2018
+
+// There are quite a lot of bignumber packages out there on the web,
+// but none of them seemed to be such that I could readily use them
+// for arithmetic within a Lisp at all easily. The code here tries to
+// support "big-numbers as objects" where the exact structure of the object
+// and storage management for it is done elsewhere, and also "big-numbers
+// as block of memory managed by malloc and free".
+//
+// The code uses 64-bit digits and a 2s complement representation for
+// negative numbers. This means it will work best on 64-bit platforms
+// (which by now are by far the most important), and it provides bitwise
+// logical operations (logand and logor) as well as arithmetic.
+//
+// If VSL is defined when this is compiled it uses Lisp-style object
+// representation, otherwise malloc().
+// If TEST is defined then this file becomes a self-contained one with
+// a few demonstration and test examples at the end.
+
+
+/**************************************************************************
+ * Copyright (C) 2018, Codemist.                         A C Norman       *
+ *                                                                        *
+ * Redistribution and use in source and binary forms, with or without     *
+ * modification, are permitted provided that the following conditions are *
+ * met:                                                                   *
+ *                                                                        *
+ *     * Redistributions of source code must retain the relevant          *
+ *       copyright notice, this list of conditions and the following      *
+ *       disclaimer.                                                      *
+ *     * Redistributions in binary form must reproduce the above          *
+ *       copyright notice, this list of conditions and the following      *
+ *       disclaimer in the documentation and/or other materials provided  *
+ *       with the distribution.                                           *
+ *                                                                        *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS    *
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      *
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS      *
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE         *
+ * COPYRIGHT OWNERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,   *
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,   *
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS  *
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND *
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR  *
+ * TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF     *
+ * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH   *
+ * DAMAGE.                                                                *
+ *************************************************************************/
+
+
 
 // TODO:
 //   eqn, greaterp, geq, lessp, leq
@@ -632,8 +681,7 @@ number_representation string_to_bignum(const char *s)
         s++;
     }
     size_t chars = strlen(s);
-// If I do the 
-    size_t words = 1 + (108853*(uint64_t)chars)/0x2000000;
+    size_t words = 1 + (108853*(uint64_t)chars)/0x200000;
 // I have predicted the number of 64-bit digits that will be needed to
 // represent an s-digit (decimal) number based an approximation
 // 108853/2^21 for log(10)/log(2^64). In 64-bit arithmetic the numerator
@@ -645,6 +693,7 @@ number_representation string_to_bignum(const char *s)
 // rarely it will be and overestimate and it will be necessary to trim the
 // vector at the end.
     uint64_t *r = preallocate(words);
+printf("%d chars -> %d words\n", (int)chars, (int)words);
     for (size_t i=0; i<words; i++) r[i] = 0;
 // Now for each chunk of digits NNNN in the input I want to go in effect
 //     r = 10^19*r + NNNN;
@@ -665,11 +714,15 @@ number_representation string_to_bignum(const char *s)
             multiply64(r[i], ten19, d, hi, lo);
             r[i] = lo;
             d = hi;
+printf("carry forward %.16" PRIx64, d);
         }
     }
     size_t n1 = words;
+printf("at end of assembly words = %d\n", (int)words);
 // Here I may be negating a positive number, and in 2s complement that
 // can never lead to a number growing in length.
+for (size_t i=0; i<n1; i++) printf(" %.16" PRIx64, r[i]);
+printf("\n");
     if (sign)
     {   uint64_t carry = 1;
         for (size_t i=0; i<words; i++)
@@ -682,6 +735,8 @@ number_representation string_to_bignum(const char *s)
 // needed and I arranged that any error was conservative - ie allocating
 // more that would eventually be used.
     else while (r[n1-1]==0 && n1>1 && positive(r[n1-2])) n1--; 
+for (size_t i=0; i<n1; i++) printf(" %.16" PRIx64, r[i]);
+printf("\n");
     return confirm_size(r, words, n1);
 }
 
@@ -790,6 +845,12 @@ printf("\n");
     len += sprintf(p1, "%" PRId64, r[++p]);
     p1 += len;
     assert(len < m*sizeof(uint64_t));
+    while (p < m)
+    {   sprintf(p1, "%.19" PRId64, r[++p]);
+        p += 19;
+        len += 19;
+        assert(len <= m*sizeof(uint64_t));
+    }
     return confirm_size_string(r, m, len);
 }
 
@@ -1058,9 +1119,12 @@ void bigmultiply(const uint64_t *a, size_t lena,
 // The actual value may be 1 word shorter than this.
 }
 
-// @@@@@@@@@@@@@@@@@@@@@@@@@@@@
+#ifdef TEST
 
 // I need some test code for all of this!
+
+// display() will show the internal representation of a bignum as a
+// sequence of hex values. This is obviously useful while debugging!
 
 void display(const char *label, uint64_t *a, size_t lena)
 {   printf("%s: [%d]", label, (int)lena);
@@ -1080,12 +1144,17 @@ void display(const char *label, number_representation a)
 
 int main(int argc, char *argv[])
 {
-    number_representation ten = string_to_bignum("100");
+    number_representation ten = string_to_bignum("100000000000000000000");
     display("ten", ten);
     const char *s = bignum_to_string(ten);
+    printf("ten = <%s>\n", s);
+    ten = string_to_bignum("100000000000000000000000000000000000000000");
+    display("ten", ten);
+    s = bignum_to_string(ten);
     printf("ten = <%s>\n", s);
     return 0;    
 }
 
+#endif // TEST
 
 // end of arith.cpp
