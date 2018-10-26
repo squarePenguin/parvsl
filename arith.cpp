@@ -1290,6 +1290,10 @@ public:
     void operator --(int);
 };
 
+const char *to_string(Bignum x)
+{   return bignum_to_string(x.val);
+}
+
 inline Bignum Bignum::operator +(const Bignum &x) const
 {   Bignum ans;
     ans.val = bigadd(this->val, x.val);
@@ -1387,13 +1391,10 @@ int main(int argc, char *argv[])
     display("ten", ten);
     s = bignum_to_string(ten);
     printf("ten = <%s>\n", s);
-    for (int i=0; i<20; i++)
-    {   char ti[30];
-        sprintf(ti, "%d", -i);
-        number_representation k = string_to_bignum(ti);
-        const char *l = bignum_to_string_hex(k);
-        printf("%d : %s\n", i, l);
-    }
+    Bignum x;
+    x.val = ten;
+    s = to_string(x+x);
+    printf("ten+ten = <%s>\n", s);
 
     return 0;    
 }
