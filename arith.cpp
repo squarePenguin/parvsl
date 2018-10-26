@@ -469,8 +469,12 @@ void free_string(string_representation p)
 // This length will be such that the overall number does not have any
 // extraneous leading zeros or leading 0xffffffffffffffff words, save that
 // the value zero will be returned as a single word value not a no-word
-// one. A consequence of all this is that any bignum with length 1 can be
-// extracted as an int64_t without loss.
+// one. Note the word "extraneous", because the positive value 2^64-1
+// will be represented as a 2-word item with 0 in the higher digit and
+// 0xffffffffffffffff in the lower one - the leading zero is needed so
+// that it is clear that the value is positive. A consequence of all this
+// is that any bignum with length 1 can be extracted as an int64_t without
+// loss.
 
 // I want "add-with-carry" operations, and so I provide a function here to
 // implement it. If the C++ compiler had a nice intrinsic I would like
@@ -765,9 +769,8 @@ static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
 #ifdef __GNUC__
 
 // Note that __GNUC__ also gets defined by clang on the Macintosh, so
-// this code is probably optimized there too. Because bignums never have
-// a zero leading digit I should never call this with a zero argument,
-// which is just as well because its behaviour in that case is undefined!
+// this code is probably optimized there too. This must NEVER be called
+// with a zero argument.
 
 static inline int nlz(uint64_t x)
 {   return __builtin_clzll(x);  // Must use the 64-bit version of clz.
@@ -801,7 +804,7 @@ static size_t predict_size_in_bytes(uint64_t *a, size_t n)
         r = 8;       // 8 bits for a "-" sign.
     }
     else r = 0;
-    r = r + 64*(n-1) + (64-nlz(top));
+    r = r + 64*(n-1) + (top==0 ? 0 : 64-nlz(top));
 // This risks overflow if the string was going to be over 2^51 bytes long!
     return (617*r)/2048;
 } 
@@ -994,6 +997,18 @@ void biglogand(const uint64_t *a, size_t lena,
     else return ordered_biglogand(b, lenb, a, lena, r, lenr);
 }
 
+number_representation biglogand(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n;
+    if (na >= nb) n = na;
+    else n = nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    biglogand(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
 // logor
 
 void ordered_biglogor(const uint64_t *a, size_t lena,
@@ -1086,6 +1101,18 @@ void bigadd(const uint64_t *a, size_t lena,
     else return ordered_bigadd(b, lenb, a, lena, r, lenr);
 }
 
+number_representation bigadd(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n;
+    if (a >= b) n = na+1;
+    else n = nb+1;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigadd(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
 // For subtraction I implement both a-b and b-a. These work by
 // computing a + (~b) + 1 and (~a) + b + 1 respectively.
 
@@ -1174,7 +1201,21 @@ void bigmultiply(const uint64_t *a, size_t lena,
                  uint64_t *r, size_t &lenr)
 {   for (size_t i=0; i<lena+lenb; i++)
         r[i] = 0;
-// As coded at present I only cope with +ve inputs.
+// As coded at present I only cope with +ve inputs, however dealing with
+// negative ones will be easy - it is merely that I have not coded it yet.
+// If a and/or be are negative then I can treat their true values as
+//    a = sa + va      b = sb + vb
+// where sa and sb and the signs - represented here as 0 for a positive
+// number and -2^(64*len) for a negative one. va and vb are then the simple
+// bit-patterns for a and b but now interpreted as unsigned values. So if
+// instead of using 64-bit digits I was using 8 bit ones, the value -3
+// would be stored as 0xfd and that would be spit up as -128 + 253.
+// Then a*b = sa*sb + sa*vb + sb*va + va*vb.
+// The last item there is just the product of a and b when treated as
+// unsigned values, and so is what I compute first here rather simply.
+// If sa and/or sb is non-zero it is just the negative of a power of 2^64,
+// and so I can correct the unsigned product into a signed one by (sometimes)
+// subtracting a shifted version of a or b from it.
     for (size_t i=0; i<lena; i++)
     {   uint64_t prev_hi = 0, carry = 0;
         for (size_t j=0; j<lenb; j++)
@@ -1187,9 +1228,131 @@ void bigmultiply(const uint64_t *a, size_t lena,
         }
         r[i+lenb] = prev_hi + carry;
     }
+//  if (negative(a[lena-1])) subtract shifted b from r
+//  if (negative(b[lenb-1])) subtract shifted a from r
     lenr = lena + lenb;
 // The actual value may be 1 word shorter than this.
+//  test top digit or r and if necessary reduce lenr.
 }
+
+// If this code is going to be used within a Lisp system (or indeed
+// some similar system) then I think that the rest of the code will
+// with to call bigadd etc directly and the "convenience" layer will emerge
+// when arithmetic gets reflected up unto the Lisp world, eg as (plus 2 3).
+// However for other users it may be handy to provide operator overloading
+// so that C++ code can use buf arithmetic integrated in with the rest of
+// their code and using infix operators.
+
+#ifndef VSL
+
+class Bignum
+{
+public:
+    number_representation val;
+    Bignum()
+    {   val = (number_representation)0;
+    }
+    Bignum(int32_t n);
+    Bignum(int64_t n);
+
+    void operator = (const Bignum &x);
+
+    bool operator ==(const Bignum &x) const;
+    bool operator > (const Bignum &x) const;
+    bool operator >=(const Bignum &x) const;
+    bool operator < (const Bignum &x) const;
+    bool operator <=(const Bignum &x) const;
+
+    Bignum operator + (const Bignum &x) const;
+    Bignum operator - (const Bignum &x) const;
+    Bignum operator * (const Bignum &x) const;
+    Bignum operator / (const Bignum &x) const;
+    Bignum operator % (const Bignum &x) const;
+    Bignum operator - () const;
+
+    Bignum operator & (const Bignum &x) const;
+    Bignum operator | (const Bignum &x) const;
+    Bignum operator ^ (const Bignum &x) const;
+
+    void operator += (const Bignum &x);
+    void operator -= (const Bignum &x);
+    void operator *= (const Bignum &x);
+    void operator /= (const Bignum &x);
+    void operator %= (const Bignum &x);
+
+    void operator &= (const Bignum &x);
+    void operator |= (const Bignum &x);
+    void operator ^= (const Bignum &x);
+
+    void operator ++();
+    void operator ++(int);
+    void operator --();
+    void operator --(int);
+};
+
+inline Bignum Bignum::operator +(const Bignum &x) const
+{   Bignum ans;
+    ans.val = bigadd(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator -(const Bignum &x) const
+{
+//      Bignum ans;
+//      ans.subtract(*this, x);
+//      return ans;
+}
+inline Bignum Bignum::operator *(const Bignum &x) const {
+//      Bignum ans;
+//      ans.multiply(*this, x);
+//      return ans;
+}
+inline Bignum Bignum::operator /(const Bignum &x) const {
+//      if (x.isZero()) throw "Bignum::operator /: division by zero";
+//      Bignum q, r;
+//      r = *this;
+//      r.divideWithRemainder(x, q);
+//      return q;
+}
+inline Bignum Bignum::operator %(const Bignum &x) const {
+//      if (x.isZero()) throw "Bignum::operator %: division by zero";
+//      Bignum q, r;
+//      r = *this;
+//      r.divideWithRemainder(x, q);
+//      return r;
+}
+inline Bignum Bignum::operator -() const {
+//      Bignum ans;
+//      ans.negate(*this);
+//      return ans;
+}
+inline void Bignum::operator +=(const Bignum &x) {
+//      add(*this, x);
+}
+inline void Bignum::operator -=(const Bignum &x) {
+//      subtract(*this, x);
+}
+inline void Bignum::operator *=(const Bignum &x) {
+//      multiply(*this, x);
+}
+inline void Bignum::operator /=(const Bignum &x) {
+//      if (x.isZero()) throw "Bignum::operator /=: division by zero";
+//      /* The following technique is slightly faster than copying *this first
+//       * when x is large. */
+//      Bignum q;
+//      divideWithRemainder(x, q);
+//      // *this contains the remainder, but we overwrite it with the quotient.
+//      *this = q;
+}
+inline void Bignum::operator %=(const Bignum &x) {
+//      if (x.isZero()) throw "Bignum::operator %=: division by zero";
+//      Bignum q;
+//      // Mods *this by x.  Don't care about quotient left in q.
+//      divideWithRemainder(x, q);
+} 
+
+#endif
+
 
 #ifdef TEST
 
