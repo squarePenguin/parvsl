@@ -50,7 +50,6 @@
 
 
 // TODO:
-//   eqn, greaterp, geq, lessp, leq
 //   gcdn, lcmn
 //   float, floor, ceil, fix
 //   quotient, remainder
@@ -927,11 +926,43 @@ string_representation bignum_to_string_hex(number_representation aa)
     return confirm_size_string(r, nn, m);
 }
 
+// eqn
+
+bool bigeqn(const uint64_t *a, size_t lena,
+            const uint64_t *b, size_t lenb)
+{   if (lena != lenb) return false;
+    return memcmp(a, b, lena*sizeof(uint64_t)) == 0;   
+}
+
+bool bigeqn(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    return bigeqn(number_data(a), na, number_data(b), nb);
+}
+
 // greaterp
 
 bool biggreaterp(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb)
-{   
+{   uint64_t a0, b0;
+// If one of the numbers has more digits than the other then the sign of
+// the longer one gives my the answer.
+    if (lena > lenb) return positive(a0 = a[lena-1]);
+    else if (lenb > lena) return negative(b0 = b[lenb-1]);
+// When the two numbers are the same length but the top digits differ
+// then comparing those digits tells me all I need to know.
+    if ((int64_t)a0 > (int64_t)b0) return true;
+    if ((int64_t)a0 < (int64_t)b0) return false;
+// Otherwise I need to scan down through digits...
+    lena--;
+    while (lena != 0)
+    {   lena--;
+        a0 = a[lena];
+        b0 = b[lena];
+        if (a0 > b0) return true;
+        if (a0 < b0) return false;
+    }
+// If the two values are the same return false
     return false;
 }
 
@@ -945,8 +976,20 @@ bool biggreaterp(number_representation a, number_representation b)
 
 bool biggeq(const uint64_t *a, size_t lena,
             const uint64_t *b, size_t lenb)
-{   
-    return false;
+{   uint64_t a0, b0;
+    if (lena > lenb) return positive(a0 = a[lena-1]);
+    else if (lenb > lena) return negative(b0 = b[lenb-1]);
+    if ((int64_t)a0 > (int64_t)b0) return true;
+    if ((int64_t)a0 < (int64_t)b0) return false;
+    lena--;
+    while (lena != 0)
+    {   lena--;
+        a0 = a[lena];
+        b0 = b[lena];
+        if (a0 > b0) return true;
+        if (a0 < b0) return false;
+    }
+    return true;
 }
 
 bool biggeq(number_representation a, number_representation b)
@@ -959,8 +1002,7 @@ bool biggeq(number_representation a, number_representation b)
 
 bool biglessp(const uint64_t *a, size_t lena,
               const uint64_t *b, size_t lenb)
-{   
-    return false;
+{   return biggreaterp(b, lenb, a, lena);
 }
 
 bool biglessp(number_representation a, number_representation b)
@@ -973,8 +1015,7 @@ bool biglessp(number_representation a, number_representation b)
 
 bool bigleq(const uint64_t *a, size_t lena,
             const uint64_t *b, size_t lenb)
-{   
-    return false;
+{   return biggeq(b, lenb, a, lena);
 }
 
 bool bigleq(number_representation a, number_representation b)
@@ -1415,8 +1456,21 @@ class Bignum
 {
 public:
     number_representation val;
+// A default constructor build a Bignum with no stored data.
     Bignum()
     {   val = (number_representation)0;
+    }
+    ~Bignum()
+    {
+// If I am in Lisp mode then a garbage collector will tidy up. If I am
+// in "ordinary" mode I must clean up the vector that represented the actual
+// bignum when I destroy the object.
+#ifndef VSL
+        if (val != (number_representation)0)
+        {   free_bignum(val);
+            val = (number_representation)0;
+        }
+#endif
     }
     Bignum(int32_t n);
     Bignum(int64_t n);
