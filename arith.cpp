@@ -182,8 +182,6 @@ static inline LispObject boxfloat(double a)
 
 #endif // VSL
 
-//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-
 // Storage management for bignums is sort of delicate because at the
 // start of an operation one normally has just an upper bound on how much
 // space will be needed - the exact number of words to be used only emerges
@@ -929,6 +927,62 @@ string_representation bignum_to_string_hex(number_representation aa)
     return confirm_size_string(r, nn, m);
 }
 
+// greaterp
+
+bool biggreaterp(const uint64_t *a, size_t lena,
+                 const uint64_t *b, size_t lenb)
+{   
+    return false;
+}
+
+bool biggreaterp(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    return biggreaterp(number_data(a), na, number_data(b), nb);
+}
+
+// geq
+
+bool biggeq(const uint64_t *a, size_t lena,
+            const uint64_t *b, size_t lenb)
+{   
+    return false;
+}
+
+bool biggeq(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    return biggeq(number_data(a), na, number_data(b), nb);
+}
+
+// lessp
+
+bool biglessp(const uint64_t *a, size_t lena,
+              const uint64_t *b, size_t lenb)
+{   
+    return false;
+}
+
+bool biglessp(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    return biglessp(number_data(a), na, number_data(b), nb);
+}
+
+// leq
+
+bool bigleq(const uint64_t *a, size_t lena,
+            const uint64_t *b, size_t lenb)
+{   
+    return false;
+}
+
+bool bigleq(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    return bigleq(number_data(a), na, number_data(b), nb);
+}
+
 // Negation. Note that because I am using 2s complement the result could be
 // one word longer or shorter than the input. For instance if you negate
 // [0x8000000000000000] (a negative value) you get [0,0x8000000000000000],
@@ -1027,6 +1081,18 @@ void biglogor(const uint64_t *a, size_t lena,
     else return ordered_biglogor(b, lenb, a, lena, r, lenr);
 }
 
+number_representation biglogor(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n;
+    if (na >= nb) n = na;
+    else n = nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    biglogor(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
 // logxor
 
 void ordered_biglogxor(const uint64_t *a, size_t lena,
@@ -1050,6 +1116,18 @@ void biglogxor(const uint64_t *a, size_t lena,
                uint64_t *r, size_t &lenr)
 {   if (lena >= lenb) return ordered_biglogxor(a, lena, b, lenb, r, lenr);
     else return ordered_biglogxor(b, lenb, a, lena, r, lenr);
+}
+
+number_representation biglogxor(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n;
+    if (na >= nb) n = na;
+    else n = nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    biglogxor(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
 }
 
 // Add when the length of a is greater than that of b.
@@ -1196,6 +1274,30 @@ void bigsubtract(const uint64_t *a, size_t lena,
     else return ordered_bigrevsubtract(b, lenb, a, lena, r, lenr);
 }
 
+number_representation bigsubtract(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n;
+    if (a >= b) n = na+1;
+    else n = nb+1;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigsubtract(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+number_representation bigrevsubtract(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n;
+    if (a >= b) n = na+1;
+    else n = nb+1;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigsubtract(number_data(b), nb, number_data(a), na, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
 void bigmultiply(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
                  uint64_t *r, size_t &lenr)
@@ -1235,6 +1337,70 @@ void bigmultiply(const uint64_t *a, size_t lena,
 //  test top digit or r and if necessary reduce lenr.
 }
 
+number_representation bigmultiply(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n = na+nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigmultiply(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+void bigquotient(const uint64_t *a, size_t lena,
+                 const uint64_t *b, size_t lenb,
+                 uint64_t *r, size_t &lenr)
+{   printf("Division not dcoded yet\n");
+    abort();
+}
+
+number_representation bigquotient(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n = na+nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigquotient(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+void bigremainder(const uint64_t *a, size_t lena,
+                  const uint64_t *b, size_t lenb,
+                  uint64_t *r, size_t &lenr)
+{   printf("Division not dcoded yet\n");
+    abort();
+}
+
+number_representation bigremainder(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n = na+nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigremainder(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+void bigdivide(const uint64_t *a, size_t lena,
+               const uint64_t *b, size_t lenb,
+               uint64_t *r, size_t &lenr)
+{   printf("Division not dcoded yet\n");
+    abort();
+}
+
+number_representation bigdivide(number_representation a, number_representation b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    size_t n = na+nb;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigdivide(number_data(a), na, number_data(b), nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+
+
+
 // If this code is going to be used within a Lisp system (or indeed
 // some similar system) then I think that the rest of the code will
 // with to call bigadd etc directly and the "convenience" layer will emerge
@@ -1273,6 +1439,7 @@ public:
     Bignum operator & (const Bignum &x) const;
     Bignum operator | (const Bignum &x) const;
     Bignum operator ^ (const Bignum &x) const;
+    Bignum operator ~ () const;
 
     void operator += (const Bignum &x);
     void operator -= (const Bignum &x);
@@ -1301,45 +1468,95 @@ inline Bignum Bignum::operator +(const Bignum &x) const
 }
 
 inline Bignum Bignum::operator -(const Bignum &x) const
+{   Bignum ans;
+    ans.val = bigsubtract(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator *(const Bignum &x) const
+{   Bignum ans;
+    ans.val = bigmultiply(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator /(const Bignum &x) const
+{   Bignum ans;
+    ans.val = bigquotient(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator %(const Bignum &x) const
+{   Bignum ans;
+    ans.val = bigremainder(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator -() const
+{   Bignum ans;
+    ans.val = bignegate(this->val);
+    return ans;
+}
+
+inline Bignum Bignum::operator &(const Bignum &x) const
+{   Bignum ans;
+    ans.val = biglogand(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator |(const Bignum &x) const
+{   Bignum ans;
+    ans.val = biglogor(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator ^(const Bignum &x) const
+{   Bignum ans;
+    ans.val = biglogxor(this->val, x.val);
+    return ans;
+}
+
+inline Bignum Bignum::operator ~() const
+{   Bignum ans;
+    ans.val = biglognot(this->val);
+    return ans;
+}
+
+inline bool Bignum::operator >(const Bignum &x) const
+{   return biggreaterp(this->val, x.val);
+}
+
+inline bool Bignum::operator >=(const Bignum &x) const
+{   return biggeq(this->val, x.val);
+}
+
+inline bool Bignum::operator <(const Bignum &x) const
+{   return biglessp(this->val, x.val);
+}
+
+inline bool Bignum::operator <=(const Bignum &x) const
+{   return bigleq(this->val, x.val);
+}
+
+
+
+
+inline void Bignum::operator +=(const Bignum &x)
 {
-//      Bignum ans;
-//      ans.subtract(*this, x);
-//      return ans;
-}
-inline Bignum Bignum::operator *(const Bignum &x) const {
-//      Bignum ans;
-//      ans.multiply(*this, x);
-//      return ans;
-}
-inline Bignum Bignum::operator /(const Bignum &x) const {
-//      if (x.isZero()) throw "Bignum::operator /: division by zero";
-//      Bignum q, r;
-//      r = *this;
-//      r.divideWithRemainder(x, q);
-//      return q;
-}
-inline Bignum Bignum::operator %(const Bignum &x) const {
-//      if (x.isZero()) throw "Bignum::operator %: division by zero";
-//      Bignum q, r;
-//      r = *this;
-//      r.divideWithRemainder(x, q);
-//      return r;
-}
-inline Bignum Bignum::operator -() const {
-//      Bignum ans;
-//      ans.negate(*this);
-//      return ans;
-}
-inline void Bignum::operator +=(const Bignum &x) {
 //      add(*this, x);
 }
-inline void Bignum::operator -=(const Bignum &x) {
+
+inline void Bignum::operator -=(const Bignum &x)
+{
 //      subtract(*this, x);
 }
-inline void Bignum::operator *=(const Bignum &x) {
+
+inline void Bignum::operator *=(const Bignum &x)
+{
 //      multiply(*this, x);
 }
-inline void Bignum::operator /=(const Bignum &x) {
+
+inline void Bignum::operator /=(const Bignum &x)
+{
 //      if (x.isZero()) throw "Bignum::operator /=: division by zero";
 //      /* The following technique is slightly faster than copying *this first
 //       * when x is large. */
@@ -1348,7 +1565,9 @@ inline void Bignum::operator /=(const Bignum &x) {
 //      // *this contains the remainder, but we overwrite it with the quotient.
 //      *this = q;
 }
-inline void Bignum::operator %=(const Bignum &x) {
+
+inline void Bignum::operator %=(const Bignum &x)
+{
 //      if (x.isZero()) throw "Bignum::operator %=: division by zero";
 //      Bignum q;
 //      // Mods *this by x.  Don't care about quotient left in q.
