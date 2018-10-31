@@ -64,12 +64,12 @@
 #define __STDC_CONST_MACROS 1
 #define __STDC_LIMIT_MACROS 1
 
-#include <stdio.h>
-#include <string.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <assert.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstring>
+#include <cstdint>
+#include <cinttypes>
+#include <cassert>
+#include <cstdlib>
 
 #include <iostream>
 #include <iomanip>
@@ -913,11 +913,11 @@ string_representation bignum_to_string(number_representation aa)
     {   *p1++ = '-';
         len = 1;
     }
-    len += sprintf(p1, "%" PRId64, r[p++]);
+    len += std::sprintf(p1, "%" PRId64, r[p++]);
     p1 += len;
     assert(len < m*sizeof(uint64_t));
     while (p < m)
-    {   sprintf(p1, "%.19" PRId64, r[p++]);
+    {   std::sprintf(p1, "%.19" PRId64, r[p++]);
         p1 += 19;
         len += 19;
         assert(len <= m*sizeof(uint64_t));
@@ -1484,7 +1484,7 @@ number_representation bigmultiply(number_representation a, number_representation
 void bigquotient(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
                  uint64_t *r, size_t &lenr)
-{   printf("Division not dcoded yet\n");
+{   std::cout << "Division not dcoded yet\n" << std::endl;
     abort();
 }
 
@@ -1501,7 +1501,7 @@ number_representation bigquotient(number_representation a, number_representation
 void bigremainder(const uint64_t *a, size_t lena,
                   const uint64_t *b, size_t lenb,
                   uint64_t *r, size_t &lenr)
-{   printf("Division not dcoded yet\n");
+{   std::cout << "Division not dcoded yet\n" << std::endl;
     abort();
 }
 
@@ -1518,7 +1518,7 @@ number_representation bigremainder(number_representation a, number_representatio
 void bigdivide(const uint64_t *a, size_t lena,
                const uint64_t *b, size_t lenb,
                uint64_t *r, size_t &lenr)
-{   printf("Division not dcoded yet\n");
+{   std::cout << "Division not dcoded yet" << std::endl;
     abort();
 }
 
@@ -1566,16 +1566,25 @@ public:
     {   val = string_to_bignum(s);
     }
 
-// Whenever I assign a Bignum I have to worry about whether I am allowed to
-// have multiple references to a single item. If I am not (as in the simple
-// case where data is allocated using malloc()) I need to make a copy of the
-// value that I am assigning (and I need to discard the value that is being
-// overwritten).
-
     void operator = (const Bignum &x)
     {   if (this == &x) return; // assign to self - a silly case!
         free_bignum(val);
         val = sometimes_copy_bignum(x.val);
+    }
+
+    void operator = (const int64_t x)
+    {   free_bignum(val);
+        val = int_to_bignum(x);
+    }
+
+    void operator = (const int32_t x)
+    {   free_bignum(val);
+        val = int_to_bignum((int64_t)x);
+    }
+
+    void operator = (const char *x)
+    {   free_bignum(val);
+        val = string_to_bignum(x);
     }
 
     bool operator ==(const Bignum &x) const;
@@ -1833,36 +1842,38 @@ inline Bignum Bignum::operator --(int)
 // sequence of hex values. This is obviously useful while debugging!
 
 void display(const char *label, uint64_t *a, size_t lena)
-{   printf("%s: [%d]", label, (int)lena);
+{   std::cout << label << "[" << (int)lena << "]";
     for (size_t i=0; i<lena; i++)
-        printf(" %.16" PRIx64, a[lena-i-1]);
-    printf("\n");
+        std::cout << std::hex << std::setfill('0')
+                  << std::setw(16) << a[lena-i-1]
+                  << std::dec << std::setw(0);
+    std::cout << std::endl;
 }
 
 void display(const char *label, number_representation a)
-{   printf("%s: [%d]", label, (int)number_size(a));
+{   
     uint64_t *d = number_data(a);
     size_t len = number_size(a);
+    std::cout << label << "[" << (int)len << "]";
     for (size_t i=0; i<len; i++)
-        printf(" %.16" PRIx64, d[len-i-1]);
-    printf("\n");
+        std::cout << std::hex << std::setfill('0')
+                  << std::setw(16) << d[len-i-1]
+                  << std::dec << std::setw(0);
+    std::cout << std::endl;
+}
+
+void display(const char *label, const Bignum &a)
+{   display(label, a.val);
 }
 
 int main(int argc, char *argv[])
 {
-    number_representation ten = string_to_bignum("100000000000000000000");
+    Bignum ten = "123456789012345678901234567890123456789012345";
     display("ten", ten);
-    const char *s = bignum_to_string(ten);
-    printf("ten = <%s>\n", s);
-    ten = string_to_bignum("123456789012345678901234567890123456789012345");
-    display("ten", ten);
-    s = bignum_to_string(ten);
-    printf("ten = <%s>\n", s);
+    std::cout << ten << std::endl;
     Bignum x;
-    x.val = ten;
-    s = to_string(x+x);
-    printf("ten+ten = <%s>\n", s);
-    std::cout << "(A) ten+ten = " << (x+x) << std::endl;
+    x = 987654321;
+    std::cout << "ten+ten = " << (x+x) << std::endl;
     return 0;    
 }
 
