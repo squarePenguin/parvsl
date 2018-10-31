@@ -13,7 +13,10 @@
 // logical operations (logand and logor) as well as arithmetic.
 //
 // If VSL is defined when this is compiled it uses Lisp-style object
-// representation, otherwise malloc().
+// representation, otherwise malloc(). Well I use malloc() and free()
+// rather than the C++ equivalents because that way I can provide an easy
+// way for the user to plug in replacements....
+//
 // If TEST is defined then this file becomes a self-contained one with
 // a few demonstration and test examples at the end.
 
@@ -67,6 +70,9 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <stdlib.h>
+
+#include <iostream>
+#include <iomanip>
 
 #ifdef VSL
 
@@ -359,6 +365,11 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return (LispObject)&bignum_header(p) + tagATOM;
 }
 
+number_representation sometimes_copy_bignum(number_representation p)
+{
+    return p;
+}
+
 void free_bignum(number_representation p)
 {
 }
@@ -396,14 +407,25 @@ const char *string_data(string_representation a)
 {   return a;
 }
 
+// The following are provided so that a user can update malloc_function
+// and free_function to refer to their own choice of allocation methods.
+
+typedef void *malloc_t(size_t);
+typedef void *realloc_t(void *, size_t);
+typedef void free_t(void *);
+
+malloc_t  *malloc_function = malloc;
+realloc_t *realloc_function = realloc;
+free_t    *free_function   = free;
+
 uint64_t *preallocate(size_t n)
-{   uint64_t *r = (uint64_t *)malloc((n+1)*sizeof(uint64_t));
+{   uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
     assert(r != NULL);
     return &r[1];
 }
 
 number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
-{   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+{   p = (uint64_t *)(*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
@@ -412,7 +434,7 @@ number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
 // In this implementation I just let malloc sort itself out.
 
 number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{   p = (uint64_t *)realloc((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+{   p = (uint64_t *)(*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
@@ -440,20 +462,47 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // Remember to allow for the terminator when adjusting the size! Well
 // there will always have been space for it because we are losing the header
 // word.
-    const char *cc = (const char *)realloc(c, final_n+1);
+    const char *cc = (const char *)(*realloc_function)(c, final_n+1);
     assert(cc != NULL);
     return cc;
 }
 
+number_representation sometimes_copy_bignum(number_representation p)
+{
+    size_t n = number_size(p);
+    uint64_t *d = number_data(p);
+    uint64_t *r = preallocate(n);
+    memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
 void free_bignum(number_representation p)
-{   free((void *)&p[-1]);
+{   if (p != (number_representation)0)
+        (*free_function)((void *)&p[-1]);
 }
 
 void free_string(string_representation p)
-{   free((void *)p);
+{   if ((number_representation)p != (number_representation)0)
+       (*free_function)((void *)p);
 }
 
 #endif // VSL
+
+// When I use Bignums that are allocated using malloc() and operated on
+// via C++ overloaded operators I often need to copy the data. However when
+// memory management uses garbage collection I can allow multiple references
+// to the same object and so copying is not needed as much. This copies
+// in the cases where that is relevant.
+
+// This version ALWAYS creates a fresh copy of the Bignum.
+
+number_representation always_copy_bignum(number_representation p)
+{   size_t n = number_size(p);
+    uint64_t *d = number_data(p);
+    uint64_t *r = preallocate(n);
+    memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
 
 // I am going to represent bignums as arrays of 64-bit digits.
 // Overall the representation will use 2s complement, and so all but the
@@ -1072,8 +1121,6 @@ number_representation biglognot(number_representation a)
     return confirm_size(p, n, final_n);
 }
 
-// The "bitnot" operation is simple and length can not change.
-
 // logand
 
 void ordered_biglogand(const uint64_t *a, size_t lena,
@@ -1171,6 +1218,44 @@ number_representation biglogxor(number_representation a, number_representation b
     return confirm_size(p, n, final_n);
 }
 
+void bigleftshift(const uint64_t *a, size_t lena,
+                  int n,
+                  uint64_t *r, size_t &lenr)
+{   //@@@ At present this merely copies!!!!
+    memcpy(r, a, lena*sizeof(uint64_t));
+    lenr = lena;
+}
+
+number_representation bigleftshift(number_representation a, int n)
+{   size_t na = number_size(a);
+    size_t nr;
+    nr = na;
+// @@@ At present this is not coded...
+    uint64_t *p = preallocate(nr);
+    size_t final_n;
+    bigleftshift(number_data(a), na, n, p, final_n);
+    return confirm_size(p, nr, final_n);
+}
+
+void bigrightshift(const uint64_t *a, size_t lena,
+                   int n,
+                   uint64_t *r, size_t &lenr)
+{   //@@@ At present this merely copies!!!!
+    memcpy(r, a, lena*sizeof(uint64_t));
+    lenr = lena;
+}
+
+number_representation bigrightshift(number_representation a, int n)
+{   size_t na = number_size(a);
+    size_t nr;
+    nr = na;
+// @@@ At present this is not coded...
+    uint64_t *p = preallocate(nr);
+    size_t final_n;
+    bigrightshift(number_data(a), na, n, p, final_n);
+    return confirm_size(p, nr, final_n);
+}
+
 // Add when the length of a is greater than that of b.
 
 static inline void ordered_bigadd(const uint64_t *a, size_t lena,
@@ -1230,6 +1315,14 @@ number_representation bigadd(number_representation a, number_representation b)
     size_t final_n;
     bigadd(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+number_representation bigadd_small(number_representation a, int64_t b)
+{   size_t na = number_size(a);
+    uint64_t *p = preallocate(na+1);
+    size_t final_n;
+    bigadd_small(number_data(a), na, b, p, final_n);
+    return confirm_size(p, na+1, final_n);
 }
 
 // For subtraction I implement both a-b and b-a. These work by
@@ -1461,21 +1554,29 @@ public:
     {   val = (number_representation)0;
     }
     ~Bignum()
-    {
-// If I am in Lisp mode then a garbage collector will tidy up. If I am
-// in "ordinary" mode I must clean up the vector that represented the actual
-// bignum when I destroy the object.
-#ifndef VSL
-        if (val != (number_representation)0)
-        {   free_bignum(val);
-            val = (number_representation)0;
-        }
-#endif
+    {   free_bignum(val);
     }
-    Bignum(int32_t n);
-    Bignum(int64_t n);
+    Bignum(int32_t n)
+    {   val = int_to_bignum((int64_t)n);
+    }
+    Bignum(int64_t n)
+    {   val = int_to_bignum(n);
+    }
+    Bignum(const char *s)
+    {   val = string_to_bignum(s);
+    }
 
-    void operator = (const Bignum &x);
+// Whenever I assign a Bignum I have to worry about whether I am allowed to
+// have multiple references to a single item. If I am not (as in the simple
+// case where data is allocated using malloc()) I need to make a copy of the
+// value that I am assigning (and I need to discard the value that is being
+// overwritten).
+
+    void operator = (const Bignum &x)
+    {   if (this == &x) return; // assign to self - a silly case!
+        free_bignum(val);
+        val = sometimes_copy_bignum(x.val);
+    }
 
     bool operator ==(const Bignum &x) const;
     bool operator > (const Bignum &x) const;
@@ -1495,6 +1596,9 @@ public:
     Bignum operator ^ (const Bignum &x) const;
     Bignum operator ~ () const;
 
+    Bignum operator >> (int n) const;
+    Bignum operator << (int n) const;
+
     void operator += (const Bignum &x);
     void operator -= (const Bignum &x);
     void operator *= (const Bignum &x);
@@ -1505,10 +1609,28 @@ public:
     void operator |= (const Bignum &x);
     void operator ^= (const Bignum &x);
 
-    void operator ++();
-    void operator ++(int);
-    void operator --();
-    void operator --(int);
+    void operator >>= (int n);
+    void operator <<= (int n);
+
+    Bignum operator ++();
+    Bignum operator ++(int);
+    Bignum operator --();
+    Bignum operator --(int);
+
+    friend std::ostream & operator << (std::ostream &out, const Bignum &a)
+    {   string_representation s = bignum_to_string(a.val);
+        out << std::setw(string_size(s)) << string_data(s);
+        free_string(s);
+        return out;
+    }
+    friend std::istream & operator >> (std::istream &in, Bignum &a)
+    {   int64_t n;
+// What I really want to do is to read in a string of digits and then
+// use string_to_bignum().
+        in >> n;
+        a.val = int_to_bignum(n);
+        return in;
+    }
 };
 
 const char *to_string(Bignum x)
@@ -1569,10 +1691,26 @@ inline Bignum Bignum::operator ^(const Bignum &x) const
     return ans;
 }
 
+inline Bignum Bignum::operator <<(int n) const
+{   Bignum ans;
+    ans.val = bigleftshift(this->val, n);
+    return ans;
+}
+
+inline Bignum Bignum::operator >>(int n) const
+{   Bignum ans;
+    ans.val = bigrightshift(this->val, n);
+    return ans;
+}
+
 inline Bignum Bignum::operator ~() const
 {   Bignum ans;
     ans.val = biglognot(this->val);
     return ans;
+}
+
+inline bool Bignum::operator ==(const Bignum &x) const
+{   return bigeqn(this->val, x.val);
 }
 
 inline bool Bignum::operator >(const Bignum &x) const
@@ -1595,38 +1733,94 @@ inline bool Bignum::operator <=(const Bignum &x) const
 
 
 inline void Bignum::operator +=(const Bignum &x)
-{
-//      add(*this, x);
+{   number_representation r = bigadd(val, x.val);
+    free_bignum(val);
+    val = r;
 }
 
 inline void Bignum::operator -=(const Bignum &x)
-{
-//      subtract(*this, x);
+{   number_representation r = bigsubtract(val, x.val);
+    free_bignum(val);
+    val = r;
 }
 
 inline void Bignum::operator *=(const Bignum &x)
-{
-//      multiply(*this, x);
+{   number_representation r = bigmultiply(val, x.val);
+    free_bignum(val);
+    val = r;
 }
 
 inline void Bignum::operator /=(const Bignum &x)
-{
-//      if (x.isZero()) throw "Bignum::operator /=: division by zero";
-//      /* The following technique is slightly faster than copying *this first
-//       * when x is large. */
-//      Bignum q;
-//      divideWithRemainder(x, q);
-//      // *this contains the remainder, but we overwrite it with the quotient.
-//      *this = q;
+{   number_representation r = bigquotient(val, x.val);
+    free_bignum(val);
+    val = r;
 }
 
 inline void Bignum::operator %=(const Bignum &x)
-{
-//      if (x.isZero()) throw "Bignum::operator %=: division by zero";
-//      Bignum q;
-//      // Mods *this by x.  Don't care about quotient left in q.
-//      divideWithRemainder(x, q);
+{   number_representation r = bigremainder(val, x.val);
+    free_bignum(val);
+    val = r;
 } 
+
+inline void Bignum::operator &=(const Bignum &x)
+{   number_representation r = biglogand(val, x.val);
+    free_bignum(val);
+    val = r;
+} 
+
+inline void Bignum::operator |=(const Bignum &x)
+{   number_representation r = biglogor(val, x.val);
+    free_bignum(val);
+    val = r;
+} 
+
+inline void Bignum::operator ^=(const Bignum &x)
+{   number_representation r = biglogxor(val, x.val);
+    free_bignum(val);
+    val = r;
+} 
+
+inline void Bignum::operator <<=(int n)
+{   number_representation r = bigleftshift(val, n);
+    free_bignum(val);
+    val = r;
+}
+
+inline void Bignum::operator >>=(int n)
+{   number_representation r = bigrightshift(val, n);
+    free_bignum(val);
+    val = r;
+}
+
+inline Bignum Bignum::operator ++()
+{   number_representation r = bigadd_small(val, 1);
+    free_bignum(val);
+    val = r;
+    return *this;
+}
+
+inline Bignum Bignum::operator ++(int)
+{   number_representation r = bigadd_small(val, 1);
+    Bignum oldval;
+    oldval.val = val;
+    val = r;
+    return oldval;
+}
+
+inline Bignum Bignum::operator --()
+{   number_representation r = bigadd_small(val, -1);
+    free_bignum(val);
+    val = r;
+    return *this;
+}
+
+inline Bignum Bignum::operator --(int)
+{   number_representation r = bigadd_small(val, -1);
+    Bignum oldval;
+    oldval.val = val;
+    val = r;
+    return oldval;
+}
 
 #endif
 
@@ -1668,7 +1862,7 @@ int main(int argc, char *argv[])
     x.val = ten;
     s = to_string(x+x);
     printf("ten+ten = <%s>\n", s);
-
+    std::cout << "(A) ten+ten = " << (x+x) << std::endl;
     return 0;    
 }
 
@@ -1676,3 +1870,4 @@ int main(int argc, char *argv[])
 
 // end of arith.cpp
 
+ 
