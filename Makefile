@@ -12,12 +12,12 @@ endif
 all:	vsl vsl.img
 
 vsl:	vsl.cpp
-	g++ -fno-diagnostics-color $(CFLAGS) \
+	g++ $(CFLAGS) \
 		vsl.cpp $(LIBS) -o vsl \
 		2>&1 | tee vsl.log
 
 bvsl:	vsl.cpp
-	g++ -fno-diagnostics-color $(CFLAGS) \
+	g++ $(CFLAGS) \
 		-I./bigint-2010.04.30 -DVSL=1 \
 		vsl.cpp \
 		bigint-2010.04.30/BigInteger.cc \
