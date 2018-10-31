@@ -563,12 +563,24 @@ static inline uint64_t add_with_carry(uint64_t a1, uint64_t a2, uint64_t &r)
 // the result. At least I can keep the code portable, even if I can then
 // worry about performance a bit.
 
+// Well it seems that g++ and clang have different views about how to
+// ask for unsigned 128-bit integers!
+
+#ifdef __SIZEOF_INT128__
+#ifdef __CLANG__
+typedef __int128  INT128;
+typedef __uint128 UINT128;
+#else // __CLANG__
+typedef __int128  INT128;
+typedef unsigned __int128 UINT128;
+#endif // __CLANG__
+#endif // __SIZEOF_INT128__
 
 static inline void multiply64(uint64_t a, uint64_t b,
                               uint64_t &hi, uint64_t &lo)
 {
 #ifdef __SIZEOF_INT128__
-    unsigned __int128 r = (unsigned __int128)a*(unsigned __int128)b;
+    UINT128 r = (UINT128)a*(UINT128)b;
     hi = (uint64_t)(r >> 64);
     lo = (uint64_t)r;
 #else
@@ -603,8 +615,8 @@ static inline void multiply64(uint64_t a, uint64_t b, uint64_t c,
                               uint64_t &hi, uint64_t &lo)
 {
 #ifdef __SIZEOF_INT128__
-    unsigned __int128 r = (unsigned __int128)a*(unsigned __int128)b +
-                          (unsigned __int128_t)c;
+    UINT128 r = (UINT128)a*(UINT128)b +
+                          (UINT128)c;
     hi = (uint64_t)(r >> 64);
     lo = (uint64_t)r;
 #else
@@ -799,12 +811,12 @@ number_representation string_to_bignum(const char *s)
 static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
 {   uint64_t hi = 0;
     for (size_t i = n-1; i!=0; i--)
-    {   unsigned __int128 p = ((unsigned __int128)hi << 64) | r[i];
+    {   UINT128 p = ((UINT128)hi << 64) | r[i];
         uint64_t q = (uint64_t)(p / ten19);
         hi = (uint64_t)(p % ten19);
         r[i] = q;
     }
-    unsigned __int128 p = ((unsigned __int128)hi << 64) | r[0];
+    UINT128 p = ((UINT128)hi << 64) | r[0];
     uint64_t q = (uint64_t)(p / ten19);
     hi = (uint64_t)(p % ten19);
     r[0] = q;
@@ -1842,9 +1854,10 @@ inline Bignum Bignum::operator --(int)
 // sequence of hex values. This is obviously useful while debugging!
 
 void display(const char *label, uint64_t *a, size_t lena)
-{   std::cout << label << "[" << (int)lena << "]";
+{   std::cout << label << " [" << (int)lena << "]";
     for (size_t i=0; i<lena; i++)
-        std::cout << std::hex << std::setfill('0')
+        std::cout << " "
+                  << std::hex << std::setfill('0')
                   << std::setw(16) << a[lena-i-1]
                   << std::dec << std::setw(0);
     std::cout << std::endl;
@@ -1854,9 +1867,10 @@ void display(const char *label, number_representation a)
 {   
     uint64_t *d = number_data(a);
     size_t len = number_size(a);
-    std::cout << label << "[" << (int)len << "]";
+    std::cout << label << " [" << (int)len << "]";
     for (size_t i=0; i<len; i++)
-        std::cout << std::hex << std::setfill('0')
+        std::cout << " "
+                  << std::hex << std::setfill('0')
                   << std::setw(16) << d[len-i-1]
                   << std::dec << std::setw(0);
     std::cout << std::endl;
@@ -1880,5 +1894,3 @@ int main(int argc, char *argv[])
 #endif // TEST
 
 // end of arith.cpp
-
- 
