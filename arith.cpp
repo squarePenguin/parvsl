@@ -388,6 +388,34 @@ void free_string(string_representation p)
 // Strings are returned to the user as freshly malloced memory holding a
 // native-style C++ string with a terminating NUL character at the end.
 
+
+// As a first try I am using malloc() to allocate each memory block every
+// time I might want one, realloc() to adjust its size so it is precisely as
+// large as is needed and free() to release it. Doing things this way is
+// straightforward but may put severe strain on the memory management
+// subsystem! An alternative scheme that might be worth considering would
+// still represent each bignum by a block of uint64_t values with a header
+// word, but now the header word would hold two values packed together.
+// One would be the length of data used for the bignum and the second would
+// indicate the total size of the memory block. I thinnk it would be reasonable
+// to use two uint32_t values in the space that could hold a uint64_t. If the
+// "length used" field counted in digits that could cope with up to 2^32
+// digits, each 8-bytes long, i.e. it could cope with individual bignums each
+// using up to 32 Gbytes of  memory. That seems sufficient for now and for all
+// rational use of this package. I would then keep every bignum in a block
+// of memory whose size was a power of 2, and so I would only need 5 bits in
+// the other half of the header.
+// Then where I now perform calls to realloc() to shorten a vector I might
+// either always leave the vector with its existing length and just mark it
+// as having a lesser number of digits in use, or I could perform more
+// enthusiastic adjustment when the size had changed significantly.
+// I could also look at all uses of free_bignum() and see if I was about to
+// perform a preallocate() that could use the space released. This would
+// work particularly well with some cases of Bignum::operator= where the
+// bignum presently in the variable is at present discarded and could
+// instead often be recycled. If I make all memory blocks a power of 2 in
+// size I might consider a "buddy" scheme for managing them...
+
 typedef uint64_t *number_representation;
 typedef const char *string_representation;
 
@@ -407,8 +435,9 @@ const char *string_data(string_representation a)
 {   return a;
 }
 
-// The following are provided so that a user can update malloc_function
-// and free_function to refer to their own choice of allocation methods.
+// The following are provided so that a user can update malloc_function,
+// realloc_function and free_function to refer to their own choice of
+// allocation technology.
 
 typedef void *malloc_t(size_t);
 typedef void *realloc_t(void *, size_t);
@@ -430,8 +459,6 @@ number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
     p[0] = final_n;
     return &p[1];
 }
-
-// In this implementation I just let malloc sort itself out.
 
 number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 {   p = (uint64_t *)(*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
@@ -472,7 +499,7 @@ number_representation sometimes_copy_bignum(number_representation p)
     size_t n = number_size(p);
     uint64_t *d = number_data(p);
     uint64_t *r = preallocate(n);
-    memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -500,7 +527,7 @@ number_representation always_copy_bignum(number_representation p)
 {   size_t n = number_size(p);
     uint64_t *d = number_data(p);
     uint64_t *r = preallocate(n);
-    memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -678,12 +705,12 @@ static inline bool negative(uint64_t a)
 
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
 {   uint32_t r;
-    memcpy(&r, (const char *)v + 4*n, sizeof(uint32_t));
+    std::memcpy(&r, (const char *)v + 4*n, sizeof(uint32_t));
     return r;
 }
 
 static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   memcpy((char *)v + 4*n, &r, sizeof(uint32_t));
+{   std::memcpy((char *)v + 4*n, &r, sizeof(uint32_t));
 }
 
 #elif defined __BYTE_ORDER__ && \
@@ -692,12 +719,12 @@ static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
 
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
 {   uint32_t r;
-    memcpy(&r, (const char *)v + 4*(n^1), sizeof(uint32_t));
+    std::memcpy(&r, (const char *)v + 4*(n^1), sizeof(uint32_t));
     return r;
 }
 
 static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   memcpy((char *)v + 4*(n^1), &r, sizeof(uint32_t));
+{   std::memcpy((char *)v + 4*(n^1), &r, sizeof(uint32_t));
 }
 
 #else // endianness not known at compile time
@@ -992,7 +1019,7 @@ string_representation bignum_to_string_hex(number_representation aa)
 bool bigeqn(const uint64_t *a, size_t lena,
             const uint64_t *b, size_t lenb)
 {   if (lena != lenb) return false;
-    return memcmp(a, b, lena*sizeof(uint64_t)) == 0;   
+    return std::memcmp(a, b, lena*sizeof(uint64_t)) == 0;   
 }
 
 bool bigeqn(number_representation a, number_representation b)
@@ -1234,7 +1261,7 @@ void bigleftshift(const uint64_t *a, size_t lena,
                   int n,
                   uint64_t *r, size_t &lenr)
 {   //@@@ At present this merely copies!!!!
-    memcpy(r, a, lena*sizeof(uint64_t));
+    std::memcpy(r, a, lena*sizeof(uint64_t));
     lenr = lena;
 }
 
@@ -1253,7 +1280,7 @@ void bigrightshift(const uint64_t *a, size_t lena,
                    int n,
                    uint64_t *r, size_t &lenr)
 {   //@@@ At present this merely copies!!!!
-    memcpy(r, a, lena*sizeof(uint64_t));
+    std::memcpy(r, a, lena*sizeof(uint64_t));
     lenr = lena;
 }
 
@@ -1888,6 +1915,13 @@ int main(int argc, char *argv[])
     Bignum x;
     x = 987654321;
     std::cout << "ten+ten = " << (x+x) << std::endl;
+
+    Bignum a, b;
+    a = "1000000000000000000000000000";
+    b = "100000000000000000000000";
+    std::cout << (a*a - b*b) << std::endl
+              << (a + b)*(a - b) << std::endl;
+
     return 0;    
 }
 
