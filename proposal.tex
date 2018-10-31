@@ -25,7 +25,7 @@
 	
 	\textbf{Project Supervisor:} Dr Arthur C. Norman
 	
-	\textbf{Directors of Studies:} Prof. Frank Stajano, Dr. Arthur Norman 
+	\textbf{Directors of Studies:} Prof. Frank Stajano, Dr. Arthur C. Norman 
 	
 	\textbf{Project Overseers:} Prof. Jean Bacon, Prof. Ross Anderson, Dr. Amanda Prorok
 	
@@ -116,22 +116,23 @@
 	\section*{Success criteria}
 	
 	The project will be a success if the multi-threaded LISP language is functional,
-	running both sequential and parallel code as expected.
+	running both sequential and parallel code as expected. This involves two steps:
 	
-	To evaluate this, I will first test the storage allocation and garbage
-	collection systems. This can be done reasonably early by writing a C++ framework
-	to generate patterns of allocation and release of data. By calling  internal
-	functions directly, I can assess the validity and performance of the
-	garbage collector.
-	
-	When the entire compiler reaches a working state, I will start writing tests
-	in Lisp. These tests will involve common examples of concurrency, such as a
-	work queue used by multiple threads.
-	
-	Finally, running REDUCE and passing the regression tests successfully is
-	important. Eventually, I will attempt to extend REDUCE code to make use
-	of multi-threading support. Vector and matrix operations are good candidates
-	for this.
+	\begin{enumerate}
+		\item An infrastructure in Lisp for simple benchmarks, involving allocations and
+		garbage collection cycles, including both sequential and parallel code. The single 
+		threaded tests will run on both the original VSL and the thread supporting version in
+		order to compare how much overhead has been introduced. The multi-threaded tests 
+		will further help evaluate for performance and correctness. These tests can use
+		standards concurrency examples, such as a work queue used by multiple
+		consumers and producers.
+		
+		\item The parallel Lisp should be robust enough to run at least a core part of Reduce.
+		Reduce comes with a large suite of tests. These will be used as regression tests. 
+		The parallel implementation should be able to run the same tests as the original one. 
+		Furthermore, it should demonstrate a few algebraic computations in a parallel way. 
+		Vector and matrix operations are good candidates for this.
+	\end{enumerate}
 	
 	\section*{Possible extensions}
 	
