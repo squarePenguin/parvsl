@@ -50,6 +50,16 @@ showtime;
 quit;
 EOF
 
+./parvsl -iparreduce.img <<EOF | tee testlogs/par$mod.rlg
+off int;
+$pkg on echo;
+showtime;
+in "../packages/$dir/$mod.tst";
+showtime;
+quit;
+EOF
+
 diff -b testlogs/$mod.rlg ../packages/$dir | tee testlogs/$mod.diff
+diff -b testlogs/$mod.rlg testlogs/par$mod.rlg | tee testlogs/par$mod.diff
 
 exit 0
