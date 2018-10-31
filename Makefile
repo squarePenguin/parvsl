@@ -3,10 +3,14 @@
 CFLAGS = -O0 -g -Wall
 #CFLAGS = -O3 -Wall
 
+ifeq ($(shell uname),Darwin)
+LIBS=-lm -lz -ledit -lncurses -ltermcap
+else
 ifeq ($(shell uname -o),Cygwin)
 LIBS=-lm -lz -ledit -lncurses
 else
 LIBS=-lm -lz -ledit -lncurses -ltermcap
+endif
 endif
 
 all:	vsl vsl.img vsl.pdf vslmanual.pdf
