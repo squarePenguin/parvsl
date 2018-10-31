@@ -32,8 +32,16 @@ bvsl:	vsl.cpp
 		$(LIBS) -o bvsl \
 		2>&1 | tee bvsl.log
 
+parvsl:    parvsl.cpp
+	g++ -fno-diagnostics-color -pthread $(CFLAGS) \
+		parvsl.cpp $(LIBS) -o parvsl \
+		2>&1 | tee parvsl.log
+
 vsl.img:	vsl library.lsp vsl.lsp
 	./vsl -z library.lsp | tee vsl.img.log
+
+parvsl.img:	parvsl library.lsp vsl.lsp
+	./parvsl -z library.lsp | tee parvsl.img.log
 
 reduce:	vsl
 	mkdir -p reduce.img.modules
@@ -41,6 +49,14 @@ reduce:	vsl
 	./vsl -z -ireduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
+
+parreduce:	parvsl
+	mkdir -p parreduce.img.modules
+	rm -f parreduce.img.modules/* parreduce.img inline-defs.dat
+	./parvsl -z -iparreduce.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce.lsp | tee parreduce.log
+
 
 debug_reduce:	vsl
 	mkdir -p reduce.img.modules
@@ -58,6 +74,13 @@ rcore:	vsl
 	./vsl -z -ircore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildrcore.lsp | tee rcore.log
+
+parrcore:	parvsl
+	mkdir -p parrcore.img.modules
+	rm -f parrcore.img.modules/* parrcore.img inline-defs.dat
+	./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildrcore.lsp | tee parrcore.log
 
 step2:	vsl
 	cp rcore.img step2.img
