@@ -764,6 +764,14 @@ number_representation int_to_bignum(int64_t n)
 
 static const uint64_t ten19 = UINT64_C(10000000000000000000);
 
+static inline void truncate_positive(const uint64_t *r, size_t &n)
+{   while (r[n-1]==0 && n>1 && positive(r[n-2])) n--;
+}
+
+static inline void truncate_negative(const uint64_t *r, size_t &n)
+{   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
+}
+
 number_representation string_to_bignum(const char *s)
 {   bool sign = false;
     if (*s == '-')
@@ -814,12 +822,12 @@ number_representation string_to_bignum(const char *s)
         {   uint64_t w = r[i] = ~r[i] + carry;
             carry = (w < carry ? 1 : 0);  
         }
-        while (r[n1-1]==allbits && n1>1 && negative(r[n1-2])) n1--;
+        truncate_negative(r, n1);
     }
 // However I could not have been precisely certain how many 64-bit words were
 // needed and I arranged that any error was conservative - ie allocating
 // more that would eventually be used.
-    else while (r[n1-1]==0 && n1>1 && positive(r[n1-2])) n1--; 
+    else truncate_positive(r, n1);
     return confirm_size(r, words, n1);
 }
 
@@ -834,6 +842,8 @@ number_representation string_to_bignum(const char *s)
 // 0 to n-1 and divides it by 10^19, returning the remainder and
 // setting both the digits and its length suitably to be the quotient.
 // The number is POSITIVE here.
+
+#ifdef __SIZEOF_INT128__
 
 static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
 {   uint64_t hi = 0;
@@ -850,6 +860,15 @@ static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
     if (r[n-1] == 0) n--;
     return hi;
 }
+
+#else // __SIZEOF_INT128__
+
+static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
+{   std::cout << "short_divide_ten_19 without int128_t" << std::endl;
+    abort();
+}
+
+#endif // __SIZEOF__INT128__
 
 #ifdef __GNUC__
 
@@ -1474,10 +1493,7 @@ number_representation bigrevsubtract(number_representation a, number_representat
 void bigmultiply(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
                  uint64_t *r, size_t &lenr)
-{   for (size_t i=0; i<lena+lenb; i++)
-        r[i] = 0;
-// As coded at present I only cope with +ve inputs, however dealing with
-// negative ones will be easy - it is merely that I have not coded it yet.
+{   for (size_t i=0; i<lena+lenb; i++) r[i] = 0;
 // If a and/or be are negative then I can treat their true values as
 //    a = sa + va      b = sb + vb
 // where sa and sb and the signs - represented here as 0 for a positive
@@ -1503,11 +1519,21 @@ void bigmultiply(const uint64_t *a, size_t lena,
         }
         r[i+lenb] = prev_hi + carry;
     }
-//  if (negative(a[lena-1])) subtract shifted b from r
-//  if (negative(b[lenb-1])) subtract shifted a from r
+    if (negative(a[lena-1]))
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lenb; i++)
+            carry = add_with_carry(r[i+lena], ~b[i], r[i+lena]);
+    }
+    if (negative(b[lenb-1]))
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena; i++)
+            carry = add_with_carry(r[i+lenb], ~a[i], r[i+lenb]);
+    }
     lenr = lena + lenb;
 // The actual value may be 1 word shorter than this.
 //  test top digit or r and if necessary reduce lenr.
+    truncate_positive(r, lenr);
+    truncate_negative(r, lenr);
 }
 
 number_representation bigmultiply(number_representation a, number_representation b)
@@ -1918,9 +1944,31 @@ int main(int argc, char *argv[])
 
     Bignum a, b;
     a = "1000000000000000000000000000";
-    b = "100000000000000000000000";
-    std::cout << (a*a - b*b) << std::endl
-              << (a + b)*(a - b) << std::endl;
+    b = "1000000000000000000000000000000000";
+    std::cout << "a   =          " << a << std::endl;
+    std::cout << "b   =          " << b << std::endl;
+    std::cout << "-a  =          " << -a << std::endl;
+    std::cout << "-b  =          " << -b << std::endl;
+    display("a  ", a);
+    display("-a ", -a);
+    display("b  ", b);
+    display("-b ", -b);
+
+    std::cout << "a*a  =         " << a*a << std::endl;
+    std::cout << "b*b  =         " << b*b << std::endl;
+    std::cout << "-(a*a)  =      " << -(a*a) << std::endl;
+    std::cout << "-(b*b)  =      " << -(b*b) << std::endl;
+    std::cout << "(-a)*a  =      " << (-a)*a << std::endl;
+    std::cout << "(-b)*b  =      " << (-b)*b << std::endl;
+    std::cout << "a*(-a)  =      " << a*(-a) << std::endl;
+    std::cout << "b*(-b)  =      " << b*(-b) << std::endl;
+
+    std::cout << "a*a + b*b  =   " << (a*a + b*b) << std::endl;
+    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
+    std::cout << "b*b - a*a  =   " << (b*b - a*a) << std::endl;
+    std::cout << "a+b  =         " << a+b << std::endl;
+    std::cout << "a-b  =         " << a-b << std::endl;
+    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
 
     return 0;    
 }
