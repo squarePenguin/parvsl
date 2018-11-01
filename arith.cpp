@@ -1959,13 +1959,27 @@ int main(int argc, char *argv[])
     Bignum a, b;
     a = "1000000000000000000000000000";
     b = "1000000000000000000000000000000000";
-    std::cout << "a   =          " << a << std::endl;
-    std::cout << "b   =          " << b << std::endl;
-    std::cout << "-a  =          " << -a << std::endl;
-    std::cout << "-b  =          " << -b << std::endl;
+//    std::cout << "a   =          " << a << std::endl;
+//    std::cout << "b   =          " << b << std::endl;
+//    std::cout << "-a  =          " << -a << std::endl;
+//    std::cout << "-b  =          " << -b << std::endl;
 
-    std::cout << "a*a  =         " << a*a << std::endl;
-    display(     "a*a            ", a*a);
+//    std::cout << "a*a  =         " << a*a << std::endl;
+//    display(     "a*a            ", a*a);
+
+Bignum aa=a*a;
+Bignum maa = -aa;
+Bignum bad = (-a)*a;
+Bignum bad1 = (-a)*a;
+display("aa", aa);
+display("maa", maa);
+display("bad", bad);
+display("bad1", bad1);
+std::cout << maa << std::endl << bad << std::endl << bad1 << std::endl;
+std::cout << maa << std::endl << bad << std::endl << bad1 << std::endl;
+std::cout << maa << std::endl << bad << std::endl << bad1 << std::endl;
+
+#if 0
     std::cout << "-(a*a)  =      " << -(a*a) << std::endl;
     display(     "-(a*a)         ", -(a*a));
     std::cout << "(-a)*a  =      " << (-a)*a << std::endl;
@@ -1984,7 +1998,7 @@ int main(int argc, char *argv[])
     std::cout << "a+b  =         " << a+b << std::endl;
     std::cout << "a-b  =         " << a-b << std::endl;
     std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
-
+#endif
     return 0;    
 }
 
