@@ -983,13 +983,13 @@ string_representation bignum_to_string(number_representation aa)
     {   *p1++ = '-';
         len = 1;
     }
-    int w = std::sprintf(p1, "%" PRId64, r[p++]);
+    int w = std::sprintf(p1, "%" PRIu64, r[p++]);
     assert(w > 0);
     len += w;
     p1 += w;
     assert(len < m*sizeof(uint64_t));
     while (p < m)
-    {   assert(std::sprintf(p1, "%.19" PRId64, r[p++]) == 19);
+    {   assert(std::sprintf(p1, "%.19" PRIu64, r[p++]) == 19);
         p1 += 19;
         len += 19;
         assert(len <= m*sizeof(uint64_t));
@@ -1333,7 +1333,8 @@ number_representation bigrightshift(number_representation a, int n)
 static inline void ordered_bigadd(const uint64_t *a, size_t lena,
                                   const uint64_t *b, size_t lenb,
                                   uint64_t *r, size_t &lenr)
-{   uint64_t carry = 0;
+{   assert(lena >= lenb);
+    uint64_t carry = 0;
     size_t i = 0;
 // The lowest digits can be added without there being any carry-in.
     carry = add_with_carry(a[0], b[0], r[0]);
@@ -1381,7 +1382,7 @@ number_representation bigadd(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
-    if (a >= b) n = na+1;
+    if (na >= nb) n = na+1;
     else n = nb+1;
     uint64_t *p = preallocate(n);
     size_t final_n;
@@ -1403,7 +1404,8 @@ number_representation bigadd_small(number_representation a, int64_t b)
 static inline void ordered_bigsubtract(const uint64_t *a, size_t lena,
                                        const uint64_t *b, size_t lenb,
                                        uint64_t *r, size_t &lenr)
-{   uint64_t carry = 1;
+{   assert(lena >= lenb);
+    uint64_t carry = 1;
     size_t i;
 // Add the digits that (a) and (b) have in common
     for (i=0; i<lenb; i++)
@@ -1429,7 +1431,8 @@ static inline void ordered_bigsubtract(const uint64_t *a, size_t lena,
 static inline void ordered_bigrevsubtract(const uint64_t *a, size_t lena,
                                           const uint64_t *b, size_t lenb,
                                           uint64_t *r, size_t &lenr)
-{   uint64_t carry = 1;
+{   assert(lena >= lenb);
+    uint64_t carry = 1;
     size_t i;
 // Add the digits that (a) and (b) have in common
     for (i=0; i<lenb; i++)
@@ -1484,7 +1487,7 @@ number_representation bigsubtract(number_representation a, number_representation
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
-    if (a >= b) n = na+1;
+    if (na >= nb) n = na+1;
     else n = nb+1;
     uint64_t *p = preallocate(n);
     size_t final_n;
@@ -1503,6 +1506,8 @@ number_representation bigrevsubtract(number_representation a, number_representat
     bigsubtract(number_data(b), nb, number_data(a), na, p, final_n);
     return confirm_size(p, n, final_n);
 }
+
+extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
 
 void bigmultiply(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
@@ -1536,12 +1541,12 @@ void bigmultiply(const uint64_t *a, size_t lena,
     if (negative(a[lena-1]))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lenb; i++)
-            carry = add_with_carry(r[i+lena], ~b[i], r[i+lena]);
+            carry = add_with_carry(r[i+lena], ~b[i], carry, r[i+lena]);
     }
     if (negative(b[lenb-1]))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lena; i++)
-            carry = add_with_carry(r[i+lenb], ~a[i], r[i+lenb]);
+            carry = add_with_carry(r[i+lenb], ~a[i], carry, r[i+lenb]);
     }
     lenr = lena + lenb;
 // The actual value may be 1 word shorter than this.
@@ -1920,7 +1925,7 @@ inline Bignum Bignum::operator --(int)
 // display() will show the internal representation of a bignum as a
 // sequence of hex values. This is obviously useful while debugging!
 
-void display(const char *label, uint64_t *a, size_t lena)
+void display(const char *label, const uint64_t *a, size_t lena)
 {   std::cout << label << " [" << (int)lena << "]";
     for (size_t i=0; i<lena; i++)
         std::cout << " "
@@ -1932,7 +1937,7 @@ void display(const char *label, uint64_t *a, size_t lena)
 
 void display(const char *label, number_representation a)
 {   
-    uint64_t *d = number_data(a);
+    const uint64_t *d = number_data(a);
     size_t len = number_size(a);
     std::cout << label << " [" << (int)len << "]";
     for (size_t i=0; i<len; i++)
@@ -1949,56 +1954,13 @@ void display(const char *label, const Bignum &a)
 
 int main(int argc, char *argv[])
 {
-    Bignum ten = "123456789012345678901234567890123456789012345";
-    display("ten", ten);
-    std::cout << ten << std::endl;
-    Bignum x;
-    x = 987654321;
-    std::cout << "ten+ten = " << (x+x) << std::endl;
-
     Bignum a, b;
-    a = "1000000000000000000000000000";
-    b = "1000000000000000000000000000000000";
-//    std::cout << "a   =          " << a << std::endl;
-//    std::cout << "b   =          " << b << std::endl;
-//    std::cout << "-a  =          " << -a << std::endl;
-//    std::cout << "-b  =          " << -b << std::endl;
+    a = "100000000000000000000000000";
+    b = "100000000000000000000000000000000";
 
-//    std::cout << "a*a  =         " << a*a << std::endl;
-//    display(     "a*a            ", a*a);
-
-Bignum aa=a*a;
-Bignum maa = -aa;
-Bignum bad = (-a)*a;
-Bignum bad1 = (-a)*a;
-display("aa", aa);
-display("maa", maa);
-display("bad", bad);
-display("bad1", bad1);
-std::cout << maa << std::endl << bad << std::endl << bad1 << std::endl;
-std::cout << maa << std::endl << bad << std::endl << bad1 << std::endl;
-std::cout << maa << std::endl << bad << std::endl << bad1 << std::endl;
-
-#if 0
-    std::cout << "-(a*a)  =      " << -(a*a) << std::endl;
-    display(     "-(a*a)         ", -(a*a));
-    std::cout << "(-a)*a  =      " << (-a)*a << std::endl;
-    display(     "(-a)*a         ", (-a)*a);
-    std::cout << "a*(-a)  =      " << a*(-a) << std::endl;
-    std::cout << "(-a)*(-a)  =   " << (-a)*(-a) << std::endl;
-
-    std::cout << "b*b  =         " << b*b << std::endl;
-    std::cout << "-(b*b)  =      " << -(b*b) << std::endl;
-    std::cout << "(-b)*b  =      " << (-b)*b << std::endl;
-    std::cout << "b*(-b)  =      " << b*(-b) << std::endl;
-
-    std::cout << "a*a + b*b  =   " << (a*a + b*b) << std::endl;
     std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
-    std::cout << "b*b - a*a  =   " << (b*b - a*a) << std::endl;
-    std::cout << "a+b  =         " << a+b << std::endl;
-    std::cout << "a-b  =         " << a-b << std::endl;
     std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
-#endif
+
     return 0;    
 }
 
