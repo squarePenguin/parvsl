@@ -57,7 +57,7 @@
 //   float, floor, ceil, fix
 //   quotient, remainder
 //   expt, isqrt
-//   bitlength, findfirst-bit, findlast-bit
+//   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
 
 
 #define __STDC_FORMAT_MACROS 1
@@ -70,9 +70,21 @@
 #include <cinttypes>
 #include <cassert>
 #include <cstdlib>
+#include <cstdarg>
 
 #include <iostream>
 #include <iomanip>
+
+static FILE *logfile = NULL;
+
+static void logprintf(const char *fmt, ...)
+{   if (logfile == NULL) logfile = std::fopen("arith.log", "w");
+    std::va_list args;
+    va_start(args, fmt);
+    std::vfprintf(logfile, fmt, args);
+    va_end(args);
+    std::fflush(logfile);
+}
 
 #ifdef VSL
 
@@ -346,7 +358,7 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // a little (typically by 4 bytes).
     if (sizeof(uint64_t) != sizeof(intptr_t))
     {   char *p1 = (char *)&p[-1];
-        memmove(p1+sizeof(uintptr_t), p, final_n);
+        std::memmove(p1+sizeof(uintptr_t), p, final_n);
         final_n -= (sizeof(uint64_t) - sizeof(intptr_t));
     }
 // In my Lisp world I allocate memory in units of 8 bytes and when a string
@@ -484,7 +496,7 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // memort move tends to be associated with a quadratic cost convertion from
 // internal to character form so it is really not liable to dominate overall
 // timings.
-    memmove(c, (char *)p, final_n);
+    std::memmove(c, (char *)p, final_n);
     c[final_n] = 0; // write in terminator
 // Remember to allow for the terminator when adjusting the size! Well
 // there will always have been space for it because we are losing the header
@@ -966,16 +978,18 @@ string_representation bignum_to_string(number_representation aa)
 // digits data, and I have arranged to position everything to (just)
 // avoid overwriting myself.
     char *p1 = (char *)r;
-    int len = 0;
+    size_t len = 0;
     if (sign)
     {   *p1++ = '-';
         len = 1;
     }
-    len += std::sprintf(p1, "%" PRId64, r[p++]);
-    p1 += len;
+    int w = std::sprintf(p1, "%" PRId64, r[p++]);
+    assert(w > 0);
+    len += w;
+    p1 += w;
     assert(len < m*sizeof(uint64_t));
     while (p < m)
-    {   std::sprintf(p1, "%.19" PRId64, r[p++]);
+    {   assert(std::sprintf(p1, "%.19" PRId64, r[p++]) == 19);
         p1 += 19;
         len += 19;
         assert(len <= m*sizeof(uint64_t));
@@ -1949,18 +1963,19 @@ int main(int argc, char *argv[])
     std::cout << "b   =          " << b << std::endl;
     std::cout << "-a  =          " << -a << std::endl;
     std::cout << "-b  =          " << -b << std::endl;
-    display("a  ", a);
-    display("-a ", -a);
-    display("b  ", b);
-    display("-b ", -b);
 
     std::cout << "a*a  =         " << a*a << std::endl;
-    std::cout << "b*b  =         " << b*b << std::endl;
+    display(     "a*a            ", a*a);
     std::cout << "-(a*a)  =      " << -(a*a) << std::endl;
-    std::cout << "-(b*b)  =      " << -(b*b) << std::endl;
+    display(     "-(a*a)         ", -(a*a));
     std::cout << "(-a)*a  =      " << (-a)*a << std::endl;
-    std::cout << "(-b)*b  =      " << (-b)*b << std::endl;
+    display(     "(-a)*a         ", (-a)*a);
     std::cout << "a*(-a)  =      " << a*(-a) << std::endl;
+    std::cout << "(-a)*(-a)  =   " << (-a)*(-a) << std::endl;
+
+    std::cout << "b*b  =         " << b*b << std::endl;
+    std::cout << "-(b*b)  =      " << -(b*b) << std::endl;
+    std::cout << "(-b)*b  =      " << (-b)*b << std::endl;
     std::cout << "b*(-b)  =      " << b*(-b) << std::endl;
 
     std::cout << "a*a + b*b  =   " << (a*a + b*b) << std::endl;
