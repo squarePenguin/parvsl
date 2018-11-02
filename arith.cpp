@@ -1331,7 +1331,7 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 // but its value had required a leading zero. I remove that zero.
 
 static void bigabsval(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
-{   if (positive(a[lena-1])
+{   if (positive(a[lena-1]))
     {   if (lenr > 1 && a[lenr-1] == 0) lena--;
         memcpy(r, a, lena*sizeof(uint64_t));
     }
