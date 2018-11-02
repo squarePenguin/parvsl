@@ -71,9 +71,11 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstdarg>
-
+#include <random>
 #include <iostream>
 #include <iomanip>
+#include <thread>
+#include <ctime>
 
 static FILE *logfile = NULL;
 
@@ -759,6 +761,75 @@ static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
 
 #endif // endianness
 
+// When printing numbers in octal it will be handy to be able treat the
+// data as an array of 3-bit digits, so here is an access function that
+// does that. There is a messy issue about the top of a number, where it
+// may not be a whole number of 3-bit octal digits. I pass in v, a vector
+// of 64-bit values, n which is the length of that vector and i which
+// is the index of the octal digit that I wish to extract. To help with
+// that I have a function virtual_digit64() which lets me read from a
+// bignum as if it has been usefully sign-extended.
+
+static inline uint64_t virtual_digit64(const uint64_t *v, size_t n, size_t j)
+{   if (j < n) return v[j];
+    else if (positive(v[n-1])) return 0;
+    else return UINT64_C(0xffffffffffffffff);
+}
+
+static inline int read_u3(const uint64_t *v, size_t n, size_t i)
+{   size_t bits = 3*n;
+    size_t n0 = bits/64;   // word with lowest bit of the 3
+    size_t s0 = bits%64;   // amount to shift right to align it properly
+    uint64_t w = virtual_digit64(v, n, n0) >> s0;
+// If I needed to shift by 62 or 63 bits then the octal digit I am interested
+// in needs some bits from the next word up.
+    if (s0 >= 62) w |= (virtual_digit64(v, n, n0+1) << (64-s0));
+    return (int)(w & 0x7);
+}
+    
+
+// It is useful to be able to generate random values. C++11 is simultaneously
+// very helpful and rather unhelpful. The class std::random_device is
+// expected to yield genuine unpredictable values, but it is not guaranteed
+// to and it fails to on some platforms, so despite the fact that when it
+// works it is a really good thing I can not rely solely on it. Each time I
+// use a random_device it gives me just 32 bits. For my real generator that
+// is not really enough.
+// So here I create 3 notionally unpredictable units and then merge in the
+// identity of the current thread and two measurements related to time.
+// To avoid thread safety issues with random_device I make calls to it
+// global, and then the thread identifier and time of day information stands
+// a prospect of arranging that each thread gets its own mersenne-twister
+// with its own seeding.
+// Note that Wikipedia explains "Multiple instances that differ only in
+// seed value (but not other parameters) are not generally appropriate
+// for Monte-Carlo simulations that require independent random number
+// generators" and here even the independence of my thread-specific
+// seed values is questionable.
+
+// I perform all this setup at initialization time, but by wrapping the
+// same sequence of steps as a crifical region I could use it to re-seed
+// generators whenever I felt the need to.
+//
+
+static std::random_device basic_randomness;
+static unsigned int seed_component_1 = basic_randomness();
+static unsigned int seed_component_2 = basic_randomness();
+static unsigned int seed_component_3 = basic_randomness();
+static thread_local std::seed_seq random_seed
+{   (unsigned int)
+        std::hash<std::thread::id>()(std::this_thread::get_id()),
+    seed_component_1,
+    seed_component_2,
+    seed_component_3,
+    (unsigned int)time(NULL),
+    (unsigned int)
+        std::chrono::high_resolution_clock::now().time_since_epoch().count()
+};
+static thread_local std::mt19937_64 mersenne_twister(random_seed);
+// mersenne_twister() now generates 64-bit unsigned integers.
+
+
 // Convert a 64-bit integer to a bignum.
 
 static inline void int_to_bignum(int64_t n, uint64_t *r)
@@ -998,6 +1069,87 @@ string_representation bignum_to_string(number_representation aa)
 }
 
 string_representation bignum_to_string_hex(number_representation aa)
+{   size_t n = number_size(aa);
+    uint64_t *a = number_data(aa);
+// Making the value zero a special case simplifies things later on!
+    if (n == 1 && a[0] == 0)
+    {   uint64_t *r = preallocate(1);
+        strcpy((char *)r, "0");
+        return confirm_size_string(r, 1, 1);
+    }
+// printing in hexadecimal should be way easier!
+    size_t m = 16*n;
+    uint64_t top = a[n-1];
+    bool sign = negative(top);
+    if (sign)
+    {   m += 2; // for "~f"
+        while ((top>>60) == 0xf)
+        {   top = top << 4;
+            m--;
+        }
+    }
+    else
+    {   while ((top>>60) == 0)
+        {   top = top << 4;
+            m--;
+        }
+    }
+    size_t nn = (m + 7)/8;
+    uint64_t *r = preallocate(nn);
+    char *p = (char *)r;
+    top = a[n-1];
+    if (sign)
+    {   *p++ = '~';
+        *p++ = 'f';
+    }
+    bool started = false;
+    for (size_t i=0; i<n; i++)
+    {   uint64_t v = a[n-i-1];
+        for (int j=0; j<16; j++)
+        {   int d = (int)(v >> (60-4*j)) & 0xf;
+            if (!started)
+            {   if ((sign && d==0xf) ||
+                    (!sign && d==0)) continue;
+                started = true;
+            }
+            *p++ = "0123456789abcdef"[d];
+        }
+    }   
+    return confirm_size_string(r, nn, m);
+}
+
+string_representation bignum_to_string_octal(number_representation aa)
+{   size_t n = number_size(aa);
+    uint64_t *a = number_data(aa);
+    size_t width = (64*n + 2)/3; // raw number of octal digits needed.
+    uint64_t top = a[n-1];
+    bool sign = negative(top);
+// There is a slight misery in that 64 is not a multiple of 3 (!) and so
+// the octal representation of a value has some digits that depend on a pair
+// of adjacent words from the bignum.
+    size_t nn;  // will be the number of characters used in the output
+    if (sign)
+    {   while (read_u3(a, n, width-1) == 7 && width > 1) width--;
+     nn = width+2;
+    }
+    else
+    {   while (read_u3(a, n, width-1) == 0 && width > 1) width--;
+        nn = width;
+    }
+    nn = (nn + 7)/8;   // words needed for string result
+    uint64_t *r = preallocate(nn);
+    char *p = (char *)r;
+    if (sign)
+    {   *p++ = '~';
+        *p++ = 'f';
+    }
+    for (size_t i=0; i<width; i++)
+        *p++ = '0' + read_u3(a, n, width-i-1);
+    return confirm_size_string(r, nn, width);
+}
+
+string_representation bignum_to_string_binary(number_representation aa)
+// This still displays in hex! Boo Hiss!!!!! @@@@
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
 // Making the value zero a special case simplifies things later on!
