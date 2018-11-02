@@ -777,13 +777,14 @@ static inline uint64_t virtual_digit64(const uint64_t *v, size_t n, size_t j)
 }
 
 static inline int read_u3(const uint64_t *v, size_t n, size_t i)
-{   size_t bits = 3*n;
+{   size_t bits = 3*i;
     size_t n0 = bits/64;   // word with lowest bit of the 3
     size_t s0 = bits%64;   // amount to shift right to align it properly
     uint64_t w = virtual_digit64(v, n, n0) >> s0;
 // If I needed to shift by 62 or 63 bits then the octal digit I am interested
 // in needs some bits from the next word up.
     if (s0 >= 62) w |= (virtual_digit64(v, n, n0+1) << (64-s0));
+logprintf("digit %d (of %d words) = %d\n", (int)i, (int)n, (int)(w & 0x7));
     return (int)(w & 0x7);
 }
     
@@ -1141,7 +1142,7 @@ string_representation bignum_to_string_octal(number_representation aa)
     char *p = (char *)r;
     if (sign)
     {   *p++ = '~';
-        *p++ = 'f';
+        *p++ = '7';
     }
     for (size_t i=0; i<width; i++)
         *p++ = '0' + read_u3(a, n, width-i-1);
@@ -1317,6 +1318,31 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 // I can shrink.
     if (r[lena-1]==topbit) r[lena++] = 0;
     else if (r[lena-1]==0 && lena>1 && positive(r[lena-2])) lena--; 
+    lenr = lena;
+}
+
+// bigabsval() is used internally and leaves a number where every digit is
+// to be treated as unsigned. So if the top digit of a number starts off
+// as 0x8000000000000000 (the largest negative value possible) a normal
+// negation to give a 2s complement accurate result would have to put an
+// extra zero word ahead of the negative of that (which has the same bit
+// pattern). Here where the output is treated as unsigned the length remains
+// unchanged. It can also be the case that the input started off as positive
+// but its value had required a leading zero. I remove that zero.
+
+static void bigabsval(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
+{   if (positive(a[lena-1])
+    {   if (lenr > 1 && a[lenr-1] == 0) lena--;
+        memcpy(r, a, lena*sizeof(uint64_t));
+    }
+    else
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena; i++)
+        {   carry = ~a[i] + carry;
+            r[i] = carry;
+            carry = (carry == 0 ? 1 : 0);
+        }
+    }
     lenr = lena;
 }
 
@@ -1863,7 +1889,13 @@ public:
     Bignum operator --(int);
 
     friend std::ostream & operator << (std::ostream &out, const Bignum &a)
-    {   string_representation s = bignum_to_string(a.val);
+    {   std::ios_base::fmtflags fg = out.flags();
+        string_representation s;
+        if ((fg & std::ios_base::hex) != 0)
+            s = bignum_to_string_hex(a.val);
+        else if ((fg & std::ios_base::oct) != 0)
+            s = bignum_to_string_octal(a.val);
+        else s = bignum_to_string(a.val); // decimal
         out << std::setw(string_size(s)) << string_data(s);
         free_string(s);
         return out;
@@ -2112,6 +2144,10 @@ int main(int argc, char *argv[])
 
     std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
     std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
+    std::cout << "a*a - b*b  =   " << std::hex << (a*a - b*b) << std::endl;
+    std::cout << "(a+b)*(a-b)  = " << std::hex << (a + b)*(a - b) << std::endl;
+    std::cout << "a*a - b*b  =   " << std::oct << (a*a - b*b) << std::endl;
+    std::cout << "(a+b)*(a-b)  = " << std::oct << (a + b)*(a - b) << std::endl;
 
     return 0;    
 }
