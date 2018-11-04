@@ -1830,6 +1830,44 @@ number_representation bigsquare(number_representation a)
     return confirm_size(p, n, final_n);
 }
 
+// This raises a bignum to a positive integer power. If the power is n then
+// the size of the output may be n*lena. The two vectors v and w are workspace
+// and must both be of size (at least) the size that the result could end
+// up as.
+
+void bigpower(uint64_t *a, size_t lena, uint64_t n,
+              uint64_t *v,
+              uint64_t *w,
+              uint64_t *r, size_t &lenr)
+{   if (n == 0)
+    {   r[0] = 0;
+        lenr = 1;
+        return;
+    }
+    memcpy((void *)v, (void *)a, lena*sizeof(uint64_t));
+    size_t lenv = lena;
+    w[0] = 1;
+    size_t lenw = 1;
+    while (n > 1)
+    {   if (n%2 == 0)
+        {   bigsquare(v, lenv, r, lenr);
+            memcpy((void *)v, (void *)r, lenr*sizeof(uint64_t));
+            lenv = lenr;
+            n = n / 2;
+        }
+        else
+        {   bigmultiply(v, lenv, w, lenw, r, lenr);
+            memcpy((void *)w, (void *)r, lenr*sizeof(uint64_t));
+            lenw = lenr;
+            bigsquare(v, lenv, r, lenr);
+            memcpy((void *)v, (void *)r, lenr*sizeof(uint64_t));
+            lenv = lenr;
+            n = (n-1) / 2;
+        }
+    }
+    bigmultiply(v, lenv, w, lenw, r, lenr);
+}
+
 //
 // The next section of code will become the division stuff for bignums.
 // At present it is very very much work in progress, with a sketch that
