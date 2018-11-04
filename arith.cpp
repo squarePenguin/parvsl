@@ -755,7 +755,10 @@ static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
 #else // endianness not known at compile time
 
 // If I am uncertain about endianness I can extract or insert data
-// using shift operations. It is not actually TOO bad.
+// using shift operations. It is not actually TOO bad. I am mainly providing
+// these in case the nicest implementation of long division when I do not
+// have int128_t available will involve working with 32-bit rather than
+// 64-bit digits.
 
 static inline uint32_t read_u32(const uint64_t *v, size_t n)
 {   uint64_t r = v[n/2];
@@ -1478,10 +1481,10 @@ void ordered_biglogxor(const uint64_t *a, size_t lena,
     {   for (; i<lena; i++)
             r[i] = ~a[i];
     }
-// The logxor operation can cause the inputs to shrink.
-    while (r[lena-1]==0 && lena>1 && positive(r[lena-2])) lena--;
-    while (r[lena-1]==allbits && lena>1 && negative(r[lena-2])) lena--;
     lenr = lena;
+// The logxor operation can cause the inputs to shrink.
+    truncate_positive(r, lenr);
+    truncate_negative(r, lenr);
 }
 
 void biglogxor(const uint64_t *a, size_t lena,
@@ -1503,19 +1506,33 @@ number_representation biglogxor(number_representation a, number_representation b
     return confirm_size(p, n, final_n);
 }
 
+extern void bigrightshift(const uint64_t *a, size_t lena,
+                          int n,
+                          uint64_t *r, size_t &lenr);
+
 void bigleftshift(const uint64_t *a, size_t lena,
                   int n,
                   uint64_t *r, size_t &lenr)
-{   //@@@ At present this merely copies!!!!
-    std::memcpy(r, a, lena*sizeof(uint64_t));
-    lenr = lena;
+{   if (n == 0)
+    {   std::memcpy(r, a, lena*sizeof(uint64_t));
+        lenr = lena;
+        return;
+    }
+    else if (n < 0)
+    {   bigrightshift(a, lena, -b, r, lenr);
+        return;
+    }
+// @@@    
+    abort();
 }
 
+extern number_representation bigrightshift(number_representation a, int n);
+
 number_representation bigleftshift(number_representation a, int n)
-{   size_t na = number_size(a);
-    size_t nr;
-    nr = na;
-// @@@ At present this is not coded...
+{   if (n == 0) return a;
+    else if (n < 0) return bigrightshift(a, -n);
+    size_t na = number_size(a);
+    size_t nr = na + (n/64) + 1;
     uint64_t *p = preallocate(nr);
     size_t final_n;
     bigleftshift(number_data(a), na, n, p, final_n);
@@ -1525,16 +1542,37 @@ number_representation bigleftshift(number_representation a, int n)
 void bigrightshift(const uint64_t *a, size_t lena,
                    int n,
                    uint64_t *r, size_t &lenr)
-{   //@@@ At present this merely copies!!!!
-    std::memcpy(r, a, lena*sizeof(uint64_t));
-    lenr = lena;
+{   if (n == 0)
+    {   std::memcpy(r, a, lena*sizeof(uint64_t));
+        lenr = lena;
+        return;
+    }
+    else if (n < 0)
+    {   bigleftshift(a, lena, -b, r, lenr);
+        return;
+    }
+    size_t words = n/64;
+    size_t bits = n % 64;
+    if (bits == 0)
+    {   for (int i=0; i<lena-words; i++)
+           r[i] = a[i+words];
+    }
+    else
+    {   for (int i=0; i<lena-words-1; i++)
+           r[i] = (a[i+words]>>bits) |
+                  (a[i+words+1]<<(64-bits);
+        r[lena-words-1] = (uint64_t)((int64_t)a[lena-1]>>bits);
+    }
+    lenr = lena-words;
+    truncate_positive(r, lenr);
+    truncate_negative(r, lenr);
 }
 
 number_representation bigrightshift(number_representation a, int n)
-{   size_t na = number_size(a);
-    size_t nr;
-    nr = na;
-// @@@ At present this is not coded...
+{   if (n == 0) return a;
+    else if (n < 0) return bigleftshift(a, -n);
+    size_t na = number_size(a);
+    size_t nr = na - (n/64);
     uint64_t *p = preallocate(nr);
     size_t final_n;
     bigrightshift(number_data(a), na, n, p, final_n);
