@@ -55,9 +55,10 @@
 // TODO:
 //   gcdn, lcmn
 //   float, floor, ceil, fix
-//   quotient, remainder
 //   expt, isqrt
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
+//   check support where int128 is not available
+// a LOT of testing. Some profiling and performance tuning.
 
 
 #define __STDC_FORMAT_MACROS 1
@@ -1166,7 +1167,6 @@ string_representation bignum_to_string_octal(number_representation aa)
 }
 
 string_representation bignum_to_string_binary(number_representation aa)
-// This still displays in hex! Boo Hiss!!!!! @@@@
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
 // Making the value zero a special case simplifies things later on!
@@ -1175,20 +1175,19 @@ string_representation bignum_to_string_binary(number_representation aa)
         strcpy((char *)r, "0");
         return confirm_size_string(r, 1, 1);
     }
-// printing in hexadecimal should be way easier!
-    size_t m = 16*n;
+    size_t m = 64*n;
     uint64_t top = a[n-1];
     bool sign = negative(top);
     if (sign)
-    {   m += 2; // for "~f"
-        while ((top>>60) == 0xf)
-        {   top = top << 4;
+    {   m += 2; // for "~1"
+        while ((top>>63) == 1)
+        {   top = top << 1;
             m--;
         }
     }
     else
-    {   while ((top>>60) == 0)
-        {   top = top << 4;
+    {   while ((top>>63) == 0)
+        {   top = top << 1;
             m--;
         }
     }
@@ -1198,19 +1197,19 @@ string_representation bignum_to_string_binary(number_representation aa)
     top = a[n-1];
     if (sign)
     {   *p++ = '~';
-        *p++ = 'f';
+        *p++ = '1';
     }
     bool started = false;
     for (size_t i=0; i<n; i++)
     {   uint64_t v = a[n-i-1];
-        for (int j=0; j<16; j++)
-        {   int d = (int)(v >> (60-4*j)) & 0xf;
+        for (int j=0; j<64; j++)
+        {   int d = (int)(v >> (63-j)) & 0x1;
             if (!started)
-            {   if ((sign && d==0xf) ||
+            {   if ((sign && d==1) ||
                     (!sign && d==0)) continue;
                 started = true;
             }
-            *p++ = "0123456789abcdef"[d];
+            *p++ = '0' + d;
         }
     }   
     return confirm_size_string(r, nn, m);
@@ -1759,6 +1758,78 @@ number_representation bigmultiply(number_representation a, number_representation
     return confirm_size(p, n, final_n);
 }
 
+// For big multi-digit numbers squaring can be done almost twice as fast
+// as general multiplication. 
+// eg (a0,a1,a2,a3)^2 can be expressed as
+// a0^2+a1^2+a2^2+a3^2 + 2*(a0*a1+a0*a2+a0*a3+a1*a2+a1*a3+a2*a3)
+// where the part that has been doubled uses symmetry to reduce the work.
+
+void bigsquare(const uint64_t *a, size_t lena,
+               uint64_t *r, size_t &lenr)
+{   for (size_t i=0; i<2*lena; i++) r[i] = 0;
+// If a is negative then I can treat its true values as
+//    a = sign(a) + unsigned(a)
+// where a negative value is indicated by having sign(a)=2^(64*len).
+// Then the signed product is just a*a [ - 2*a*2^(64*len) ].
+    uint64_t carry;
+    for (size_t i=0; i<lena; i++)
+    {   uint64_t prev_hi = 0;
+        carry = 0;
+// Note that all the terms I add in here will need to be doubled in the
+// final accounting.
+        for (size_t j=i+1; j<lena; j++)
+        {   uint64_t hi, lo, w;
+            multiply64(a[i], a[j], hi, lo);
+            uint64_t c1 = add_with_carry(lo, r[i+j], w);
+            uint64_t c2 = add_with_carry(w, prev_hi, r[i+j]);
+            prev_hi = hi + c1;  // can never overflow
+            carry = c2;
+        }
+        r[i+lena] = prev_hi + carry;
+    }
+// Double the part that has been computed so far.
+    carry = 0;
+    for (size_t i=0; i<lenr; i++)
+    {   uint64_t w = r[i];
+        r[i] = (w >> 1) | (carry << 63);
+        carry = w & 1;
+    }
+// Now add in the bits that do not get doubled.
+    carry = 0;
+    for (size_t i=0; i<lena; i++)
+    {   uint64_t hi, lo, w;
+        multiply64(a[i], a[i], hi, lo);
+// Add (hi,lo) + carry in at r[2*i+1], r[2*i]
+        carry = add_with_carry(lo, r[2*i], carry, r[2*i]);
+        carry = add_with_carry(hi, r[2*i+1], carry, r[2*i+1]);
+    }
+// Now if the original a was negative I must subtract 2*a from the high
+// half of my result.
+    if (negative(a[lena-1]))
+    {   carry = 1;
+        uint64_t shiftbit = 0;
+        for (size_t i=0; i<lena; i++)
+        {   uint64_t w = ~a[i];
+            carry = add_with_carry(r[i+lena], 2*w+shiftbit, carry, r[i+lena]);
+            shiftbit = w>>63;
+        }
+    }
+    lenr = 2*lena;
+// The actual value may be 1 word shorter than this.
+//  test top digit or r and if necessary reduce lenr.
+    truncate_positive(r, lenr);
+    truncate_negative(r, lenr);
+}
+
+number_representation bigsquare(number_representation a)
+{   size_t na = number_size(a);
+    size_t n = 2*na;
+    uint64_t *p = preallocate(n);
+    size_t final_n;
+    bigsquare(number_data(a), na, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
 //
 // The next section of code will become the division stuff for bignums.
 // At present it is very very much work in progress, with a sketch that
@@ -1991,21 +2062,20 @@ void bigquotrem(uint64_t *a, size_t lena,
 //@@        return pack_up_result(q, lenq);
 }
 
-void bigquotient(const uint64_t *a, size_t lena,
-                 const uint64_t *b, size_t lenb,
-                 uint64_t *r, size_t &lenr)
-{   std::cout << "Division not dcoded yet\n" << std::endl;
-    abort();
-}
-
 number_representation bigquotient(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
-    size_t n = na+nb;
-    uint64_t *p = preallocate(n);
-    size_t final_n;
-    bigquotient(number_data(a), na, number_data(b), nb, p, final_n);
-    return confirm_size(p, n, final_n);
+    size_t n1 = na-nb+1;           // for the quotient
+    uint64_t *q = preallocate(n1);
+    size_t n2 = na+1;              // for workspace and the remainder
+    uint64_t *r = preallocate(n2);
+    size_t n3 = nb;                // temp workspace
+    uint64_t *w = preallocate(n3);
+    bigquotrem(a, na, b, nb,
+               w, n3,
+               q, n1, r, n2);
+// here w and r are no longer needed.
+    return confirm_size(q, na+nb+1, n1);
 }
 
 void bigremainder(const uint64_t *a, size_t lena,
@@ -2386,16 +2456,19 @@ void display(const char *label, const Bignum &a)
 
 int main(int argc, char *argv[])
 {
-    Bignum a, b;
+    Bignum a, b, c;
     a = "100000000000000000000000000";
     b = "100000000000000000000000000000000";
+    c = b / a;
+    display("c", c);
+    std::cout << c << std::endl;
 
-    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
-    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
-    std::cout << "a*a - b*b  =   " << std::hex << (a*a - b*b) << std::endl;
-    std::cout << "(a+b)*(a-b)  = " << std::hex << (a + b)*(a - b) << std::endl;
-    std::cout << "a*a - b*b  =   " << std::oct << (a*a - b*b) << std::endl;
-    std::cout << "(a+b)*(a-b)  = " << std::oct << (a + b)*(a - b) << std::endl;
+//    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
+//    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
+//    std::cout << "a*a - b*b  =   " << std::hex << (a*a - b*b) << std::endl;
+//    std::cout << "(a+b)*(a-b)  = " << std::hex << (a + b)*(a - b) << std::endl;
+//    std::cout << "a*a - b*b  =   " << std::oct << (a*a - b*b) << std::endl;
+//    std::cout << "(a+b)*(a-b)  = " << std::oct << (a + b)*(a - b) << std::endl;
 
     return 0;    
 }
