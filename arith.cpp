@@ -54,8 +54,10 @@
 
 // TODO:
 //   gcdn, lcmn
+//   leftshift & rightshift
 //   float, floor, ceil, fix
-//   expt, isqrt
+//   isqrt
+//   random bignum generation
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
 //   check support where int128 is not available
 // a LOT of testing. Some profiling and performance tuning.
@@ -616,6 +618,14 @@ typedef __uint128 UINT128;
 typedef __int128  INT128;
 typedef unsigned __int128 UINT128;
 #endif // __CLANG__
+
+std::ostream & operator << (std::ostream &out, UINT128 a)
+{   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
+        << " "
+        << (uint64_t)a << std::dec << std::setw(0) << std::setfill(' '); 
+    return out;
+}
+
 #endif // __SIZEOF_INT128__
 
 static inline void multiply64(uint64_t a, uint64_t b,
@@ -983,7 +993,7 @@ static inline int nlz(uint64_t x)
 // I want an estimate of the number of bytes that it will take to
 // represent a number when I convert it to a string.
 
-static size_t predict_size_in_bytes(uint64_t *a, size_t n)
+static size_t predict_size_in_bytes(const uint64_t *a, size_t n)
 {   uint64_t r;
 // I am first going to estimate the size in BITS and then I will
 // see how that maps onto bytes.
@@ -995,12 +1005,16 @@ static size_t predict_size_in_bytes(uint64_t *a, size_t n)
     else r = 0;
     r = r + 64*(n-1) + (top==0 ? 0 : 64-nlz(top));
 // This risks overflow if the string was going to be over 2^51 bytes long!
-    return (617*r)/2048;
+    return 1+(617*r)/2048;
 } 
 
-string_representation bignum_to_string(number_representation aa)
-{   size_t n = number_size(aa);
-    uint64_t *a = number_data(aa);
+// The "as_unsigned" option here is not for general use - it is JUST for
+// internal debugging because at times I work with values that are known
+// to be positive and so where the top digit must be treated as unsigned...
+
+string_representation bignum_to_string(const uint64_t *a, size_t n,
+                                       bool as_unsigned=false)
+{
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
     {   uint64_t *r = preallocate(1);
@@ -1025,7 +1039,7 @@ string_representation bignum_to_string(number_representation aa)
     for (; i<m; i++) r[i] = 0;
 // Make it positive
     bool sign = false;
-    if (negative(r[n-1]))
+    if (negative(r[n-1]) && !as_unsigned)
     {   sign = true;
         uint64_t carry = 1;
         for (i=0; i<n; i++)
@@ -1084,6 +1098,12 @@ string_representation bignum_to_string(number_representation aa)
         assert(len <= m*sizeof(uint64_t));
     }
     return confirm_size_string(r, m, len);
+}
+
+string_representation bignum_to_string(number_representation aa)
+{   size_t n = number_size(aa);
+    uint64_t *a = number_data(aa);
+    return bignum_to_string(a, n);
 }
 
 string_representation bignum_to_string_hex(number_representation aa)
@@ -1702,6 +1722,12 @@ number_representation bigrevsubtract(number_representation a, number_representat
 
 extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
 
+// The next is temporary and is for debugging!
+static void temp(const char *label, const uint64_t *a, size_t lena)
+{   display(label, a, lena);
+    std::cout << string_data(bignum_to_string(a, lena, true)) << std::endl;
+}
+
 void bigmultiply(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
                  uint64_t *r, size_t &lenr)
@@ -1992,11 +2018,13 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 // The test on the next line should detect all case where q0 was in error
 // by 2 and most when it was in error by 1.
 //
+    std::cout << "p0 = " << p0 << " / " << (UINT128)b[lenb-1] << std::endl;
+    std::cout << "q0 = " << q0 << "  r0 = " << r0 << std::endl;
     if (q0 == UINT64_C(0x8000000000000000) ||
         (UINT128)q0*(UINT128)b[lenb-2] >
         ((UINT128)r0<<64 | a[lena-2]))
         q0--;
-//  trace_printf("Leading quotient digit = %d = %#x\n", q0, q0);
+    std::cout << "Leading quotient digit = " << q0 << std::endl;
 //
 // Now I want to go "a = a - b*q0*2^(31*(lena-lenb));" so that a
 // is set to an accurate remainder after using q0 as (part of) the
@@ -2004,9 +2032,11 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 // to reduce q0 again and compensate.
 //
     atop += multiply_and_subtract(a, lena, q0, b, lenb);
-//  show1("sets a to ", atop, a, lena);
-    if ((int64_t)atop < 0)
+    temp("mul & sub by q0: ", a, lena);
+    std::cout << "sets a to " << atop << std::endl;
+    if (negative(atop))
     {   q0--;
+        std::cout << "need to add back correction" << std::endl;
         atop = add_back_correction(a, lena, b, lenb);
 // When I add back b I ought to get a carry...
         assert(atop == 1);
@@ -2044,7 +2074,10 @@ void bigquotrem(uint64_t *a, size_t lena,
 // whether the eventual quotient and/or remainder will need to be negated
 // at the end. This leaves the two inputs as rows of unsigned 64-bit digits
 // with a[alen] and b[blen] both non-zero.
+    temp("quotrem a: ", a, lena);
+    temp("quotrem b: ", b, lenb);
     bigabsval(a, lena, r, lenr);
+    bigabsval(b, lenb, w, lenw);
     bool quot_sign = false, rem_sign = false;
     if (negative(a[lena-1]))
         quot_sign = rem_sign = true;
@@ -2058,9 +2091,12 @@ void bigquotrem(uint64_t *a, size_t lena,
         lenq = 1;
         memcpy((void *)r, (void *)a, lena*sizeof(uint64_t));
         lenr = lena;
+        temp("quotient is zero, remainder: ", r, lenr);
         return;
     } 
 // By now a and b both have strictly positive leading digits.
+    temp("quotrem r: ", a, lenr);
+    temp("quotrem w: ", b, lenw);
     lenq = lena-lenb; // potential length of quotient.
 // I will multiply a and b by a scale factor that gets the top digit of "b"
 // reasonably large. The value stored in "a" can become one digit longer,
@@ -2074,16 +2110,19 @@ void bigquotrem(uint64_t *a, size_t lena,
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not. So beware that
 // r now has digits running from 0 to lenr rather than 0 to lenr-1.
+    std::cout << "scale by " << scale << std::endl;
     bigmultiply_by_int_in_place(r, lenr, scale, r[lenr]);
     uint64_t wtop;
     bigmultiply_by_int_in_place(w, lenw, scale, wtop);
     assert(wtop == 0);
-// @@@@@@
+    temp("scaled r: ", r, lenr);
+    temp("scaled w: ", w, lenw);
     size_t m = lenq-1;
     for (;;)
     {   uint64_t qd = next_quotient_digit(
             r[lenr], r, lenr,
-            b, lenb);
+            w, lenw);
+        std::cout << "next quotient digit = " << qd << std::endl;
         q[m] = qd;
         if (m == 0) break;
         m--;
@@ -2265,6 +2304,7 @@ public:
         return in;
     }
 };
+
 
 const char *to_string(Bignum x)
 {   return bignum_to_string(x.val);
