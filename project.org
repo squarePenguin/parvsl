@@ -21,3 +21,31 @@ Still it allows benchmarks etc.
 
 It already provides a conservative GC. I will augment that to support
 multiple-threads, using a stop-the-world approach. 
+
+*** TODO talk about garbage collection
+*** TODO talk about 
+*** TODO talk about thread preemption
+*** TODO Use RAII for exception handling tyding
+
+** Dealing with fluid variables
+
+Fluid variables are symbols which are reused for local scope.
+Currently, the interpreter simply saves the old value, rebinds
+it then evaluates the function. At the end it pop back the old value.
+This scheme does not work for a multi-threaded compiler, as local bindings
+on on thread should not interfere with the other threads.
+
+The solution would be to instead have the local a thread local space for values.
+
+** Dealing with multiple stacks
+
+To run the conservative GC, we have a pointer to the beginning of the stack
+and one recorded before collection.
+
+This approach does not really work for multiple threads as each one has their own
+stack. We could stop all wait for all the threads to stop doing work and report
+their stack, but this could suffer from deadlock. We would want a safe way for threads
+to report they are clean, but how do we tell their stack at any point?
+C++ does not allow preemption so how do we terminate a really long computation, or 
+even an infinite loop?
+
