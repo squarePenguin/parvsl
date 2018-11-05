@@ -1519,7 +1519,7 @@ void bigleftshift(const uint64_t *a, size_t lena,
         return;
     }
     else if (n < 0)
-    {   bigrightshift(a, lena, -b, r, lenr);
+    {   bigrightshift(a, lena, -n, r, lenr);
         return;
     }
 // @@@    
@@ -1548,7 +1548,7 @@ void bigrightshift(const uint64_t *a, size_t lena,
         return;
     }
     else if (n < 0)
-    {   bigleftshift(a, lena, -b, r, lenr);
+    {   bigleftshift(a, lena, -n, r, lenr);
         return;
     }
     size_t words = n/64;
@@ -1560,7 +1560,7 @@ void bigrightshift(const uint64_t *a, size_t lena,
     else
     {   for (int i=0; i<lena-words-1; i++)
            r[i] = (a[i+words]>>bits) |
-                  (a[i+words+1]<<(64-bits);
+                  (a[i+words+1]<<(64-bits));
         r[lena-words-1] = (uint64_t)((int64_t)a[lena-1]>>bits);
     }
     lenr = lena-words;
@@ -2033,10 +2033,20 @@ again2:
 
 #endif // __SIZE_OF_INT128__
 
+// a = a - b*q*base^(lena-lenb) and return the carry out from the top.
+
 static uint64_t multiply_and_subtract(uint64_t *a, size_t lena,
                                       uint64_t q0,
                                       uint64_t *b, size_t lenb)
-{   return 0;
+{   uint64_t carry = 0;
+    for (size_t i=0; i<lenb; i++)
+    {   UINT128 d = a[i+lena-lenb] -
+                    b[i]*(UINT128)q0 +
+                    carry;
+        a[i+lena-lenb] = (uint64_t)d;
+        carry = (uint64_t)(d >> 64);
+    }
+    return carry;
 }
 
 static uint64_t add_back_correction(uint64_t *a, size_t lena,
@@ -2135,7 +2145,7 @@ void bigquotrem(uint64_t *a, size_t lena,
 // By now a and b both have strictly positive leading digits.
     temp("quotrem r: ", a, lenr);
     temp("quotrem w: ", b, lenw);
-    lenq = lena-lenb; // potential length of quotient.
+    lenq = lena-lenb+1; // potential length of quotient.
 // I will multiply a and b by a scale factor that gets the top digit of "b"
 // reasonably large. The value stored in "a" can become one digit longer,
 // but there is space to store that.
@@ -2155,20 +2165,26 @@ void bigquotrem(uint64_t *a, size_t lena,
     assert(wtop == 0);
     temp("scaled r: ", r, lenr);
     temp("scaled w: ", w, lenw);
+    temp("q (junk here): ", q, lenq);
     size_t m = lenq-1;
     for (;;)
     {   uint64_t qd = next_quotient_digit(
             r[lenr], r, lenr,
             w, lenw);
-        std::cout << "next quotient digit = " << qd << std::endl;
+        std::cout << "next quotient digit returned as " << qd << std::endl;
         q[m] = qd;
+        std::cout << "just set digit " << m << "of quotient" << std::endl;
+        temp("q (partial here): ", q, lenq);
         if (m == 0) break;
         m--;
     }
+    std::cout << "Now I need to unscale" << std::endl;
 // Unscale and correct the signs.
     unscale(r, lenr, scale);
+    std::cout << "Now I need to fix signs" << std::endl;
     if (rem_sign) negate_in_place(r, lenr);
 // Ensure that the quotient has r prefix zero digit if needbe.
+    std::cout << "Now I need to make suitable for 2s complement" << std::endl;
     fix_up_bignum_length(q, lenq);
     if (quot_sign) negate_in_place(q, lenq);
 // Now I need to pack the results so that they are suitable for use
