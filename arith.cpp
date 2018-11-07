@@ -54,7 +54,6 @@
 
 // TODO:
 //   gcdn, lcmn
-//   leftshift & rightshift
 //   float, floor, ceil, fix
 //   isqrt
 //   random bignum generation
@@ -171,7 +170,8 @@ static inline LispObject *heapaddr(LispObject x)
 
 // Fixnums and Floating point numbers are rather easy!
 
-#define qfixnum(x)     (((intptr_t)(x)) >> 3)
+#define qfixnum(x)     (((intptr_t)(x)) / 8)
+
 // NB that C++ makes this undefined if there is overflow!
 #define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
 
@@ -1522,7 +1522,13 @@ void bigleftshift(const uint64_t *a, size_t lena,
     {   bigrightshift(a, lena, -n, r, lenr);
         return;
     }
-// @@@    
+// In the code here I will need to watch out because the behaviour of
+// right shifts on signed integer types is not guaranteed in C++ and so
+// might not propagate the sign bit in the way I would perhaps view as nice.
+// However division by a positive power of 2 does have guaranteed behaviour
+// and so apart from trying to shift right by 63 bits I can use that instead!
+// @@@
+    std::cout << "right shifts not coded yet - they will be easy" << std::endl;
     abort();
 }
 
@@ -2031,7 +2037,9 @@ again2:
     r = (un21*base + un0 - q0*c) >> s;
 }
 
-#endif // __SIZE_OF_INT128__
+#endif // __SIZEOF_INT128__
+
+#ifdef __SIZEOF_INT128__
 
 // a = a - b*q*base^(lena-lenb) and return the carry out from the top.
 
@@ -2045,6 +2053,216 @@ static uint64_t multiply_and_subtract(uint64_t *a, size_t lena,
                     carry;
         a[i+lena-lenb] = (uint64_t)d;
         carry = (uint64_t)(d >> 64);
+    }
+    return carry;
+}
+
+// add_back_correction() is used when a quotient digit was mis-predicted by
+// 1 and I detect that when I calculate a = a - b*q and end up with a negative
+// result. I fix things up by decrementing q and going
+//         a = a + (b<<(lena-lenb))
+ 
+static uint64_t add_back_correction(uint64_t *a, size_t lena,
+                                    uint64_t *b, size_t lenb)
+{   uint64_t carry = 0;
+    for (size_t i=0; i<lenb; i++)
+        carry = add_with_carry(a[i+lena-lenb], b[i], carry, a[i+lena-lenb]);
+    return carry;
+}
+
+static inline uint64_t next_quotient_digit(uint64_t atop,
+                                           uint64_t *a, size_t &lena,
+                                           uint64_t *b, size_t lenb)
+{   UINT128 p0 = (UINT128)atop<<64 | a[lena-1];
+    uint64_t q0 =  (uint64_t)(p0 / (UINT128)b[lenb-1]);
+    uint64_t r0 =  (uint64_t)(p0 % (UINT128)b[lenb-1]);
+// At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
+// but never any worse than that.
+//
+// The test on the next line should detect all case where q0 was in error
+// by 2 and most when it was in error by 1.
+//
+    std::cout << "p0 = " << p0 << " / " << (UINT128)b[lenb-1] << std::endl;
+    std::cout << "q0 = " << q0 << "  r0 = " << r0 << std::endl;
+    if (q0 == UINT64_C(0x8000000000000000) ||
+        (UINT128)q0*(UINT128)b[lenb-2] >
+        ((UINT128)r0<<64 | a[lena-2]))
+        q0--;
+    std::cout << "Leading quotient digit = " << q0 << std::endl;
+//
+// Now I want to go "a = a - b*q0*2^(31*(lena-lenb));" so that a
+// is set to an accurate remainder after using q0 as (part of) the
+// quotient. This may carry an overshoot into atop and if so I will need
+// to reduce q0 again and compensate.
+//
+    atop += multiply_and_subtract(a, lena, q0, b, lenb);
+    temp("mul & sub by q0: ", a, lena);
+    std::cout << "sets a to " << atop << std::endl;
+    if (negative(atop))
+    {   q0--;
+        std::cout << "need to add back correction" << std::endl;
+        atop = add_back_correction(a, lena, b, lenb);
+// When I add back b I ought to get a carry...
+        assert(atop == 1);
+    }
+    lena--;  // a is now one digit shorter.
+    return q0;
+}
+
+// negate_in_place will start with a value that is positive. There is one
+// special case. If the input is (as it were) 0000:8000:0000... then negating
+// it would yield ffff:8000:0000... and the leading ffff can be discarded.
+
+static void negate_in_place(uint64_t *r, size_t &lenr)
+{   uint64_t carry = 1;
+    for (size_t i=0; i<lenr; i++)
+    {   uint64_t w = r[i] = ~r[i] + carry;
+        carry = w < carry ? 1 : 0;
+    }
+    if (lenr > 1 &&
+        r[lenr-1] == UINT64_C(0xffffffffffffffff) &&
+        negative(r[lenr-2])) lenr--;
+}
+
+// r is an unsigned number. Divide it by scale, and the quotient
+// ought to be exact.
+
+static void unscale(uint64_t *r, size_t &lenr, uint64_t scale)
+{   uint64_t hi = 0;
+    for (size_t i = lenr-1; i!=0; i--)
+    {   UINT128 p = ((UINT128)hi << 64) | r[i];
+        uint64_t q = (uint64_t)(p / scale);
+        hi = (uint64_t)(p % scale);
+        r[i] = q;
+    }
+    UINT128 p = ((UINT128)hi << 64) | r[0];
+    uint64_t q = (uint64_t)(p / scale);
+    hi = (uint64_t)(p % scale);
+    r[0] = q;
+    if (r[lenr-1] == 0) lenr--;
+    assert(hi==0);
+}
+
+// I need to make copies of both numerator and denominator here because
+// both forced positive and both get scaled. So w is passed as temporary
+// workspace, and q and r as places where the quotient and remainder will
+// end up - note r has to start of one word longer than the numerator a
+// even though by the end it will be shorter than b.
+
+void bigquotrem(uint64_t *a, size_t lena,
+                uint64_t *b, size_t lenb,
+                uint64_t *w, size_t lenw,   // temp - size lenb
+                uint64_t *q, size_t &lenq,  // quotient - size lena-lenb+1
+                uint64_t *r, size_t &lenr)  // remainder - size lena+1
+{
+// I copy the absolute values of a and b to places where it will be
+// OK to overwrite them, taking their absolute values as I go. I record
+// whether the eventual quotient and/or remainder will need to be negated
+// at the end. This leaves the two inputs as rows of unsigned 64-bit digits
+// with a[alen] and b[blen] both non-zero.
+    temp("quotrem a: ", a, lena);
+    temp("quotrem b: ", b, lenb);
+    bigabsval(a, lena, r, lenr);
+    bigabsval(b, lenb, w, lenw);
+    bool quot_sign = false, rem_sign = false;
+    if (negative(a[lena-1]))
+        quot_sign = rem_sign = true;
+    if (negative(b[lenb-1])) quot_sign = !quot_sign;
+// Now I want to compute the quotient of r by w, and both are positive.
+// Taking absolute values might have changed the lengths, so this is a good
+// place to check for a division where the quotient is unquestionably zero.
+    if (lenr < lenw ||
+        (lenr == lenw && r[lenr-1] < w[lenw-1]))
+    {   q[0] = 0;
+        lenq = 1;
+        memcpy((void *)r, (void *)a, lena*sizeof(uint64_t));
+        lenr = lena;
+        temp("quotient is zero, remainder: ", r, lenr);
+        return;
+    } 
+// By now a and b both have strictly positive leading digits.
+    temp("quotrem r: ", a, lenr);
+    temp("quotrem w: ", b, lenw);
+    lenq = lena-lenb+1; // potential length of quotient.
+// I will multiply a and b by a scale factor that gets the top digit of "b"
+// reasonably large. The value stored in "a" can become one digit longer,
+// but there is space to store that.
+//
+// The scale factor used here is as per Knuth II edition II. Edition III
+// proposed 0x7fffffffU/bignum_digits(b)[lenb] and if you look at just the
+// leading digit of b alone that seems OK, but I am concerned that when you
+// take lower digits of b into account that multiplying b by it can overflow.
+    uint64_t scale = UINT64_C(0x8000000000000000) / (w[lenw-1] + 1);
+// When I scale the dividend expands into an extra digit but the scale
+// factor has been chosen so that the divisor does not. So beware that
+// r now has digits running from 0 to lenr rather than 0 to lenr-1.
+    std::cout << "scale by " << scale << std::endl;
+    bigmultiply_by_int_in_place(r, lenr, scale, r[lenr]);
+    uint64_t wtop;
+    bigmultiply_by_int_in_place(w, lenw, scale, wtop);
+    assert(wtop == 0);
+    temp("scaled r: ", r, lenr);
+    temp("scaled w: ", w, lenw);
+    temp("q (junk here): ", q, lenq);
+    size_t m = lenq-1;
+    for (;;)
+    {   uint64_t qd = next_quotient_digit(
+            r[lenr], r, lenr,
+            w, lenw);
+        std::cout << "next quotient digit returned as " << qd << std::endl;
+        q[m] = qd;
+        std::cout << "just set digit " << m << "of quotient" << std::endl;
+        temp("q (partial here): ", q, lenq);
+        if (m == 0) break;
+        m--;
+    }
+// The quotient is OK correct now but has been computed as an unsigned value
+// so if its top digit has its top bit set I need to prepend a zero;
+    if (negative(q[lenq-1])) q[lenq++] = 0;
+    if (quot_sign) negate_in_place(q, lenq);
+    temp("quotient returns as: ", q, lenq);
+    std::cout << "Now I need to unscale" << std::endl;
+// Unscale and correct the signs.
+    unscale(r, lenr, scale);
+    if (negative(r[lenq-1])) r[lenq++] = 0;
+    if (rem_sign) negate_in_place(r, lenr);
+    temp("remainder returns as: ", r, lenr);
+}
+
+#else // __SIZEOF_INT128__
+
+//
+// The code here has not been re-worked!
+// This version is for platforms where __int128_t does not exist. That
+// means that performing a 128 by 64 bit division would be messy. I think
+// that overall I will do best if I implement the whole of the long division
+// code as if my numbers were stored using 32-bit digits rather than
+// 64 bit ones. The access functions read_u32 and write_u32 allow me to
+// treat the 64-bit raw data that I have as if it was a sequence of 32-bit
+// words, and I have tried to implement those such that issues of strict
+// aliasingwill not impact me. Obviously using this code will involve 4 times
+// as much work as if I could have used the 64-bit digits directly, but
+// if I had done that I would have suffered a lot in the inner loop
+// building up 128 by 64 bit divisions. So I think this ends up cleaner.
+// And I HOPE that the code is very very similar to the regular version.
+// Hmm maybe I should have made it a template body of code paramaterised
+// on uint32_t, uint64_t and UINT128. Yup I can manage that. I will try
+// coding the version here that way.
+//
+
+// a = a - b*q*base^(lena-lenb) and return the carry out from the top.
+
+template <typename WIDE, NARROW>
+static NARROW multiply_and_subtract(NARROW *a, size_t lena,
+                                      NARROW q0,
+                                      NARROW *b, size_t lenb)
+{   NARROW carry = 0;
+    for (size_t i=0; i<lenb; i++)
+    {   WIDE d = a[i+lena-lenb] -
+                    b[i]*(WIDE)q0 +
+                    carry;
+        a[i+lena-lenb] = (NARROW)d;
+        carry = (NARROW)(d >> 64);
     }
     return carry;
 }
@@ -2192,6 +2410,10 @@ void bigquotrem(uint64_t *a, size_t lena,
 //@@        mv_2 = pack_up_result(r, lenr);
 //@@        return pack_up_result(q, lenq);
 }
+
+
+
+#endif // SIZEOF_INT128__
 
 number_representation bigquotient(number_representation a, number_representation b)
 {   size_t na = number_size(a);
