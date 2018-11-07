@@ -138,4 +138,54 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 #define isEQHASH(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH))
 #define isEQHASHX(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX))
 
+// This sets the size of the hash table used to store all the symbols
+// that Lisp knows about. I note that if I built a serious application
+// such as the Reduce algebra system (reduce-algebra.sourceforge.net) I would
+// end up with around 7000 symbols in a basic installation! So the size
+// table I use here intended to give decent performance out to that scale.
+// This is (of course) utterly over the top for the purpose of toy and
+// demonstration applications! I make the table size a prime in the hope that
+// that will help keep hashed distribution even across it.
+// Hmm - a full copy of everything that makes up Reduce involved around
+// 40K distinct symbols...
+
+#define OBHASH_SIZE 10007
+
+// Some Lisp values that I will use frequently...
+
+#define nil        bases[0]
+#define undefined  bases[1]
+#define lisptrue   bases[2]
+#define lispsystem bases[3]
+#define echo       bases[4]
+#define lambda     bases[5]
+#define quote      bases[6]
+#define backquote  bases[7]
+#define comma      bases[8]
+#define comma_at   bases[9]
+#define eofsym     bases[10]
+#define cursym     bases[11]
+#define work1      bases[12]
+#define work2      bases[13]
+#define restartfn  bases[14]
+#define expr       bases[15]
+#define subr       bases[16]
+#define fexpr      bases[17]
+#define fsubr      bases[18]
+#define macro      bases[19]
+#define input      bases[20]
+#define output     bases[21]
+#define pipe       bases[22]
+#define raise      bases[23]
+#define lower      bases[24]
+#define dfprint    bases[25]
+#define bignum     bases[26]
+#define BASES_SIZE       27
+
+LispObject bases[BASES_SIZE];
+LispObject obhash[OBHASH_SIZE];
+
+// ... and non-LispObject values that need to be saved as part of a
+// heap image.
+
 #endif // COMMON_HPP

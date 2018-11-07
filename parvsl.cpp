@@ -149,56 +149,6 @@ int devzero_fd = 0;
 
 LispObject *C_stackbase;
 
-// This sets the size of the hash table used to store all the symbols
-// that Lisp knows about. I note that if I built a serious application
-// such as the Reduce algebra system (reduce-algebra.sourceforge.net) I would
-// end up with around 7000 symbols in a basic installation! So the size
-// table I use here intended to give decent performance out to that scale.
-// This is (of course) utterly over the top for the purpose of toy and
-// demonstration applications! I make the table size a prime in the hope that
-// that will help keep hashed distribution even across it.
-// Hmm - a full copy of everything that makes up Reduce involved around
-// 40K distinct symbols...
-
-#define OBHASH_SIZE 10007
-
-// Some Lisp values that I will use frequently...
-
-#define nil        bases[0]
-#define undefined  bases[1]
-#define lisptrue   bases[2]
-#define lispsystem bases[3]
-#define echo       bases[4]
-#define lambda     bases[5]
-#define quote      bases[6]
-#define backquote  bases[7]
-#define comma      bases[8]
-#define comma_at   bases[9]
-#define eofsym     bases[10]
-#define cursym     bases[11]
-#define work1      bases[12]
-#define work2      bases[13]
-#define restartfn  bases[14]
-#define expr       bases[15]
-#define subr       bases[16]
-#define fexpr      bases[17]
-#define fsubr      bases[18]
-#define macro      bases[19]
-#define input      bases[20]
-#define output     bases[21]
-#define pipe       bases[22]
-#define raise      bases[23]
-#define lower      bases[24]
-#define dfprint    bases[25]
-#define bignum     bases[26]
-#define BASES_SIZE       27
-
-LispObject bases[BASES_SIZE];
-LispObject obhash[OBHASH_SIZE];
-
-// ... and non-LispObject values that need to be saved as part of a
-// heap image.
-
 
 void my_exit(int n)
 {
@@ -220,8 +170,6 @@ uintptr_t heap2_freechain;
 // consumed by items that are pinned by the conservative garbage collector.
 
 uintptr_t npins = 0, heap1_pads = 0, heap2_pads = 0;
-
-thread_local par::Thread_data thread_data;
 
 // I am liable to want to support memory that has been allocated in segments
 // (ie not all at the start of the run). I will arrange that each allocated
@@ -588,51 +536,51 @@ LispObject wrongnumber5up(LispObject env, LispObject a, LispObject a2,
 static inline LispObject cons(LispObject a, LispObject b)
 {
     check_space(2*sizeof(LispObject), __LINE__);
-    setheapstarts(thread_data.segment_fringe);
-    qcar(thread_data.segment_fringe) = a;
-    qcdr(thread_data.segment_fringe) = b;
-    a = thread_data.segment_fringe;
-    thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = a;
+    qcdr(par::thread_data.segment_fringe) = b;
+    a = par::thread_data.segment_fringe;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject list2star(LispObject a, LispObject b, LispObject c)
 {   // (cons a (cons b c))
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(thread_data.segment_fringe);
-    qcar(thread_data.segment_fringe) = a;
-    qcdr(thread_data.segment_fringe) = thread_data.segment_fringe + 2*sizeof(LispObject);
-    a = thread_data.segment_fringe;
-    thread_data.segment_fringe += 2*sizeof(LispObject);
-    setheapstarts(thread_data.segment_fringe);
-    qcar(thread_data.segment_fringe) = b;
-    qcdr(thread_data.segment_fringe) = c;
-    thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = a;
+    qcdr(par::thread_data.segment_fringe) = par::thread_data.segment_fringe + 2*sizeof(LispObject);
+    a = par::thread_data.segment_fringe;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = b;
+    qcdr(par::thread_data.segment_fringe) = c;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject acons(LispObject a, LispObject b, LispObject c)
 {   // (cons (cons a b) c)
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(thread_data.segment_fringe);
-    qcar(thread_data.segment_fringe) = thread_data.segment_fringe + 2*sizeof(LispObject);
-    qcdr(thread_data.segment_fringe) = c;
-    c = thread_data.segment_fringe;
-    thread_data.segment_fringe += 2*sizeof(LispObject);
-    setheapstarts(thread_data.segment_fringe);
-    qcar(thread_data.segment_fringe) = a;
-    qcdr(thread_data.segment_fringe) = b;
-    thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = par::thread_data.segment_fringe + 2*sizeof(LispObject);
+    qcdr(par::thread_data.segment_fringe) = c;
+    c = par::thread_data.segment_fringe;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = a;
+    qcdr(par::thread_data.segment_fringe) = b;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
     return c;
 }
 
 static inline LispObject boxfloat(double a)
 {   LispObject r;
     check_space(8, __LINE__);
-    setheapstartsandfp(thread_data.segment_fringe);
-    r = thread_data.segment_fringe + tagFLOAT;
+    setheapstartsandfp(par::thread_data.segment_fringe);
+    r = par::thread_data.segment_fringe + tagFLOAT;
     qfloat(r) = a;
-    thread_data.segment_fringe += 8;
+    par::thread_data.segment_fringe += 8;
     return r;
 }
 
@@ -642,8 +590,8 @@ static inline LispObject boxfloat(double a)
 static inline LispObject allocatesymbol(LispObject pname)
 {   LispObject r;
     check_space(SYMSIZE*sizeof(LispObject), __LINE__);
-    setheapstarts(thread_data.segment_fringe);
-    r = thread_data.segment_fringe + tagSYMBOL;
+    setheapstarts(par::thread_data.segment_fringe);
+    r = par::thread_data.segment_fringe + tagSYMBOL;
     qflags(r) = tagHDR + typeSYM;
     qvalue(r) = undefined;
     qplist(r) = nil;
@@ -656,7 +604,7 @@ static inline LispObject allocatesymbol(LispObject pname)
     qdefn4(r) = undefined4;
     qdefn5up(r) = undefined5up;
     qlits(r)  = r;
-    thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
+    par::thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
     return r;
 }
 
@@ -669,11 +617,11 @@ static inline LispObject allocateatom(int n)
 // header and must then be rounded up to be a multiple of 8.
     int nn = ALIGN8(sizeof(LispObject) + n);
     check_space(nn, __LINE__);
-    setheapstarts(thread_data.segment_fringe);
-    r = thread_data.segment_fringe + tagATOM;
+    setheapstarts(par::thread_data.segment_fringe);
+    r = par::thread_data.segment_fringe + tagATOM;
 // I mark the new vector as being a string so that it is GC safe
     qheader(r) = tagHDR + typeSTRING + packlength(n);
-    thread_data.segment_fringe += nn;
+    par::thread_data.segment_fringe += nn;
     return r;
 }
 
@@ -1367,50 +1315,48 @@ void check_space(int len, int line)
     intptr_t i;
     for (;;) // loop for when pinned items intrude.
     {
-        {
+        // Check if we can just fit in the current segment
+        if (par::thread_data.segment_fringe + len >= par::thread_data.segment_limit) {
             std::lock_guard<std::mutex> lock(check_space_mutex);
-            // Check if we can just fit in the current segment
-            if (!par::get_segment_status() || thread_data.segment_fringe + len >= thread_data.segment_limit) {
-                if (fringe1 + par::Thread_data::SEGMENT_SIZE >= limit1)
-                {   reclaim(line);
-                    continue;
-                } else {
-                    thread_data.segment_fringe = fringe1;
-                    thread_data.segment_limit = thread_data.segment_fringe + par::Thread_data::SEGMENT_SIZE;
-                    fringe1 += par::Thread_data::SEGMENT_SIZE;
-                    par::set_segment_status(true);
-                }
+
+            if (fringe1 + par::Thread_data::SEGMENT_SIZE >= limit1) {   
+                reclaim(line);
+                continue;
+            } else {
+                par::thread_data.segment_fringe = fringe1;
+                par::thread_data.segment_limit = par::thread_data.segment_fringe + par::Thread_data::SEGMENT_SIZE;
+                fringe1 += par::Thread_data::SEGMENT_SIZE;
             }
         }
 
         // printf("%lld %lld %lld %lld\n", thread_data.segment_fringe, fringe1, thread_data.segment_limit, limit1);
         // VB: if a segment has been assigned we make these assertions
-        assert(thread_data.segment_fringe < thread_data.segment_limit);
-        assert(thread_data.segment_limit <= limit1);
+        assert(par::thread_data.segment_fringe < par::thread_data.segment_limit);
+        assert(par::thread_data.segment_limit <= limit1);
 
 // here thread_data.segment_fringe+len < thread_data.segment_limit
         for (i=0; i<len; i+=8)
-            if (getheapstarts(thread_data.segment_fringe+i)) break;
+            if (getheapstarts(par::thread_data.segment_fringe+i)) break;
         if (i >= len) return; // success
 // a block that looks like a string will serve as a padder...
         if (i > 0)
-        {   qcar(thread_data.segment_fringe) =
+        {   qcar(par::thread_data.segment_fringe) =
                 tagHDR + typeSTRING + packlength(i-sizeof(LispObject));
-            setheapstarts(thread_data.segment_fringe);
-            thread_data.segment_fringe += i;
+            setheapstarts(par::thread_data.segment_fringe);
+            par::thread_data.segment_fringe += i;
             heap1_pads += i;
         }
-        while (getheapstarts(thread_data.segment_fringe))
+        while (getheapstarts(par::thread_data.segment_fringe))
         {   LispObject h;
 // I now need to skip over the pinned item. If it is floating point,
 // a cons cell or a symbol I have to detect that, otherwise its
 // header gives its length explicitly.
-            if (getheapfp(thread_data.segment_fringe)) thread_data.segment_fringe += 8;
-            else if (!isHDR(h = qcar(thread_data.segment_fringe)))
-                thread_data.segment_fringe += 2*sizeof(LispObject);
+            if (getheapfp(par::thread_data.segment_fringe)) par::thread_data.segment_fringe += 8;
+            else if (!isHDR(h = qcar(par::thread_data.segment_fringe)))
+                par::thread_data.segment_fringe += 2*sizeof(LispObject);
             else if ((h & TYPEBITS) == typeSYM)
-                 thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
-            else thread_data.segment_fringe += ALIGN8(sizeof(LispObject) + veclength(h));
+                 par::thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
+            else par::thread_data.segment_fringe += ALIGN8(sizeof(LispObject) + veclength(h));
         }
     }
 }
@@ -1428,7 +1374,7 @@ void middle_reclaim()
         middle_reclaim();     // never executed!
     }
     inner_reclaim((LispObject *)((intptr_t)&w & -sizeof(LispObject)));
-    par::clear_segment_stati();
+    par::reset_segments();
 }
 
 std::mutex reclaim_mutex;
@@ -2388,6 +2334,7 @@ LispObject interpreted1(LispObject b, LispObject a1)
     }
     bvl = r;
     save1 = qvalue(bvl);
+    // par::Shallow_bind bind_bvl(bvl, a1);
     qvalue(bvl) = a1;
     r = nil;
     while (isCONS(b))
@@ -4831,24 +4778,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1) {
   return Lerrorset_3(lits, a1, nil, nil);
 }
 
-namespace par {
-std::unordered_map<int, std::thread> active_threads;
-int tid = 0;
-
-std::mutex thread_mutex;
-int start_thread(std::function<void(void)> f) {
-  std::lock_guard<std::mutex> lock(thread_mutex);
-
-  tid += 1;
-  active_threads.emplace(std::make_pair(tid, f));
-  return tid;
-}
-} // namespace par
-
 LispObject Lthread(LispObject lits, LispObject x) {
     auto f = [=]() {
-        int stack_var = 0;
-        thread_data.C_stackbase = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
         LispObject r = eval(x);
         print(r);
     };

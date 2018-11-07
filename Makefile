@@ -32,7 +32,7 @@ bvsl:	vsl.cpp
 		$(LIBS) -o bvsl \
 		2>&1 | tee bvsl.log
 
-parvsl:    parvsl.cpp
+parvsl:    parvsl.cpp common.hpp thread_data.hpp
 	g++ -fno-diagnostics-color -pthread $(CFLAGS) \
 		parvsl.cpp $(LIBS) -o parvsl \
 		2>&1 | tee parvsl.log

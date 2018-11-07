@@ -37,6 +37,10 @@ on on thread should not interfere with the other threads.
 
 The solution would be to instead have the local a thread local space for values.
 
+All fluid and local symbols need to be stored in thread-local storage. However,
+symbols are modified to fluid/global only by interpreted call.
+Idea: Make fluid and global builtin functions so I can have more control.
+
 ** Dealing with multiple stacks
 
 To run the conservative GC, we have a pointer to the beginning of the stack
@@ -48,4 +52,12 @@ their stack, but this could suffer from deadlock. We would want a safe way for t
 to report they are clean, but how do we tell their stack at any point?
 C++ does not allow preemption so how do we terminate a really long computation, or 
 even an infinite loop?
+
+All threads need to be put in a nice waiting state for garbage collection to kick in.
+We need to use a flag that tells all threads when they should stop working.
+They can simply go call the gc to do so. Thus, when they allocate they will be dealt
+with automatically. The ones that do not allocate, are either running some interpreted
+code or one of a few builtin functions. We need to treat each builtin separately
+and check the flag while running. 
+
 
