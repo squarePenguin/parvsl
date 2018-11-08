@@ -1,6 +1,6 @@
 (prog (i)
   (setq i 0)
-a (cond ((igreaterp i 1000) (return nil)))
+  (cond ((igreaterp i 1000) (return nil)))
   (setq i (iadd1 i))
   (go a))
 
