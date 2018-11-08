@@ -255,7 +255,8 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 
 // Fixnums and Floating point numbers are rather easy!
 
-#define qfixnum(x)     (((intptr_t)(x)) >> 3)
+#define qfixnum(x)     (((intptr_t)(x)) / 8) // beware signed right shifts!
+
 // NB that C++ makes this undefined if there is overflow!
 #define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
 

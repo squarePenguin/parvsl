@@ -53,12 +53,12 @@
 
 
 // TODO:
+// get quotient/remainder finished and tested properly.
 //   gcdn, lcmn
 //   float, floor, ceil, fix
 //   isqrt
-//   random bignum generation
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
-//   check support where int128 is not available
+//   support where int128 is not available
 // a LOT of testing. Some profiling and performance tuning.
 
 
@@ -790,6 +790,9 @@ static inline uint64_t virtual_digit64(const uint64_t *v, size_t n, size_t j)
     else return UINT64_C(0xffffffffffffffff);
 }
 
+// This function reads a 3-bit digit from a bignum, and is for use when
+// printing in octal.
+
 static inline int read_u3(const uint64_t *v, size_t n, size_t i)
 {   size_t bits = 3*i;
     size_t n0 = bits/64;   // word with lowest bit of the 3
@@ -843,6 +846,49 @@ static thread_local std::seed_seq random_seed
 };
 static thread_local std::mt19937_64 mersenne_twister(random_seed);
 // mersenne_twister() now generates 64-bit unsigned integers.
+
+// Now a number of functions for setting up random bignums. These may be
+// useful for users, but they will alo be very useful while tetsing this
+// code.
+
+// A uniform distribution across the range [0 .. 2^bits-1], ie
+// a bignum using (up to) the given number of bits. So eg uniform_positive(3)
+// should return 0,1,2,3,4,5,6 or 7.
+
+void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
+{   if (bits == 0)
+    {   r[0] = 0;
+        lenr = 1;
+    }
+    lenr = (bits+63)/64;
+    for (size_t i=0; i<lenr; i++)
+        r[i] = mersenne_twister();
+    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
+    while (r!=0 && r[lenr-1] == 0) lenr--;
+}
+
+// As above but returning a value that may be negative. uniform_signed(3)
+// could return -8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6 or 7.
+// Note that whuke uniform_unsigned(0) can only return the value 0,
+// uniform_signed(0) can return -1 or 0.
+
+void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
+{   bits++; // I will first generate an unsigned value with one extra bit.
+    lenr = (bits+63)/64;
+    for (size_t i=0; i<lenr; i++)
+        r[i] = mersenne_twister();
+// Now if the "extra" bit is zero my number will end up positive.
+    if ((r[lenr-1] & UINT64_C(0x8000000000000000) >> (bits%64)) == 0)
+    {   r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
+        while (r!=0 && r[lenr-1] == 0) lenr--;
+    }
+// Otherwise the result will end up negative.
+    else
+    {   if (bits%64 != 0)
+            r[lenr-1] |= UINT64_C(0xffffffffffffffff) << (64-bits%64);
+        while (r!=0 && r[lenr-1] == UINT64_C(0xffffffffffffffff)) lenr--;
+    }
+}
 
 
 // Convert a 64-bit integer to a bignum.
@@ -998,6 +1044,7 @@ static inline int nlz(uint64_t x)
 
 static size_t predict_size_in_bytes(const uint64_t *a, size_t n)
 {   uint64_t r;
+    if (n == 0) return 1;
 // I am first going to estimate the size in BITS and then I will
 // see how that maps onto bytes.
     uint64_t top = a[n-1];  // top digit.
