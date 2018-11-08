@@ -3,9 +3,15 @@
 
 #include "common.hpp"
 
+#include <cassert>
+
 #include <algorithm>
 #include <atomic>
+#include <mutex>
+#include <functional>
 #include <vector>
+#include <thread>
+#include <unordered_map>
 
 namespace par {
 // Segments are a way of splitting the memory into further chunks
@@ -34,8 +40,7 @@ private:
     std::thread t;
 public:
     Thread_RAII(std::thread&& t) : t(std::move(t)) {}
-    ~Thread_RAII()
-    {
+    ~Thread_RAII() {
         if (t.joinable()) {
             t.join();
         }

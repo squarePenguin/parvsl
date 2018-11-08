@@ -89,6 +89,8 @@
 #include <assert.h>
 #include <zlib.h>
 
+#include <iostream>
+
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -103,6 +105,10 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+
+#ifdef BIGNUM
+#include "BigIntegerLibrary.hh"
+#endif
 
 // There is a portability issue about MAP_ANONYMOUS: I hope that
 // the adjustments made here will leave everything workable
@@ -146,8 +152,6 @@ int devzero_fd = 0;
 // Each byte in the bitmap will allow marking for 8 entities, and each
 // entity is 8 bytes wide (both on 32 and 64-bit systems), hence each
 // bitmap uses 1/64th of the memory used by the region it maps.
-
-LispObject *C_stackbase;
 
 
 void my_exit(int n)
@@ -645,7 +649,7 @@ static inline LispObject makevector(int maxindex)
 }
 
 static inline LispObject boxint64(int64_t a)
-{
+{   if (a >= MIN_FIXNUM && a <= MAX_FIXNUM) return packfixnum(a);
     LispObject r = allocateatom(8);
     qheader(r) = tagHDR + typeBIGNUM + packlength(8);
     qint64(r) = a;
@@ -864,120 +868,6 @@ static LispObject Lchar_downcase(LispObject data, LispObject arg)
     }
     else return arg;
 }
-
-// I will try to have a general macro that will help me with bringing
-// everything to consistent numeric types - ie I can start off with a
-// mix of fixnums, bignums and floats. The strategy here is that if either
-// args is a float then the other is forced to that, and then for all sorts
-// of pure integer work everything will be done as int64_t
-
-#define NUMOP(name, a, b)                                                \
-    if (isFLOAT(a))                                                      \
-    {   if (isFLOAT(b)) return FF(qfloat(a), qfloat(b));                 \
-        else if (isFIXNUM(b)) return FF(qfloat(a), (double)qfixnum(b));  \
-        else if (isBIGNUM(b)) return FF(qfloat(a), (double)qint64(b));   \
-        else return error1("Bad argument for " name, b);                 \
-    }                                                                    \
-    else if (isBIGNUM(a))                                                \
-    {   if (isFLOAT(b)) return FF((double)qint64(a), qfloat(b));         \
-        else if (isFIXNUM(b)) return BB(qint64(a), (int64_t)qfixnum(b)); \
-        else if (isBIGNUM(b)) return BB(qint64(a), qint64(b));           \
-        else return error1("Bad argument for " name, b);                 \
-    }                                                                    \
-    else if (isFIXNUM(a))                                                \
-    {   if (isFLOAT(b)) return FF((double)qfixnum(a), qfloat(b));        \
-        else if (isFIXNUM(b)) return BB((int64_t)qfixnum(a),             \
-                                        (int64_t)qfixnum(b));            \
-        else if (isBIGNUM(b)) return BB((int64_t)qfixnum(a), qint64(b)); \
-        else return error1("Bad argument for " name, b);                 \
-    }                                                                    \
-    else return error1("Bad argument for " name, a)
-
-#define UNARYOP(name, a)                                                 \
-    if (isFIXNUM(a)) return BB((int64_t)qfixnum(a));                     \
-    else if (isFLOAT(a)) return FF(qfloat(a));                           \
-    else if (isBIGNUM(a)) return BB(qint64(a));                          \
-    else return error1("Bad argument for " name, a)
-
-// Similar, but only supporting integer (not floating point) values
-
-#define INTOP(name, a, b)                                                \
-    if (isBIGNUM(a))                                                     \
-    {   if (isFIXNUM(b)) return BB(qint64(a), (int64_t)qfixnum(b));      \
-        else if (isBIGNUM(b)) return BB(qint64(a), qint64(b));           \
-        else return error1("Bad argument for " name, b);                 \
-    }                                                                    \
-    else if (isFIXNUM(a))                                                \
-    {   if (isFIXNUM(b)) return BB((int64_t)qfixnum(a),                  \
-                                   (int64_t)qfixnum(b));                 \
-        else if (isBIGNUM(b)) return BB((int64_t)qfixnum(a), qint64(b)); \
-        else return error1("Bad argument for " name, b);                 \
-    }                                                                    \
-    else return error1("Bad argument for " name, a)
-
-#define UNARYINTOP(name, a)                                              \
-    if (isFIXNUM(a)) return BB((int64_t)qfixnum(a));                     \
-    else if (isBIGNUM(a)) return BB(qint64(a));                          \
-    else return error1("Bad argument for " name, a)
-
-// This takes an arbitrary 64-bit integer and returns either a fixnum
-// or a bignum as necessary.
-
-LispObject makeinteger(int64_t a)
-{   if (a >= MIN_FIXNUM && a <= MAX_FIXNUM) return packfixnum(a);
-    else return boxint64(a);
-}
-
-#undef FF
-#undef BB
-#define FF(a) boxfloat(-(a))
-#define BB(a) makeinteger(-(a))
-
-LispObject Nminus(LispObject a)
-{   UNARYOP("minus", a);
-}
-
-#undef FF
-#undef BB
-#define FF(a, b) boxfloat((a) + (b))
-#define BB(a, b) makeinteger((a) + (b))
-
-LispObject Nplus2(LispObject a, LispObject b)
-{   NUMOP("plus", a, b);
-}
-
-#undef FF
-#undef BB
-#define FF(a, b) boxfloat((a) * (b))
-#define BB(a, b) makeinteger((a) * (b))
-
-LispObject Ntimes2(LispObject a, LispObject b)
-{   NUMOP("times", a, b);
-}
-
-#undef BB
-#define BB(a, b) makeinteger((a) & (b))
-
-LispObject Nlogand2(LispObject a, LispObject b)
-{   INTOP("logand", a, b);
-}
-
-#undef BB
-#define BB(a, b) makeinteger((a) | (b))
-
-LispObject Nlogor2(LispObject a, LispObject b)
-{   INTOP("logor", a, b);
-}
-
-#undef BB
-#define BB(a, b) makeinteger((a) ^ (b))
-
-LispObject Nlogxor2(LispObject a, LispObject b)
-{   INTOP("logxor", a, b);
-}
-
-#undef FF
-#undef BB
 
 #define BOFFO_SIZE 4096
 char boffo[BOFFO_SIZE+4];
@@ -1300,6 +1190,9 @@ volatile int volatile_variable = 12345;
 // VB: For now I naively lock this. Will probably very slow.
 std::mutex check_space_mutex;
 
+int num_allocs = 0;
+int alc = 0;
+
 void check_space(int len, int line)
 {
 // The value passed will always be a multiple of 8. Ensure that that
@@ -1309,23 +1202,42 @@ void check_space(int len, int line)
 // the garbage collector while copying into heap2. The treatment of large
 // memory blocks here will be a little tedious and coule be improved by
 // checking the bitmap word at a time not bit at a time.
-    assert(len <= par::Thread_data::SEGMENT_SIZE); // TODO VB: how to fix this?
-    // VB: Maybe allocate multiple segments at once
 
+    // assert(len <= par::Thread_data::SEGMENT_SIZE); // TODO VB: ow to fix this?
+    // VB: Maybe allocate multiple segments at once
+    // printf("check_space len %d\n", len);
+    num_allocs += 1;
     intptr_t i;
     for (;;) // loop for when pinned items intrude.
     {
         // Check if we can just fit in the current segment
         if (par::thread_data.segment_fringe + len >= par::thread_data.segment_limit) {
-            std::lock_guard<std::mutex> lock(check_space_mutex);
 
-            if (fringe1 + par::Thread_data::SEGMENT_SIZE >= limit1) {   
+            std::lock_guard<std::mutex> lock(check_space_mutex);
+            int a = par::Thread_data::SEGMENT_SIZE;
+            uintptr_t size = std::max(a, len);
+
+            // printf("segfringe %llu seglimit %llu size %d \n", par::thread_data.segment_fringe, par::thread_data.segment_limit, size);
+
+            if (fringe1 + size >= limit1) {
+                // printf("fringe %llu limit %llu size %d \n", fringe1, limit1, size);
+                std::cout << "fringe " << fringe1 << " limit " << limit1 << " diff " << limit1 - fringe1 << " size " << size << std::endl;
+                std::cout << "allocs since last time " << num_allocs - alc << std::endl;
+                alc = num_allocs;
                 reclaim(line);
+                if (fringe1 + size >= limit1) {
+                    // not enough memoty
+                    my_exit(137);
+                } else {
+                    std::cout << "phew diff " << limit1 - fringe1 << " size " << size << std::endl;
+                    // printf("phew %d size %d \n", (int)limit1 - fringe1, size);
+                }
                 continue;
             } else {
+                // printf("segfringe %llu seglimit %llu size %d \n", par::thread_data.segment_fringe, par::thread_data.segment_limit, size);
                 par::thread_data.segment_fringe = fringe1;
-                par::thread_data.segment_limit = par::thread_data.segment_fringe + par::Thread_data::SEGMENT_SIZE;
-                fringe1 += par::Thread_data::SEGMENT_SIZE;
+                par::thread_data.segment_limit = par::thread_data.segment_fringe + size;
+                fringe1 += size;
             }
         }
 
@@ -2251,6 +2163,18 @@ thread_local int backtraceflag = -1;
 #define backtraceHEADER 1
 #define backtraceTRACE  2
 
+LispObject error0(const char *msg)
+{   if ((backtraceflag & backtraceHEADER) != 0)
+    {   linepos = printf("\n+++ Error: %s\n", msg);
+#ifdef DEBUG
+        if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s\n", msg);
+#endif // DEBUG
+    }
+    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+                 unwindERROR;
+    return nil;
+}
+
 LispObject error1(const char *msg, LispObject data)
 {   if ((backtraceflag & backtraceHEADER) != 0)
     {   linepos = printf("\n+++ Error: %s: ", msg);
@@ -2537,6 +2461,8 @@ LispObject eval(LispObject x)
     {  printf("eval: "); print(qcar(x)); // Eek! @@@@
     }
 #endif
+// The intent of fname is that when running VSL under a debugger it can
+// be inspected to reveal the name of a function that is being called.
     const char *fname = "unknown";
     if (isCONS(x) && isSYMBOL(qcar(x))) fname = qstring(qpname(qcar(x)));
     while (isCONS(x) && isSYMBOL(qcar(x)) && (qflags(qcar(x)) & flagMACRO))
@@ -2593,7 +2519,8 @@ LispObject eval(LispObject x)
             case 0:
                 if (flags & flagTRACED)
                 {   linepos += printf("Calling: ");
-                    errprint(f);
+                    printf("%s\n", fname); linepos = 0;
+//                  errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                 }
                 x = (*qdefn0(f))(qlits(f));
@@ -3138,256 +3065,6 @@ LispObject Lgo(LispObject lits, LispObject x)
     return nil;
 }
 
-LispObject Lplus_0(LispObject data)
-{
-    return packfixnum(0);
-}
-
-LispObject Lplus_1(LispObject data, LispObject a1)
-{
-    return a1;
-}
-
-LispObject Lplus_2(LispObject data, LispObject a1, LispObject a2)
-{
-    return Nplus2(a1, a2);
-}
-
-LispObject Lplus_3(LispObject data, LispObject a1,
-                   LispObject a2, LispObject a3)
-{
-    LispObject r = Nplus2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    return Nplus2(r, a3);
-}
-
-LispObject Lplus_4(LispObject data, LispObject a1, LispObject a2,
-                   LispObject a3, LispObject a4)
-{
-    LispObject r = Nplus2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nplus2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    return Nplus2(r, a4);
-}
-
-LispObject Lplus_5up(LispObject data, LispObject a1, LispObject a2,
-                      LispObject a3, LispObject a4, LispObject a5up)
-{
-    LispObject r = Nplus2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nplus2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nplus2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
-    while (isCONS(a5up))
-    {   r = Nplus2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
-        a5up = qcdr(a5up);
-    }
-    return r;
-}
-
-LispObject Ltimes_0(LispObject data)
-{
-    return packfixnum(1);
-}
-
-LispObject Ltimes_1(LispObject data, LispObject a1)
-{
-    return a1;
-}
-
-LispObject Ltimes_2(LispObject data, LispObject a1, LispObject a2)
-{
-    return Ntimes2(a1, a2);
-}
-
-LispObject Ltimes_3(LispObject data, LispObject a1,
-                   LispObject a2, LispObject a3)
-{
-    LispObject r = Ntimes2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    return Ntimes2(r, a3);
-}
-
-LispObject Ltimes_4(LispObject data, LispObject a1, LispObject a2,
-                   LispObject a3, LispObject a4)
-{
-    LispObject r = Ntimes2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Ntimes2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    return Ntimes2(r, a4);
-}
-
-LispObject Ltimes_5up(LispObject data, LispObject a1, LispObject a2,
-                      LispObject a3, LispObject a4, LispObject a5up)
-{
-    LispObject r = Ntimes2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Ntimes2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    r = Ntimes2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
-    while (isCONS(a5up))
-    {   r = Ntimes2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
-        a5up = qcdr(a5up);
-    }
-    return r;
-}
-
-LispObject Llogand_0(LispObject data)
-{
-    return packfixnum(-1);
-}
-
-LispObject Llogand_1(LispObject data, LispObject a1)
-{
-    return a1;
-}
-
-LispObject Llogand_2(LispObject data, LispObject a1, LispObject a2)
-{
-    return Nlogand2(a1, a2);
-}
-
-LispObject Llogand_3(LispObject data, LispObject a1,
-                   LispObject a2, LispObject a3)
-{
-    LispObject r = Nlogand2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    return Nlogand2(r, a3);
-}
-
-LispObject Llogand_4(LispObject data, LispObject a1, LispObject a2,
-                   LispObject a3, LispObject a4)
-{
-    LispObject r = Nlogand2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogand2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    return Nlogand2(r, a4);
-}
-
-LispObject Llogand_5up(LispObject data, LispObject a1, LispObject a2,
-                      LispObject a3, LispObject a4, LispObject a5up)
-{
-    LispObject r = Nlogand2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogand2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogand2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
-    while (isCONS(a5up))
-    {   r = Nlogand2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
-        a5up = qcdr(a5up);
-    }
-    return r;
-}
-
-LispObject Llogor_0(LispObject data)
-{
-    return packfixnum(0);
-}
-
-LispObject Llogor_1(LispObject data, LispObject a1)
-{
-    return a1;
-}
-
-LispObject Llogor_2(LispObject data, LispObject a1, LispObject a2)
-{
-    return Nlogor2(a1, a2);
-}
-
-LispObject Llogor_3(LispObject data, LispObject a1,
-                   LispObject a2, LispObject a3)
-{
-    LispObject r = Nlogor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    return Nlogor2(r, a3);
-}
-
-LispObject Llogor_4(LispObject data, LispObject a1, LispObject a2,
-                   LispObject a3, LispObject a4)
-{
-    LispObject r = Nlogor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    return Nlogor2(r, a4);
-}
-
-LispObject Llogor_5up(LispObject data, LispObject a1, LispObject a2,
-                      LispObject a3, LispObject a4, LispObject a5up)
-{
-    LispObject r = Nlogor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogor2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
-    while (isCONS(a5up))
-    {   r = Nlogor2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
-        a5up = qcdr(a5up);
-    }
-    return r;
-}
-
-LispObject Llogxor_0(LispObject data)
-{
-    return packfixnum(0);
-}
-
-LispObject Llogxor_1(LispObject data, LispObject a1)
-{
-    return a1;
-}
-
-LispObject Llogxor_2(LispObject data, LispObject a1, LispObject a2)
-{
-    return Nlogxor2(a1, a2);
-}
-
-LispObject Llogxor_3(LispObject data, LispObject a1,
-                   LispObject a2, LispObject a3)
-{
-    LispObject r = Nlogxor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    return Nlogxor2(r, a3);
-}
-
-LispObject Llogxor_4(LispObject data, LispObject a1, LispObject a2,
-                   LispObject a3, LispObject a4)
-{
-    LispObject r = Nlogxor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogxor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    return Nlogxor2(r, a4);
-}
-
-LispObject Llogxor_5up(LispObject data, LispObject a1, LispObject a2,
-                      LispObject a3, LispObject a4, LispObject a5up)
-{
-    LispObject r = Nlogxor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogxor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
-    r = Nlogxor2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
-    while (isCONS(a5up))
-    {   r = Nlogxor2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
-        a5up = qcdr(a5up);
-    }
-    return r;
-}
-
 LispObject Llist_0(LispObject lits)
 {
     return nil;
@@ -3892,441 +3569,1548 @@ LispObject Lapply(LispObject lits, LispObject x, LispObject y)
     y = qcdr(y);
     if (!isCONS(y)) return (*qdefn1(x))(qlits(x), a1);
     a2 = qcar(y);
-  y = qcdr(y);
-  if (!isCONS(y))
-    return (*qdefn2(x))(qlits(x), a1, a2);
-  a3 = qcar(y);
-  y = qcdr(y);
-  if (!isCONS(y))
-    return (*qdefn3(x))(qlits(x), a1, a2, a3);
-  a4 = qcar(y);
-  y = qcdr(y);
-  if (!isCONS(y))
-    return (*qdefn4(x))(qlits(x), a1, a2, a3, a4);
-  // Functions with 5 or more arguments have to unpack their own arguments
-  // for themselves.
-  return (*qdefn5up(x))(qlits(x), a1, a2, a3, a4, y);
+    y = qcdr(y);
+    if (!isCONS(y)) return (*qdefn2(x))(qlits(x), a1, a2);
+    a3 = qcar(y);
+    y = qcdr(y);
+    if (!isCONS(y)) return (*qdefn3(x))(qlits(x), a1, a2, a3);
+    a4 = qcar(y);
+    y = qcdr(y);
+    if (!isCONS(y)) return (*qdefn4(x))(qlits(x), a1, a2, a3, a4);
+// Functions with 5 or more arguments have to unpack their own arguments
+// for themselves.
+    return (*qdefn5up(x))(qlits(x), a1, a2, a3, a4, y);
 }
 
-LispObject Lplist(LispObject lits, LispObject x) {
-  if (!isSYMBOL(x))
-    return nil;
-  else
-    return qplist(x);
+LispObject Lplist(LispObject lits, LispObject x)
+{
+    if (!isSYMBOL(x)) return nil;
+    else return qplist(x);
 }
 
-LispObject Lput(LispObject lits, LispObject x, LispObject y, LispObject z) {
-  LispObject w;
-  if (!isSYMBOL(x))
-    return error1("bad arg put", x);
-  w = qplist(x);
-  while (isCONS(w)) {
-    LispObject a = qcar(w);
-    w = qcdr(w);
-    if (isCONS(a) && qcar(a) == y) {
-      qcdr(a) = z;
-      return z;
+LispObject Lput(LispObject lits, LispObject x, LispObject y, LispObject z)
+{   LispObject w;
+    if (!isSYMBOL(x)) return error1("bad arg put", x);
+    w = qplist(x);
+    while (isCONS(w))
+    {   LispObject a = qcar(w);
+        w = qcdr(w);
+        if (isCONS(a) && qcar(a) == y)
+        {   qcdr(a) = z;
+            return z;
+        }
     }
-  }
-  w = acons(y, z, qplist(x));
-  qplist(x) = w;
-  return z;
+    w = acons(y, z, qplist(x));
+    qplist(x) = w;
+    return z;
 }
 
-LispObject Lget(LispObject lits, LispObject x, LispObject y) {
-  if (!isSYMBOL(x))
-    return nil;
-  x = qplist(x);
-  while (isCONS(x)) {
-    LispObject a = qcar(x);
-    x = qcdr(x);
-    if (isCONS(a) && qcar(a) == y)
-      return qcdr(a);
-  }
-  return nil;
-}
-
-LispObject Lremprop(LispObject lits, LispObject x, LispObject y) {
-  LispObject p, r, *prev;
-  if (!isSYMBOL(x))
-    return nil;
-  p = *(prev = &qplist(x));
-  while (p != nil) {
-    if (isCONS(r = qcar(p)) && qcar(qcar(p)) == y) {
-      *prev = qcdr(p);
-      return r;
+LispObject Lget(LispObject lits, LispObject x, LispObject y)
+{
+    if (!isSYMBOL(x)) return nil;
+    x = qplist(x);
+    while (isCONS(x))
+    {   LispObject a = qcar(x);
+        x = qcdr(x);
+        if (isCONS(a) && qcar(a) == y) return qcdr(a);
     }
-    p = *(prev = &qcdr(p));
-  }
-  return nil;
-}
-
-LispObject Lmkvect(LispObject lits, LispObject x) {
-  int n;
-  if (!isFIXNUM(x))
-    return error1("bad size in mkvect", x);
-  n = (int)qfixnum(x);
-  // I put an (arbitrary) limit on the size of the largest vector.
-  if (n < 0 || n > 100000)
-    return error1("bad size in mkvect", x);
-  return makevector(n);
-}
-
-LispObject Lupbv(LispObject lits, LispObject x) {
-  if (!isVEC(x))
-    return error1("bad arg to upbv", x);
-  return makeinteger(veclength(qheader(x)) / sizeof(LispObject) - 1);
-}
-
-LispObject Lputv(LispObject lits, LispObject x, LispObject y, LispObject z) {
-  int n;
-  if (!isVEC(x) || !isFIXNUM(y))
-    return error1("bad arg to putv", cons(x, y));
-  n = (int)qfixnum(y);
-  if (n < 0 || (uintptr_t)n >= veclength(qheader(x)) / sizeof(LispObject))
-    return error1("subscript out of range in putv", y);
-  elt(x, n) = z;
-  return z;
-}
-
-LispObject Lgetv(LispObject lits, LispObject x, LispObject y) {
-  int n;
-  // As a matter of convenience and generosity I will allow "getv" to
-  // access items from hash tables as well as ordinary vectors.
-  if ((!isVEC(x) && !isEQHASH(x) && !isEQHASHX(x)) || !isFIXNUM(y))
-    return error1("bad arg to getv", cons(x, y));
-  n = (int)qfixnum(y);
-  if (n < 0 || (uintptr_t)n >= veclength(qheader(x)) / sizeof(LispObject))
-    return error1("subscript out of range in getv", y);
-  return elt(x, n);
-}
-
-LispObject Lmkhash_3(LispObject lits, LispObject x, LispObject y,
-                     LispObject z) {
-  int n;
-  LispObject r;
-  if (!isFIXNUM(x))
-    return error1("bad size in mkhash", x);
-  n = (int)qfixnum(x);
-  // I force hash tables to be of limited size.
-  if (n <= 10)
-    n = 11;
-  else if (n > 1000)
-    n = 997;
-  n |= 1; // Force table-size to be an odd number
-  r = makevector(n - 1);
-  qheader(r) ^= (typeVEC ^ typeEQHASH);
-  return r;
-}
-
-LispObject Lmkhash_2(LispObject lits, LispObject x, LispObject y) {
-  return Lmkhash_3(lits, x, y, nil);
-}
-
-LispObject Lmkhash_1(LispObject lits, LispObject x) {
-  return Lmkhash_3(lits, x, nil, nil);
-}
-
-void rehash(LispObject x) {
-  int n = veclength(qheader(x));
-  int i;
-  // At the moment that this is invoked it is at least certain that
-  // garbage collection is not in progress. Hence the second half-space
-  // is all memory available for use! So on a temporary basis I will put
-  // a copy of the hash table there.
-  // Well actually some pinned items may be present in the second half-
-  // space, but I still expect to be able to find plenty of free space
-  // somewhere there... If somehow because of fragmentation caused by
-  // pinned items it was not possible to find the space I need here
-  // then that is probably fatal, but that is always going to be the
-  // case if ensureheap2space is unable to find space.
-  LispObject x1;
-  block2 = 0;
-  fringe2 = ((block_header *)blocks_by_age[0])->h2base;
-  limit2 = ((block_header *)blocks_by_age[0])->h2top;
-  ensureheap2space(sizeof(LispObject) + n);
-  x1 = fringe2 + tagATOM;
-  // Note that this is short term use of memory in heap2, and I do not
-  // set an object-start mark bit for the "vector" I use here.
-  memcpy((void *)(x1 - tagATOM), (void *)(x - tagATOM), n + sizeof(LispObject));
-  n = n / sizeof(LispObject); // Now a count of slots in the table.
-  // I will now re-hash from the copy that I made back into the hash table, but
-  // now using the new hash values that reflect and changes that have
-  // arisen.
-  for (i = 0; i < n; i++)
-    elt(x, i) = nil;
-  for (i = 0; i < n; i++) {
-    LispObject b = elt(x1, i);
-    while (b != nil) {
-      LispObject ca = qcar(b), cd = qcdr(b);
-      int h = (int)(((uintptr_t)qcar(ca)) % ((uintptr_t)n)); // New bucket.
-      qcdr(b) = elt(x, h);
-      elt(x, h) = b; // Re-inserted in table.
-      b = cd;
-    }
-  }
-  if (isEQHASHX(x))
-    qheader(x) ^= (typeEQHASH ^ typeEQHASHX);
-}
-
-LispObject Lputhash(LispObject lits, LispObject x, LispObject y, LispObject z) {
-  int n, h;
-  LispObject c;
-  if (isEQHASHX(y))
-    rehash(y);
-  if (!isEQHASH(y))
-    return error1("not a hash table in puthash", cons(x, y));
-  n = veclength(qheader(y)) / sizeof(LispObject);
-  // I use unsigned types so I get a positive remainder.
-  h = (int)(((uintptr_t)x) % ((uintptr_t)n));
-  c = elt(y, h);
-  while (isCONS(c)) {
-    if (qcar(qcar(c)) == x) {
-      qcdr(qcar(c)) = z;
-      return z;
-    }
-    c = qcdr(c);
-  }
-  c = acons(x, z, elt(y, h));
-  elt(y, h) = c;
-  return z;
-}
-
-LispObject Lremhash(LispObject lits, LispObject x, LispObject y) {
-  int n, h;
-  LispObject c, *cp;
-  if (isEQHASHX(y))
-    rehash(y);
-  if (!isEQHASH(y))
-    return error1("not a hash table in remhash", cons(x, y));
-  n = veclength(qheader(y)) / sizeof(LispObject);
-  h = (int)(((uintptr_t)x) % ((uintptr_t)n));
-  c = *(cp = &elt(y, h));
-  while (isCONS(c)) {
-    if (qcar(qcar(c)) == x) {
-      *cp = qcdr(c);
-      return qcdr(qcar(c));
-    }
-    c = *(cp = &qcdr(c));
-  }
-  return nil;
-}
-
-LispObject Lgethash(LispObject lits, LispObject x, LispObject y) {
-  int n, h;
-  LispObject c;
-  if (isEQHASHX(y))
-    rehash(y);
-  if (!isEQHASH(y))
-    return error1("not a hash table in gethash", cons(x, y));
-  n = veclength(qheader(y)) / sizeof(LispObject);
-  h = (int)(((uintptr_t)x) % ((uintptr_t)n));
-  c = elt(y, h);
-  while (isCONS(c)) {
-    if (qcar(qcar(c)) == x)
-      return qcdr(qcar(c));
-    c = qcdr(c);
-  }
-  return nil;
-}
-
-LispObject Lgetd(LispObject lits, LispObject x) {
-  LispObject r;
-  if (!isSYMBOL(x))
     return nil;
-  r = qlits(x);
-  if ((qflags(x) & flagSPECFORM) != 0) {
-    if (qdefn1(x) == (LispFn1 *)interpretspecform)
-      // I copy the bound variable list that is returned so that nobody can
-      // use rplaca/rplacd to corrupt it.
-      return list2star(
-          fexpr, lambda,
-          //@@@                cons(shallow_copy(qcar(r)), qcdr(r)));
-          r);
-    else
-      return cons(fsubr, x);
-  }
-  // I know I only look in the qdefn1 cell here, but undefined and interpreted
-  // things always have the values I test for here in them, so that is
-  // in fact OK.
-  else if (qdefn0(x) == undefined0 && qdefn1(x) == undefined1 &&
-           qdefn2(x) == undefined2 && qdefn3(x) == undefined3 &&
-           qdefn4(x) == undefined4 && qdefn5up(x) == undefined5up)
+}
+
+LispObject Lremprop(LispObject lits, LispObject x, LispObject y)
+{   LispObject p, r, *prev;
+    if (!isSYMBOL(x)) return nil;
+    p = *(prev = &qplist(x));
+    while (p != nil)
+    {   if (isCONS(r = qcar(p)) && qcar(qcar(p)) == y)
+        {   *prev = qcdr(p);
+            return r;
+        }
+        p = *(prev = &qcdr(p));
+    }
     return nil;
-  else if (qdefn0(x) == interpreted0 &&
-           (qdefn1(x) == interpreted1 || qdefn1(x) == interpretspecform) &&
-           qdefn2(x) == interpreted2 && qdefn3(x) == interpreted3 &&
-           qdefn4(x) == interpreted4 && qdefn5up(x) == interpreted5up)
-    return list2star((qflags(x) & flagMACRO) ? macro : expr, lambda, r);
-  //***            cons(shallow_copy(qcar(r)), qcdr(r)));
-  else
-    return cons(subr, x);
 }
 
-LispObject Lreturn_0(LispObject lits) {
-  work1 = nil;
-  unwindflag = unwindRETURN;
-  return nil;
+LispObject Lmkvect(LispObject lits, LispObject x)
+{   int n;
+    if (!isFIXNUM(x)) return error1("bad size in mkvect", x);
+    n = (int)qfixnum(x);
+// I put an (arbitrary) limit on the size of the largest vector.
+    if (n < 0 || n > 100000) return error1("bad size in mkvect", x);
+    return makevector(n);
 }
 
-LispObject Lreturn_1(LispObject lits, LispObject x) {
-  work1 = x;
-  if (unwindflag == unwindNONE)
+extern LispObject boxint64(int64_t a);
+
+LispObject Lupbv(LispObject lits, LispObject x)
+{
+    if (!isVEC(x)) return error1("bad arg to upbv", x);
+    return boxint64(veclength(qheader(x))/sizeof(LispObject)-1);
+}
+
+LispObject Lputv(LispObject lits, LispObject x, LispObject y, LispObject z)
+{   int n;
+    if (!isVEC(x) || !isFIXNUM(y))
+        return error1("bad arg to putv", cons(x, y));
+    n = (int)qfixnum(y);
+    if (n < 0 || (uintptr_t)n >= veclength(qheader(x))/sizeof(LispObject))
+        return error1("subscript out of range in putv", y);
+    elt(x, n) = z;
+    return z;
+}
+
+LispObject Lgetv(LispObject lits, LispObject x, LispObject y)
+{   int n;
+// As a matter of convenience and generosity I will allow "getv" to
+// access items from hash tables as well as ordinary vectors.
+    if ((!isVEC(x) && !isEQHASH(x) && !isEQHASHX(x)) || !isFIXNUM(y))
+        return error1("bad arg to getv", cons(x, y));
+    n = (int)qfixnum(y);
+    if (n < 0 || (uintptr_t)n >= veclength(qheader(x))/sizeof(LispObject))
+        return error1("subscript out of range in getv", y);
+    return elt(x, n);
+}
+
+LispObject Lmkhash_3(LispObject lits, LispObject x, LispObject y, LispObject z)
+{   int n;
+    LispObject r;
+    if (!isFIXNUM(x)) return error1("bad size in mkhash", x);
+    n = (int)qfixnum(x);
+// I force hash tables to be of limited size.
+    if (n <= 10) n = 11;
+    else if (n > 1000) n = 997;
+    n |= 1;  // Force table-size to be an odd number
+    r = makevector(n-1);
+    qheader(r) ^= (typeVEC ^ typeEQHASH);
+    return r;
+}
+
+LispObject Lmkhash_2(LispObject lits, LispObject x, LispObject y)
+{
+    return Lmkhash_3(lits, x, y, nil);
+}
+
+LispObject Lmkhash_1(LispObject lits, LispObject x)
+{
+    return Lmkhash_3(lits, x, nil, nil);
+}
+
+void rehash(LispObject x)
+{
+    int n = veclength(qheader(x));
+    int i;
+// At the moment that this is invoked it is at least certain that
+// garbage collection is not in progress. Hence the second half-space
+// is all memory available for use! So on a temporary basis I will put
+// a copy of the hash table there.
+// Well actually some pinned items may be present in the second half-
+// space, but I still expect to be able to find plenty of free space
+// somewhere there... If somehow because of fragmentation caused by
+// pinned items it was not possible to find the space I need here
+// then that is probably fatal, but that is always going to be the
+// case if ensureheap2space is unable to find space.
+    LispObject x1;
+    block2 = 0;
+    fringe2 = ((block_header *)blocks_by_age[0])->h2base;
+    limit2 = ((block_header *)blocks_by_age[0])->h2top;
+    ensureheap2space(sizeof(LispObject)+n);
+    x1 = fringe2 + tagATOM;
+// Note that this is short term use of memory in heap2, and I do not
+// set an object-start mark bit for the "vector" I use here.
+    memcpy((void *)(x1 - tagATOM), (void *)(x - tagATOM),
+            n + sizeof(LispObject));
+    n = n/sizeof(LispObject); // Now a count of slots in the table.
+// I will now re-hash from the copy that I made back into the hash table, but
+// now using the new hash values that reflect and changes that have
+// arisen.
+    for (i=0; i<n; i++) elt(x, i) = nil;
+    for (i=0; i<n; i++)
+    {   LispObject b = elt(x1, i);
+        while (b != nil)
+        {   LispObject ca = qcar(b), cd = qcdr(b);
+            int h = (int)(((uintptr_t)qcar(ca))%((uintptr_t)n)); // New bucket.
+            qcdr(b) = elt(x, h);
+            elt(x, h) = b;    // Re-inserted in table.
+            b = cd;
+        }
+    }
+    if (isEQHASHX(x)) qheader(x) ^= (typeEQHASH ^ typeEQHASHX);
+}
+
+LispObject Lputhash(LispObject lits, LispObject x, LispObject y, LispObject z)
+{   int n, h;
+    LispObject c;
+    if (isEQHASHX(y)) rehash(y);
+    if (!isEQHASH(y)) return error1("not a hash table in puthash", cons(x, y));
+    n = veclength(qheader(y))/sizeof(LispObject);
+// I use unsigned types so I get a positive remainder.
+    h = (int)(((uintptr_t)x) % ((uintptr_t)n));
+    c = elt(y, h);
+    while (isCONS(c))
+    {   if (qcar(qcar(c)) == x)
+        {   qcdr(qcar(c)) = z;
+            return z;
+        }
+        c = qcdr(c);
+    }
+    c = acons(x, z, elt(y, h));
+    elt(y, h) = c;
+    return z;
+}
+
+LispObject Lremhash(LispObject lits, LispObject x, LispObject y)
+{   int n, h;
+    LispObject c, *cp;
+    if (isEQHASHX(y)) rehash(y);
+    if (!isEQHASH(y)) return error1("not a hash table in remhash", cons(x, y));
+    n = veclength(qheader(y))/sizeof(LispObject);
+    h = (int)(((uintptr_t)x) % ((uintptr_t)n));
+    c = *(cp = &elt(y, h));
+    while (isCONS(c))
+    {   if (qcar(qcar(c)) == x)
+        {   *cp = qcdr(c);
+            return qcdr(qcar(c));
+        }
+        c = *(cp = &qcdr(c));
+    }
+    return nil;
+}
+
+LispObject Lgethash(LispObject lits, LispObject x, LispObject y)
+{   int n, h;
+    LispObject c;
+    if (isEQHASHX(y)) rehash(y);
+    if (!isEQHASH(y)) return error1("not a hash table in gethash", cons(x, y));
+    n = veclength(qheader(y))/sizeof(LispObject);
+    h = (int)(((uintptr_t)x) % ((uintptr_t)n));
+    c = elt(y, h);
+    while (isCONS(c))
+    {   if (qcar(qcar(c)) == x) return qcdr(qcar(c));
+        c = qcdr(c);
+    }
+    return nil;
+}
+
+LispObject Lgetd(LispObject lits, LispObject x)
+{   LispObject r;
+    if (!isSYMBOL(x)) return nil;
+    r = qlits(x);
+    if ((qflags(x) & flagSPECFORM) != 0)
+    {   if (qdefn1(x) == (LispFn1 *)interpretspecform)
+// I copy the bound variable list that is returned so that nobody can
+// use rplaca/rplacd to corrupt it.
+            return list2star(fexpr,
+                lambda,
+//@@@                cons(shallow_copy(qcar(r)), qcdr(r)));
+                r);
+        else return cons(fsubr, x);
+    }
+// I know I only look in the qdefn1 cell here, but undefined and interpreted
+// things always have the values I test for here in them, so that is
+// in fact OK.
+    else if (qdefn0(x) == undefined0 &&
+             qdefn1(x) == undefined1 &&
+             qdefn2(x) == undefined2 &&
+             qdefn3(x) == undefined3 &&
+             qdefn4(x) == undefined4 &&
+             qdefn5up(x) == undefined5up) return nil;
+    else if (qdefn0(x) == interpreted0 &&
+             (qdefn1(x) == interpreted1 ||
+              qdefn1(x) == interpretspecform) &&
+             qdefn2(x) == interpreted2 &&
+             qdefn3(x) == interpreted3 &&
+             qdefn4(x) == interpreted4 &&
+             qdefn5up(x) == interpreted5up)
+        return list2star((qflags(x) & flagMACRO) ? macro : expr,
+            lambda,
+            r);
+//***            cons(shallow_copy(qcar(r)), qcdr(r)));
+    else return cons(subr, x);
+}
+
+LispObject Lreturn_0(LispObject lits)
+{
+    work1 = nil;
     unwindflag = unwindRETURN;
-  return nil;
-}
-
-// Now some numeric functions
-
-#undef FF
-#undef BB
-#define FF(a, b) ((a) > (b) ? lisptrue : nil)
-#define BB(a, b) ((a) > (b) ? lisptrue : nil)
-
-LispObject Lgreaterp(LispObject lits, LispObject x, LispObject y) {
-  NUMOP("greaterp", x, y);
-}
-
-#undef FF
-#undef BB
-#define FF(a, b) ((a) >= (b) ? lisptrue : nil)
-#define BB(a, b) ((a) >= (b) ? lisptrue : nil)
-
-LispObject Lgeq(LispObject lits, LispObject x, LispObject y) {
-  NUMOP("geq", x, y);
-}
-
-#undef FF
-#undef BB
-#define FF(a, b) ((a) < (b) ? lisptrue : nil)
-#define BB(a, b) ((a) < (b) ? lisptrue : nil)
-
-LispObject Llessp(LispObject lits, LispObject x, LispObject y) {
-  NUMOP("lessp", x, y);
-}
-
-#undef FF
-#undef BB
-#define FF(a, b) ((a) <= (b) ? lisptrue : nil)
-#define BB(a, b) ((a) <= (b) ? lisptrue : nil)
-
-LispObject Lleq(LispObject lits, LispObject x, LispObject y) {
-  NUMOP("leq", x, y);
-}
-
-LispObject Lminus(LispObject lits, LispObject x) { return Nminus(x); }
-
-LispObject Lminusp(LispObject lits, LispObject x) {
-  // Anything non-numeric will not be negative!
-  if ((isFIXNUM(x) && x < 0) || (isFLOAT(x) && qfloat(x) < 0.0) ||
-      (isATOM(x) && (qheader(x) & TYPEBITS) == typeBIGNUM && qint64(x) < 0))
-    return lisptrue;
-  else
     return nil;
 }
 
-#undef BB
-#define BB(a) makeinteger(~(a))
-
-LispObject Llognot(LispObject lits, LispObject x) { UNARYINTOP("lognot", x); }
-
-LispObject Lzerop(LispObject lits, LispObject x) {
-  // Note that a bignum can never be zero! Because that is not "big".
-  // This code is generous and anything non-numeric is not zero.
-  if (x == packfixnum(0) || (isFLOAT(x) && qfloat(x) == 0.0))
-    return lisptrue;
-  else
+LispObject Lreturn_1(LispObject lits, LispObject x)
+{
+    work1 = x;
+    if (unwindflag == unwindNONE) unwindflag = unwindRETURN;
     return nil;
 }
 
-LispObject Lonep(LispObject lits, LispObject x) {
-  if (x == packfixnum(1) || (isFLOAT(x) && qfloat(x) == 1.0))
-    return lisptrue;
-  else
+LispObject Lzerop(LispObject lits, LispObject x)
+{
+// Note that a bignum can never be zero! Because that is not "big".
+// This code is generous and anything non-numeric is not zero.
+    if (x == packfixnum(0) ||
+        (isFLOAT(x) && qfloat(x) == 0.0)) return lisptrue;
+    else return nil;
+}
+
+LispObject Lonep(LispObject lits, LispObject x)
+{
+    if (x == packfixnum(1) ||
+        (isFLOAT(x) && qfloat(x) == 1.0)) return lisptrue;
+    else return nil;
+}
+
+
+// Note that LispObject is the same width as intptr_t, and so fixnums are
+// either 29 or 61 bits wide, and this code ought to be written to support
+// both cases. Also note that the Standard for C++ says that performing any
+// arithmetic on a signed value such that overflow would arise leads to
+// undefined behaviour, and I have observed g++ exploiting that to optimize
+// code in ways that lead to less than obvious behaviour in some overflow
+// cases, so writing everything so that it is strictly safe in that regard
+// may matter even if doing so leads to rather a lot of casts to get some
+// steps performed using unsigned arithmetic.
+
+
+
+// The classes here and the class objects associated with each are purely
+// used as markers so that overloading of a function called "op" can
+// support all the various combinations of numeric types in Lisp. The
+// collection of tags set up here is intended to be enough for CSL even
+// though I will be prototyping stuff in VSL.
+//
+// I am going to hope that a good optimising compiler will observe that
+// where I am passing these objects around I am then not making any use of
+// them so it can usefully optimise out all representation of them in the
+// final exectuable code. That will happen almost naturally where I use
+// inline functions!
+
+namespace number_dispatcher
+{
+static class I {} xI;   // for small integers
+static class B {} xB;   // for bignums
+//static class R {} xR;   // for rational numbers
+//static class S {} xS;   // for short floats
+//static class F {} xF;   // for single-precision floats
+static class D {} xD;   // for double precision floats
+//static class L {} xL;   // for long floats
+//static class C {} xC;   // for complex numbers
+
+// Type-dispatch for binary functions happens in two parts - one on the
+// first operand and on on the seoond. This overload of the function "binary"
+// does the dispatch on argument 2 and ends up calling a function "op" from
+// the operation-specific class, with a call of the form
+//   op(lhsType, lhsVal, rhsType, rhsVal)
+// where the types are indicated by the number_dispatcher classes and the
+// values are whatever data the Lisp wants to use to represent them.
+// In the class that defined op() the type arguments are used to select a
+// suitable overload but do not carry any data, while the actual operands
+// are passed in the Val arguments.
+
+template <class R, class T, class U, typename V>
+static inline R binary(U lhsType, V lhsVal, LispObject b)
+{   using namespace number_dispatcher;
+    switch (b & TAGBITS)
+    {
+    case tagFIXNUM:
+        return T::op(lhsType, lhsVal, xI, qfixnum(b));
+    case tagFLOAT:
+        return T::op(lhsType, lhsVal, xD, qfloat(b));
+    case tagATOM:
+        switch (qheader(b) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return T::op(lhsType, lhsVal, xB, qint64(b));
+        default:
+            return error1("Non-numeric argument", b);
+        }
+    default:
+        return error1("Non-numeric argument", b);
+    }
+}
+
+// binary is the dispatcher on the left operand of a binary operator.
+// The template has two parameters. The first is the result typeof the
+// function we want, the second is a class that contains all the overloads
+// op op() that implement it.
+
+template <class R, class T>
+static inline R binary(LispObject a, LispObject b)
+{   using namespace number_dispatcher;
+    switch (a & TAGBITS)
+    {
+    case tagFIXNUM:
+        return binary<R,T,I,intptr_t>(xI, qfixnum(a), b);
+    case tagFLOAT:
+        return binary<R,T,D,double>(xD, qfloat(a), b);
+    case tagATOM:
+        switch (qheader(a) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return binary<R,T,B,int64_t>(xB, qint64(a), b);
+        default:
+            return error1("Non-numeric argument", a);
+        }
+    default:
+        return error1("Non-numeric argument", a);
+    }
+}
+
+// Now the same sort of things but for functions that will only accept
+// integer arguments, and so which have lighter weight dispatch.
+
+template <class R, class T, class U, typename V>
+static inline R ibinary(U lhsType, V lhsVal, LispObject b)
+{   using namespace number_dispatcher;
+    switch (b & TAGBITS)
+    {
+    case tagFIXNUM:
+        return T::op(lhsType, lhsVal, xI, qfixnum(b));
+    case tagATOM:
+        switch (qheader(b) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return T::op(lhsType, lhsVal, xB, qint64(b));
+        default:
+            return error1("Non-integer argument", b);
+        }
+    default:
+        return error1("Non-integer argument", b);
+    }
+}
+
+template <class R, class T>
+static inline R ibinary(LispObject a, LispObject b)
+{   using namespace number_dispatcher;
+    switch (a & TAGBITS)
+    {
+    case tagFIXNUM:
+        return ibinary<R,T,I,intptr_t>(xI, qfixnum(a), b);
+    case tagATOM:
+        switch (qheader(a) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return ibinary<R,T,B,int64_t>(xB, qint64(a), b);
+        default:
+            return error1("Non-integer argument", a);
+        }
+    default:
+        return error1("Non-integer argument", a);
+    }
+}
+
+// Unary operations
+
+
+template <class R, class T>
+static inline R unary(LispObject a)
+{   using namespace number_dispatcher;
+    switch (a & TAGBITS)
+    {
+    case tagFIXNUM:
+        return T::op(xI, qfixnum(a));
+    case tagFLOAT:
+        return T::op(xD, qfloat(a));
+    case tagATOM:
+        switch (qheader(a) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return T::op(xB, qint64(a));
+        default:
+            return error1("Non-numeric argument", a);
+        }
+    default:
+        return error1("Non-numeric argument", a);
+    }
+}
+
+// Integer unary operations
+
+template <class R, class T>
+static inline R iunary(LispObject a)
+{   using namespace number_dispatcher;
+    switch (a & TAGBITS)
+    {
+    case tagFIXNUM:
+        return T::op(xI, qfixnum(a));
+    case tagATOM:
+        switch (qheader(a) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return T::op(xB, qint64(a));
+        default:
+            return error1("Non-integer argument", a);
+        }
+    default:
+        return error1("Non-integer argument", a);
+    }
+}
+
+// Things like "leftshift" that take and integer and a fixnum.
+
+template <class R, class T>
+static inline R shiftlike(LispObject a, LispObject b)
+{   using namespace number_dispatcher;
+    if ((b & TAGBITS) != tagFIXNUM)
+        return error1("second argument should be a small integer", b);
+    intptr_t n = qfixnum(b);
+    switch (a & TAGBITS)
+    {
+    case tagFIXNUM:
+        return T::op(xI, qfixnum(a), n);
+    case tagATOM:
+        switch (qheader(a) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return T::op(xB, qint64(a), n);
+        default:
+            return error1("Non-integer argument", a);
+        }
+    default:
+        return error1("Non-integer argument", a);
+    }
+}
+
+} // end of number_dispatcher namespace.
+
+// ====== addition =====
+
+
+class Adder
+{
+public:
+// a and b are both fixnums. I use intptr_t to hold the integer that
+// they decode to since that will be "right" whether running on a 32 or
+// 64-bit platform. I make SHORT definitions like this one "inline".
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a + b);
+    }
+// a is a fixnum and b is a float
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a + b);
+    }
+// a is a fixnum and b is a bignum
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a + b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxfloat(a + (double)b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat(a + b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxfloat(a + (double)b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a + b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a + b);
+    }
+// longer operations, such as adding two bignums, are left so that a
+// real function call might be used.
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a + b);
+    }
+};
+
+static LispObject Nplus2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<LispObject,Adder>(a, b);
+}
+
+
+
+// ====== subtraction =====
+
+class Subtracter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a - b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a - b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a - b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxfloat(a - (double)b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat(a - b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxfloat(a - (double)b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a - b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a - b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a - b);
+    }
+};
+
+static LispObject Ndifference2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<LispObject,Subtracter>(a, b);
+}
+
+
+// ====== multiplication =====
+
+class Multiplier
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a * b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a * b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a * b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxfloat(a * (double)b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat(a * b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxfloat(a * (double)b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a * b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a * b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a * b);
+    }
+};
+
+static LispObject Ntimes2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<LispObject,Multiplier>(a, b);
+}
+
+// ====== quotient =====
+
+class Quotienter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a / b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a / b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a / b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxfloat(a / (double)b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat(a / b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxfloat(a / (double)b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a / b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return boxfloat((double)a / b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a / b);
+    }
+};
+
+static LispObject Nquotient2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<LispObject,Quotienter>(a, b);
+}
+
+// ====== remainder =====
+
+// Beware or note that Common Lisp allows you to use a remainder function
+// on real values as well as integers, even though C++ does not support
+// the "%" operator there.
+
+static inline double fpremainder(double a, double b)
+{   return a - b*(a/b);
+}
+
+class Remainderer
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(fpremainder(a, b));
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat(fpremainder((double)a, b));
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a % b);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxfloat(fpremainder(a, (double)b));
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return boxfloat(fpremainder(a, b));
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxfloat(fpremainder(a, (double)b));
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a % b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return boxfloat(fpremainder((double)a, b));
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a % b);
+    }
+};
+
+static LispObject Nremainder2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<LispObject,Remainderer>(a, b);
+}
+
+// ====== divide =====
+
+class Divider
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return cons(boxint64(a / b), boxint64(a % b));
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return cons(boxfloat((double)a / b),
+                    boxfloat(fpremainder((double)a, b)));
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return cons(boxint64(a / b), boxint64(a % b));
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return cons(boxfloat(a / (double)b),
+                    boxfloat(fpremainder(a, (double)b)));
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return cons(boxfloat(a / b), boxfloat(fpremainder(a, b)));
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return cons(boxfloat(a / (double)b),
+                    boxfloat(fpremainder(a, (double)b)));
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return cons(boxint64(a / b), boxint64(a % b));
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return cons(boxfloat((double)a / b),
+                    boxfloat(fpremainder((double)a, b)));
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return cons(boxint64(a / b), boxint64(a % b));
+    }
+};
+
+static LispObject Ndivide2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<LispObject,Divider>(a, b);
+}
+
+
+// ====== and =====
+
+class Ander
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a & b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a & b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a & b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a & b);
+    }
+};
+
+static LispObject Nlogand2(LispObject a, LispObject b)
+{   return number_dispatcher::ibinary<LispObject,Ander>(a, b);
+}
+
+
+// ====== or =====
+
+class Orer
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a | b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a | b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a | b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a | b);
+    }
+};
+
+static LispObject Nlogor2(LispObject a, LispObject b)
+{   return number_dispatcher::ibinary<LispObject,Orer>(a, b);
+}
+
+// ====== xor =====
+
+class Xorer
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a ^ b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a ^ b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return boxint64(a ^ b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return boxint64(a ^ b);
+    }
+};
+
+static LispObject Nlogxor2(LispObject a, LispObject b)
+{   return number_dispatcher::ibinary<LispObject,Xorer>(a, b);
+}
+
+// ====== greaterp ======
+
+class Greaterper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a > b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return ((double)a > b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return (a > b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a > (double)b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return (a > b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a > (double)b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return (a > b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return ((double)a > b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a > b);
+    }
+};
+
+static inline bool Bgreaterp2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<bool,Greaterper>(a, b);
+}
+
+
+// ====== geq ======
+
+class Geqer
+{
+public:
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a >= b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return ((double)a >= b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return (a >= b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a >= (double)b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return (a >= b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a >= (double)b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return (a >= b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return ((double)a >= b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a >= b);
+    }
+};
+
+static inline bool Bgeq2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<bool,Geqer>(a, b);
+}
+
+
+
+// ====== lessp ======
+
+class Lessper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a < b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return ((double)a < b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return (a < b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a < (double)b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return (a < b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a < (double)b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return (a < b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return ((double)a < b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a < b);
+    }
+};
+
+static inline bool Blessp2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<bool,Lessper>(a, b);
+}
+
+// ====== leq ======
+
+class Leqer
+{
+public:
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a <= b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::D t2, double b)
+    {   return ((double)a <= b);
+    }
+    static inline bool op(number_dispatcher::I t1, intptr_t a,
+                                number_dispatcher::B t2, int64_t b)
+    {   return (a <= b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::I t2, intptr_t b)
+    {   return (a <= (double)b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                                number_dispatcher::D t2, double b)
+    {   return (a <= b);
+    }
+    static inline bool op(number_dispatcher::D t1, double a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a <= (double)b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::I t2, intptr_t b)
+    {   return (a <= b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::D t2, double b)
+    {   return ((double)a <= b);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a,
+                         number_dispatcher::B t2, int64_t b)
+    {   return (a <= b);
+    }
+};
+
+static inline bool Bleq2(LispObject a, LispObject b)
+{   return number_dispatcher::binary<bool,Leqer>(a, b);
+}
+
+// ====== add1 ======
+
+class Add1er
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
+    {   return boxint64(a + 1);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a)
+    {   return boxfloat(a + 1.0);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a)
+    {   return boxint64(a + 1);
+    }
+};
+
+static LispObject Nadd1(LispObject a)
+{   return number_dispatcher::unary<LispObject,Add1er>(a);
+}
+
+// ====== sub1 ======
+
+class Sub1er
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
+    {   return boxint64(a - 1);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a)
+    {   return boxfloat(a - 1.0);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a)
+    {   return boxint64(a - 1);
+    }
+};
+
+static LispObject Nsub1(LispObject a)
+{   return number_dispatcher::unary<LispObject,Sub1er>(a);
+}
+
+// ====== minus ======
+
+class Minuser
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
+    {   return boxint64(-a);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a)
+    {   return boxfloat(-a);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a)
+    {   return boxint64(-a);
+    }
+};
+
+static LispObject Nminus(LispObject a)
+{   return number_dispatcher::unary<LispObject,Minuser>(a);
+}
+
+// ====== minusp ======
+
+class Minusper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, intptr_t a)
+    {   return (a < 0);
+    }
+    static inline bool op(number_dispatcher::D t1, double a)
+    {   return (a < 0);
+    }
+    static inline bool op(number_dispatcher::B t1, int64_t a)
+    {   return (a < 0);
+    }
+};
+
+static inline bool Bminusp(LispObject a)
+{   return number_dispatcher::unary<bool,Minusper>(a);
+}
+
+
+// ====== lognot ======
+
+class Lognoter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
+    {   return boxint64(~a);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a)
+    {   return boxint64(~a);
+    }
+};
+
+static LispObject Nlognot(LispObject a)
+{   return number_dispatcher::iunary<LispObject,Lognoter>(a);
+}
+
+// ====== leftshift ======
+
+class Leftshifter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a, intptr_t n)
+    {   return boxint64(a << n);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a, intptr_t n)
+    {   return boxint64(a << n);
+    }
+};
+
+static LispObject Nleftshift(LispObject a, LispObject b)
+{   return number_dispatcher::shiftlike<LispObject,Leftshifter>(a, b);
+}
+
+
+// ====== rightshift ======
+
+class Rightshifter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, intptr_t a, intptr_t n)
+    {   return boxint64(a >> n);
+    }
+    static inline LispObject op(number_dispatcher::B t1, int64_t a, intptr_t n)
+    {   return boxint64(a >> n);
+    }
+};
+
+static LispObject Nrightshift(LispObject a, LispObject b)
+{   return number_dispatcher::shiftlike<LispObject,Rightshifter>(a, b);
+}
+
+
+LispObject Lminus(LispObject lits, LispObject x)
+{   return Nminus(x);
+}
+
+LispObject Lminusp(LispObject lits, LispObject x)
+{
+// Anything non-numeric will not be negative!
+    if ((isFIXNUM(x) && x < 0) ||
+        (isFLOAT(x) && qfloat(x) < 0.0) ||
+        (isATOM(x) &&
+         (qheader(x) & TYPEBITSX) == typeBIGNUM &&
+         qint64(x) < 0)) return lisptrue;
+    else return nil;
+}
+
+LispObject Llognot(LispObject lits, LispObject x)
+{   return Nlognot(x);
+}
+
+LispObject Ladd1(LispObject lits, LispObject x)
+{   return Nadd1(x);
+}
+
+LispObject Lsub1(LispObject lits, LispObject x)
+{   return Nsub1(x);
+}
+
+LispObject Ldifference(LispObject lits, LispObject x, LispObject y)
+{   return Ndifference2(x, y);
+}
+
+LispObject Lquotient(LispObject lits, LispObject x, LispObject y)
+{   return Nquotient2(x, y);
+}
+
+LispObject Lremainder(LispObject lits, LispObject x, LispObject y)
+{   return Nremainder2(x, y);
+}
+
+LispObject Ldivide(LispObject lits, LispObject x, LispObject y)
+{   return Ndivide2(x, y);
+}
+
+LispObject Lleftshift(LispObject lits, LispObject x, LispObject y)
+{   return Nleftshift(x, y);
+}
+
+LispObject Lrightshift(LispObject lits, LispObject x, LispObject y)
+{   return Nrightshift(x, y);
+}
+
+LispObject Lgreaterp(LispObject lits, LispObject x, LispObject y)
+{   return Bgreaterp2(x,y) ? lisptrue : nil;
+}
+
+LispObject Lgeq(LispObject lits, LispObject x, LispObject y)
+{   return Bgeq2(x,y) ? lisptrue : nil;
+}
+
+LispObject Llessp(LispObject lits, LispObject x, LispObject y)
+{   return Blessp2(x,y) ? lisptrue : nil;
+}
+
+LispObject Lleq(LispObject lits, LispObject x, LispObject y)
+{   return Bleq2(x,y) ? lisptrue : nil;
+}
+
+LispObject Lplus_0(LispObject data)
+{
+    return packfixnum(0);
+}
+
+LispObject Lplus_1(LispObject data, LispObject a1)
+{
+    return a1;
+}
+
+LispObject Lplus_2(LispObject data, LispObject a1, LispObject a2)
+{
+    return Nplus2(a1, a2);
+}
+
+LispObject Lplus_3(LispObject data, LispObject a1,
+                   LispObject a2, LispObject a3)
+{
+    LispObject r = Nplus2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    return Nplus2(r, a3);
+}
+
+LispObject Lplus_4(LispObject data, LispObject a1, LispObject a2,
+                   LispObject a3, LispObject a4)
+{
+    LispObject r = Nplus2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nplus2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    return Nplus2(r, a4);
+}
+
+LispObject Lplus_5up(LispObject data, LispObject a1, LispObject a2,
+                      LispObject a3, LispObject a4, LispObject a5up)
+{
+    LispObject r = Nplus2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nplus2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nplus2(r, a4);
+    if (unwindflag != unwindNONE) return nil;
+    while (isCONS(a5up))
+    {   r = Nplus2(r, qcar(a5up));
+        if (unwindflag != unwindNONE) return nil;
+        a5up = qcdr(a5up);
+    }
+    return r;
+}
+
+LispObject Ltimes_0(LispObject data)
+{
+    return packfixnum(1);
+}
+
+LispObject Ltimes_1(LispObject data, LispObject a1)
+{
+    return a1;
+}
+
+LispObject Ltimes_2(LispObject data, LispObject a1, LispObject a2)
+{
+    return Ntimes2(a1, a2);
+}
+
+LispObject Ltimes_3(LispObject data, LispObject a1,
+                   LispObject a2, LispObject a3)
+{
+    LispObject r = Ntimes2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    return Ntimes2(r, a3);
+}
+
+LispObject Ltimes_4(LispObject data, LispObject a1, LispObject a2,
+                   LispObject a3, LispObject a4)
+{
+    LispObject r = Ntimes2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Ntimes2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    return Ntimes2(r, a4);
+}
+
+LispObject Ltimes_5up(LispObject data, LispObject a1, LispObject a2,
+                      LispObject a3, LispObject a4, LispObject a5up)
+{
+    LispObject r = Ntimes2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Ntimes2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    r = Ntimes2(r, a4);
+    if (unwindflag != unwindNONE) return nil;
+    while (isCONS(a5up))
+    {   r = Ntimes2(r, qcar(a5up));
+        if (unwindflag != unwindNONE) return nil;
+        a5up = qcdr(a5up);
+    }
+    return r;
+}
+
+LispObject Llogand_0(LispObject data)
+{
+    return packfixnum(-1);
+}
+
+LispObject Llogand_1(LispObject data, LispObject a1)
+{
+    return a1;
+}
+
+LispObject Llogand_2(LispObject data, LispObject a1, LispObject a2)
+{
+    return Nlogand2(a1, a2);
+}
+
+LispObject Llogand_3(LispObject data, LispObject a1,
+                     LispObject a2, LispObject a3)
+{
+    LispObject r = Nlogand2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    return Nlogand2(r, a3);
+}
+
+LispObject Llogand_4(LispObject data, LispObject a1, LispObject a2,
+                   LispObject a3, LispObject a4)
+{
+    LispObject r = Nlogand2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogand2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    return Nlogand2(r, a4);
+}
+
+LispObject Llogand_5up(LispObject data, LispObject a1, LispObject a2,
+                      LispObject a3, LispObject a4, LispObject a5up)
+{
+    LispObject r = Nlogand2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogand2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogand2(r, a4);
+    if (unwindflag != unwindNONE) return nil;
+    while (isCONS(a5up))
+    {   r = Nlogand2(r, qcar(a5up));
+        if (unwindflag != unwindNONE) return nil;
+        a5up = qcdr(a5up);
+    }
+    return r;
+}
+
+LispObject Llogor_0(LispObject data)
+{
+    return packfixnum(0);
+}
+
+LispObject Llogor_1(LispObject data, LispObject a1)
+{
+    return a1;
+}
+
+LispObject Llogor_2(LispObject data, LispObject a1, LispObject a2)
+{
+    return Nlogor2(a1, a2);
+}
+
+LispObject Llogor_3(LispObject data, LispObject a1,
+                   LispObject a2, LispObject a3)
+{
+    LispObject r = Nlogor2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    return Nlogor2(r, a3);
+}
+
+LispObject Llogor_4(LispObject data, LispObject a1, LispObject a2,
+                   LispObject a3, LispObject a4)
+{
+    LispObject r = Nlogor2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogor2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    return Nlogor2(r, a4);
+}
+
+LispObject Llogor_5up(LispObject data, LispObject a1, LispObject a2,
+                      LispObject a3, LispObject a4, LispObject a5up)
+{
+    LispObject r = Nlogor2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogor2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogor2(r, a4);
+    if (unwindflag != unwindNONE) return nil;
+    while (isCONS(a5up))
+    {   r = Nlogor2(r, qcar(a5up));
+        if (unwindflag != unwindNONE) return nil;
+        a5up = qcdr(a5up);
+    }
+    return r;
+}
+
+LispObject Llogxor_0(LispObject data)
+{
+    return packfixnum(0);
+}
+
+LispObject Llogxor_1(LispObject data, LispObject a1)
+{
+    return a1;
+}
+
+LispObject Llogxor_2(LispObject data, LispObject a1, LispObject a2)
+{
+    return Nlogxor2(a1, a2);
+}
+
+LispObject Llogxor_3(LispObject data, LispObject a1,
+                   LispObject a2, LispObject a3)
+{
+    LispObject r = Nlogxor2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    return Nlogxor2(r, a3);
+}
+
+LispObject Llogxor_4(LispObject data, LispObject a1, LispObject a2,
+                   LispObject a3, LispObject a4)
+{
+    LispObject r = Nlogxor2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogxor2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    return Nlogxor2(r, a4);
+}
+
+LispObject Llogxor_5up(LispObject data, LispObject a1, LispObject a2,
+                      LispObject a3, LispObject a4, LispObject a5up)
+{
+    LispObject r = Nlogxor2(a1, a2);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogxor2(r, a3);
+    if (unwindflag != unwindNONE) return nil;
+    r = Nlogxor2(r, a4);
+    if (unwindflag != unwindNONE) return nil;
+    while (isCONS(a5up))
+    {   r = Nlogxor2(r, qcar(a5up));
+        if (unwindflag != unwindNONE) return nil;
+        a5up = qcdr(a5up);
+    }
+    return r;
+}
+
+LispObject Lstop_0(LispObject lits)
+{
+    exit(EXIT_SUCCESS);
     return nil;
 }
 
-#undef FF
-#undef BB
-#define FF(a) boxfloat((a) + 1.0)
-#define BB(a) makeinteger((a) + 1)
-
-LispObject Ladd1(LispObject lits, LispObject x) { UNARYOP("add1", x); }
-
-#undef FF
-#undef BB
-#define FF(a) boxfloat((a)-1.0)
-#define BB(a) makeinteger((a)-1)
-
-LispObject Lsub1(LispObject lits, LispObject x) { UNARYOP("sub1", x); }
-
-#undef FF
-#undef BB
-#define FF(a, b) boxfloat((a) - (b))
-#define BB(a, b) makeinteger((a) - (b))
-
-LispObject Ldifference(LispObject lits, LispObject x, LispObject y) {
-  NUMOP("difference", x, y);
-}
-
-#undef FF
-#undef BB
-#define FF(a, b)                                                               \
-  ((b) == 0.0 ? error1("division by 0.0", nil) : boxfloat((a) / (b)))
-#define BB(a, b)                                                               \
-  ((b) == 0 ? error1("division by 0", nil) : makeinteger((a) / (b)))
-
-LispObject Lquotient(LispObject lits, LispObject x, LispObject y) {
-  NUMOP("quotient", x, y);
-}
-
-#undef BB
-#define BB(a, b)                                                               \
-  ((b) == 0 ? error1("remainder by 0", nil) : makeinteger((a) % (b)))
-
-LispObject Lremainder(LispObject lits, LispObject x, LispObject y) {
-  INTOP("remainder", x, y);
-}
-
-#undef BB
-#define BB(a, b)                                                               \
-  ((b) == 0 ? error1("division by 0", nil)                                     \
-            : cons(makeinteger((a) / (b)), makeinteger((a) % (b))))
-
-LispObject Ldivide(LispObject lits, LispObject x, LispObject y) {
-  INTOP("divide", x, y);
-}
-
-#undef BB
-#define BB(a) makeinteger((a) << sh)
-
-LispObject Lleftshift(LispObject lits, LispObject x, LispObject y) {
-  int sh;
-  if (!isFIXNUM(y))
-    return error1("Bad argument for leftshift", y);
-  sh = (int)qfixnum(y);
-  UNARYINTOP("leftshift", x);
-}
-
-#undef BB
-#define BB(a) makeinteger((a) >> sh)
-
-LispObject Lrightshift(LispObject lits, LispObject x, LispObject y) {
-  int sh;
-  if (!isFIXNUM(y))
-    return error1("Bad argument for rightshift", y);
-  sh = (int)qfixnum(y);
-  UNARYINTOP("rightshift", x);
-}
-
-LispObject Lstop_0(LispObject lits) {
-  exit(EXIT_SUCCESS);
-  return nil;
-}
-
-LispObject Lstop_1(LispObject lits, LispObject x) {
-  exit(isFIXNUM(x) ? (int)qfixnum(x) : EXIT_SUCCESS);
-  return nil;
+LispObject Lstop_1(LispObject lits, LispObject x)
+{
+    exit(isFIXNUM(x) ? (int)qfixnum(x) : EXIT_SUCCESS);
+    return nil;
 }
 
 int coldstart = 0;
@@ -4341,25 +5125,25 @@ int coldstart = 0;
 //                       than just using default values.
 // (restart!-list (m f) a) Reload heap, load module m, call (f a).
 
-LispObject Lrestart_lisp_0(LispObject data) {
-  work1 = cons(nil, nil);
-  if (unwindflag == unwindNONE)
-    unwindflag = unwindRESTART;
-  return nil;
+LispObject Lrestart_lisp_0(LispObject data)
+{
+    work1 = cons(nil, nil);
+    if (unwindflag == unwindNONE) unwindflag = unwindRESTART;
+    return nil;
 }
 
-LispObject Lrestart_lisp_1(LispObject data, LispObject a1) {
-  work1 = cons(a1, nil);
-  if (unwindflag == unwindNONE)
-    unwindflag = unwindRESTART;
-  return nil;
+LispObject Lrestart_lisp_1(LispObject data, LispObject a1)
+{
+    work1 = cons(a1, nil);
+    if (unwindflag == unwindNONE) unwindflag = unwindRESTART;
+    return nil;
 }
 
-LispObject Lrestart_lisp_2(LispObject data, LispObject a1, LispObject a2) {
-  work1 = list2star(a1, a2, nil);
-  if (unwindflag == unwindNONE)
-    unwindflag = unwindRESTART;
-  return nil;
+LispObject Lrestart_lisp_2(LispObject data, LispObject a1, LispObject a2)
+{
+    work1 = list2star(a1, a2, nil);
+    if (unwindflag == unwindNONE) unwindflag = unwindRESTART;
+    return nil;
 }
 
 // (preserve)           Dump image, leave restart fn unchanged, exit.
@@ -4374,628 +5158,639 @@ LispObject Lrestart_lisp_2(LispObject data, LispObject a1, LispObject a2) {
 // (preserve f b g a)   Reserved to pass a as argument to the restart function.
 //                      not implemented yet.
 
-LispObject Lpreserve_0(LispObject data) {
-  restartfn = nil;
-  work1 = cons(nil, nil);
-  if (unwindflag == unwindNONE)
-    unwindflag = unwindPRESERVE;
-  return nil;
+LispObject Lpreserve_0(LispObject data)
+{
+    restartfn = nil;
+    work1 = cons(nil, nil);
+    if (unwindflag == unwindNONE) unwindflag = unwindPRESERVE;
+    return nil;
 }
 
-LispObject Lpreserve_1(LispObject data, LispObject a1) {
-  restartfn = a1;
-  work1 = cons(nil, nil);
-  if (unwindflag == unwindNONE)
-    unwindflag = unwindPRESERVE;
-  return nil;
+LispObject Lpreserve_1(LispObject data, LispObject a1)
+{
+    restartfn = a1;
+    work1 = cons(nil, nil);
+    if (unwindflag == unwindNONE) unwindflag = unwindPRESERVE;
+    return nil;
 }
 
-LispObject Lpreserve_2(LispObject data, LispObject a1, LispObject a2) {
-  restartfn = a1;
-  work1 = cons(nil, nil);
-  if (unwindflag == unwindNONE)
-    unwindflag = unwindPRESERVE;
-  return nil;
+LispObject Lpreserve_2(LispObject data, LispObject a1, LispObject a2)
+{
+    restartfn = a1;
+    work1 = cons(nil, nil);
+    if (unwindflag == unwindNONE) unwindflag = unwindPRESERVE;
+    return nil;
 }
 
-LispObject Lpreserve_3(LispObject data, LispObject a1, LispObject a2,
-                       LispObject a3) {
-  restartfn = a1;
-  work1 = cons(a3, nil);
-  if (unwindflag == unwindNONE) {
-    unwindflag = unwindPRESERVE;
-    if (a3 != nil)
-      unwindflag |= unwindRESTART;
-  }
-  return nil;
-}
-
-LispObject Lpreserve_4(LispObject data, LispObject a1, LispObject a2,
-                       LispObject a3, LispObject a4) {
-  restartfn = a1;
-  work1 = cons(a3, nil);
-  if (unwindflag == unwindNONE) {
-    unwindflag = unwindPRESERVE;
-    if (a3 != nil)
-      unwindflag |= unwindRESTART;
-  }
-  return nil;
-}
-
-LispObject Lprin(LispObject lits, LispObject x) { return prin(x); }
-
-LispObject Lprint(LispObject lits, LispObject x) { return print(x); }
-
-LispObject Lprinc(LispObject lits, LispObject x) { return princ(x); }
-
-LispObject Lprintc(LispObject lits, LispObject x) { return printc(x); }
-
-LispObject Lterpri(LispObject lits) {
-  wrch('\n');
-  return nil;
-}
-
-LispObject Lposn(LispObject lits) { return packfixnum(linepos); }
-
-LispObject Lnreverse(LispObject lits, LispObject x) { return nreverse(x); }
-
-LispObject Lexplode(LispObject lits, LispObject x) {
-  int f = lispout;
-  lispout = -1;
-  work1 = nil;
-  prin(x);
-  lispout = f;
-  return nreverse(work1);
-}
-
-LispObject Lexplodec(LispObject lits, LispObject x) {
-  int f = lispout;
-  lispout = -1;
-  work1 = nil;
-  princ(x);
-  lispout = f;
-  return nreverse(work1);
-}
-
-LispObject Lexploden(LispObject lits, LispObject x) {
-  int f = lispout;
-  lispout = -3;
-  work1 = nil;
-  prin(x);
-  lispout = f;
-  return nreverse(work1);
-}
-
-LispObject Lexplodecn(LispObject lits, LispObject x) {
-  int f = lispout;
-  lispout = -3;
-  work1 = nil;
-  princ(x);
-  lispout = f;
-  return nreverse(work1);
-}
-
-LispObject Lreadch(LispObject lits) {
-  char ch[4];
-  if (curchar == EOF)
-    return eofsym;
-  ch[0] = qvalue(lower) != nil
-              ? tolower(curchar)
-              : qvalue(raise) != nil ? toupper(curchar) : curchar;
-  ch[1] = 0;
-  curchar = rdch();
-  return lookup(ch, 1, 1);
-}
-
-LispObject Lreadline(LispObject lits) {
-  char ch[200];
-  uintptr_t n = 0;
-  if (curchar == '\n')
-    curchar = rdch();
-  while (curchar != '\n' && curchar != EOF) {
-    if (n < sizeof(ch) - 1)
-      ch[n++] = curchar;
-    curchar = rdch();
-  }
-  if (n == 0 && curchar == EOF)
-    return eofsym;
-  ch[n] = 0;
-  return lookup(ch, n, 1);
-}
-
-LispObject Lread(LispObject lits) { return readS(); }
-
-LispObject Lcompress(LispObject lits, LispObject x) {
-  int f = lispin;
-  LispObject r, save_cursym;
-  int savetype = symtype, savech = curchar;
-  lispin = -1;
-  symtype = '?';
-  curchar = '\n';
-  save_cursym = cursym;
-  work1 = x;
-  r = readS();
-  lispin = f;
-  cursym = save_cursym;
-  symtype = savetype;
-  curchar = savech;
-  return r;
-}
-
-LispObject Lrds(LispObject lits, LispObject x) {
-  int old = lispin;
-  if (x == nil)
-    x = packfixnum(3);
-  if (isFIXNUM(x)) {
-    int n = (int)qfixnum(x);
-    if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
-        (file_direction & (1 << n)) == 0) {
-      lispin = n;
-      symtype = '?';
-      if (curchar == EOF)
-        curchar = '\n';
-      return packfixnum(old);
+LispObject Lpreserve_3(LispObject data, LispObject a1,
+                       LispObject a2, LispObject a3)
+{
+    restartfn = a1;
+    work1 = cons(a3, nil);
+    if (unwindflag == unwindNONE)
+    {   unwindflag = unwindPRESERVE;
+        if (a3 != nil) unwindflag |= unwindRESTART;
     }
-  }
-  return error1("rds failed", x);
+    return nil;
 }
 
-LispObject Lwrs(LispObject lits, LispObject x) {
-  int old = lispout;
-  if (x == nil)
-    x = packfixnum(1);
-  if (isFIXNUM(x)) {
-    int n = (int)qfixnum(x);
-    if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
-        (file_direction & (1 << n)) != 0) {
-      lispout = n;
-      return packfixnum(old);
+LispObject Lpreserve_4(LispObject data, LispObject a1,
+                       LispObject a2, LispObject a3, LispObject a4)
+{
+    restartfn = a1;
+    work1 = cons(a3, nil);
+    if (unwindflag == unwindNONE)
+    {   unwindflag = unwindPRESERVE;
+        if (a3 != nil) unwindflag |= unwindRESTART;
     }
-  }
-  return error1("wrs failed", x);
+    return nil;
+}
+
+LispObject Lprin(LispObject lits, LispObject x)
+{
+    return prin(x);
+}
+
+LispObject Lprint(LispObject lits, LispObject x)
+{
+    return print(x);
+}
+
+LispObject Lprinc(LispObject lits, LispObject x)
+{
+    return princ(x);
+}
+
+LispObject Lprintc(LispObject lits, LispObject x)
+{
+    return printc(x);
+}
+
+LispObject Lterpri(LispObject lits)
+{
+    wrch('\n');
+    return nil;
+}
+
+LispObject Lposn(LispObject lits)
+{
+    return packfixnum(linepos);
+}
+
+LispObject Lnreverse(LispObject lits, LispObject x)
+{
+    return nreverse(x);
+}
+
+LispObject Lexplode(LispObject lits, LispObject x)
+{   int f = lispout;
+    lispout = -1;
+    work1 = nil;
+    prin(x);
+    lispout = f;
+    return nreverse(work1);
+}
+
+LispObject Lexplodec(LispObject lits, LispObject x)
+{   int f = lispout;
+    lispout = -1;
+    work1 = nil;
+    princ(x);
+    lispout = f;
+    return nreverse(work1);
+}
+
+LispObject Lexploden(LispObject lits, LispObject x)
+{   int f = lispout;
+    lispout = -3;
+    work1 = nil;
+    prin(x);
+    lispout = f;
+    return nreverse(work1);
+}
+
+LispObject Lexplodecn(LispObject lits, LispObject x)
+{   int f = lispout;
+    lispout = -3;
+    work1 = nil;
+    princ(x);
+    lispout = f;
+    return nreverse(work1);
+}
+
+LispObject Lreadch(LispObject lits)
+{   char ch[4];
+    if (curchar == EOF) return eofsym;
+    ch[0] = qvalue(lower) != nil ? tolower(curchar) :
+            qvalue(raise) != nil ? toupper(curchar) : curchar;
+    ch[1] = 0;
+    curchar = rdch();
+    return lookup(ch, 1, 1);
+}
+
+LispObject Lreadline(LispObject lits)
+{   char ch[200];
+    uintptr_t n = 0;
+    if (curchar == '\n') curchar = rdch();
+    while (curchar != '\n' && curchar != EOF)
+    {   if (n < sizeof(ch)-1) ch[n++] = curchar;
+        curchar = rdch();
+    }
+    if (n == 0 && curchar == EOF) return eofsym;
+    ch[n] = 0;
+    return lookup(ch, n, 1);
+}
+
+LispObject Lread(LispObject lits)
+{
+    return readS();
+}
+
+LispObject Lcompress(LispObject lits, LispObject x)
+{   int f = lispin;
+    LispObject r, save_cursym;
+    int savetype = symtype, savech = curchar;
+    lispin = -1;
+    symtype = '?';
+    curchar = '\n';
+    save_cursym = cursym;
+    work1 = x;
+    r = readS();
+    lispin = f;
+    cursym = save_cursym;
+    symtype = savetype;
+    curchar = savech;
+    return r;
+}
+
+LispObject Lrds(LispObject lits, LispObject x)
+{   int old = lispin;
+    if (x == nil) x = packfixnum(3);
+    if (isFIXNUM(x))
+    {   int n = (int)qfixnum(x);
+        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
+            (file_direction & (1<<n)) == 0)
+        {   lispin = n;
+            symtype = '?';
+            if (curchar == EOF) curchar = '\n';
+            return packfixnum(old);
+        }
+    }
+    return error1("rds failed", x);
+}
+
+LispObject Lwrs(LispObject lits, LispObject x)
+{   int old = lispout;
+    if (x == nil) x = packfixnum(1);
+    if (isFIXNUM(x))
+    {   int n = (int)qfixnum(x);
+        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
+            (file_direction & (1<<n)) != 0)
+        {   lispout = n;
+            return packfixnum(old);
+        }
+    }
+    return error1("wrs failed", x);
 }
 
 #define LONGEST_FILENAME 1000
 char filename[LONGEST_FILENAME];
 static char imagename[LONGEST_FILENAME];
-
-LispObject Lopen(LispObject lits, LispObject x, LispObject y) {
-  FILE *f;
-  int n, how = 0;
-  char *p;
-  if (isSYMBOL(x))
-    x = qpname(x);
-  if (!isSTRING(x) ||
-      !((y == input && (how = 1) != 0) || (y == output && (how = 2) != 0) ||
-        (y == pipe && (how = 3) != 0)))
-    return error1("bad arg for open", cons(x, y));
-  if (*qstring(x) == '$' && (p = strchr(qstring(x), '/')) != NULL) {
-    sprintf(filename, "@%.*s", (int)(p - qstring(x)) - 1, 1 + qstring(x));
-    lits = qvalue(lookup(filename, strlen(filename), 0));
-    if (isSTRING(lits))
-      sprintf(filename, "%.*s%.*s", (int)veclength(qheader(lits)),
-              qstring(lits), (int)(veclength(qheader(x)) - (p - qstring(x))),
-              p);
-    else
-      sprintf(filename, "%.*s", (int)veclength(qheader(x)), qstring(x));
-  } else
-    sprintf(filename, "%.*s", (int)veclength(qheader(x)), qstring(x));
+LispObject Lopen(LispObject lits, LispObject x, LispObject y)
+{   FILE *f;
+    int n, how = 0;
+    char *p;
+    if (isSYMBOL(x)) x = qpname(x);
+    if (!isSTRING(x) ||
+        !((y == input && (how=1)!=0) ||
+          (y == output && (how=2)!=0) ||
+          (y == pipe && (how=3)!=0)))
+        return error1("bad arg for open", cons(x, y));
+    if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
+    {   sprintf(filename, "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+        lits = qvalue(lookup(filename, strlen(filename), 0));
+        if (isSTRING(lits)) sprintf(filename, "%.*s%.*s",
+           (int)veclength(qheader(lits)), qstring(lits),
+           (int)(veclength(qheader(x)) - (p-qstring(x))), p);
+        else sprintf(filename, "%.*s", (int)veclength(qheader(x)), qstring(x));
+    }
+    else sprintf(filename, "%.*s", (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
-  printf("Try to open <%s> mode %d:<%s>\n", filename, how,
-         how == 3 ? "pipe" : how == 1 ? "r" : "w");
-  if (how == 3)
-    f = popen(filename, "w");
-  else
+    if (how == 3) f = popen(filename, "w");
+    else f = fopen(filename, (how == 1 ? "r" : "w"));
+    if (f == NULL) return error1("file could not be opened", x);
+    for (n=4; n<MAX_LISPFILES && lispfiles[n]!=NULL; n++);
+    if (n<MAX_LISPFILES)
+    {   lispfiles[n] = f;
+        if (y != input) file_direction |= (1 << n);
+        return packfixnum(n);
+    }
+    return error1("too many open files", x);
+}
+
+LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
+{   FILE *f;
+    int n, how = 0;
+    if (isSYMBOL(x)) x = qpname(x);
+    if (!isSTRING(x) ||
+        !((y == input && (how=1)!=0) ||
+          (y == output && (how=2)!=0)))
+        return error1("bad arg for open-module", cons(x, y));
+    sprintf(filename, "%s.modules/%.*s.fasl", imagename,
+                      (int)veclength(qheader(x)), qstring(x));
+#ifdef __WIN32__
+//  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
+#endif // __WIN32__
     f = fopen(filename, (how == 1 ? "r" : "w"));
-  if (f == NULL) {
-    printf("errno = %d\n", errno);
-    return error1("file could not be opened", x);
-  }
-  printf("file opened!\n");
-  for (n = 4; n < MAX_LISPFILES && lispfiles[n] != NULL; n++)
-    ;
-  printf("use file slot %d (max=%d)\n", n, MAX_LISPFILES);
-  if (n < MAX_LISPFILES) {
-    lispfiles[n] = f;
-    if (y != input)
-      file_direction |= (1 << n);
-    return packfixnum(n);
-  }
-  return error1("too many open files", x);
-  ;
-}
-
-LispObject Lopen_module(LispObject lits, LispObject x, LispObject y) {
-  FILE *f;
-  int n, how = 0;
-  if (isSYMBOL(x))
-    x = qpname(x);
-  if (!isSTRING(x) ||
-      !((y == input && (how = 1) != 0) || (y == output && (how = 2) != 0)))
-    return error1("bad arg for open-module", cons(x, y));
-  sprintf(filename, "%s.modules/%.*s.fasl", imagename,
-          (int)veclength(qheader(x)), qstring(x));
-#ifdef __WIN32__
-//  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
-#endif // __WIN32__
-  f = fopen(filename, (how == 1 ? "r" : "w"));
-  if (f == NULL) {
-    printf("\n@@@Filename is <%s>, how=%d\n", filename, how);
-    return error1("file could not be opened", x);
-  }
-  for (n = 4; n < MAX_LISPFILES && lispfiles[n] != NULL; n++)
-    ;
-  if (n < MAX_LISPFILES) {
-    lispfiles[n] = f;
-    if (y != input)
-      file_direction |= (1 << n);
-    return packfixnum(n);
-  }
-  return error1("too many open files", x);
-}
-
-LispObject Lclose(LispObject lits, LispObject x) {
-  if (isFIXNUM(x)) {
-    int n = (int)qfixnum(x);
-    if (n > 3 && n < MAX_LISPFILES) {
-      if (lispin == n)
-        lispin = 3;
-      if (lispout == n)
-        lispout = 1;
-      if (lispfiles[n] != NULL)
-        fclose(lispfiles[n]);
-      lispfiles[n] = NULL;
-      file_direction &= ~(1 << n);
+    if (f == NULL)
+    {   printf("\n@@@Filename is <%s>, how=%d\n", filename, how);
+        return error1("file could not be opened", x);
     }
-  }
-  return nil;
+    for (n=4; n<MAX_LISPFILES && lispfiles[n]!=NULL; n++);
+    if (n<MAX_LISPFILES)
+    {   lispfiles[n] = f;
+        if (y != input) file_direction |= (1 << n);
+        return packfixnum(n);
+    }
+    return error1("too many open files", x);
 }
 
-void readevalprint(int loadp) {
-  while (symtype != EOF) {
-    LispObject r;
-    LispObject save_echo = qvalue(echo);
-    unwindflag = unwindNONE;
-    if (loadp)
-      qvalue(echo) = nil;
-    backtraceflag = backtraceHEADER | backtraceTRACE;
-    r = readS();
-    qvalue(echo) = save_echo;
-    fflush(stdout);
-    if (unwindflag != unwindNONE) /* Do nothing */
-      ;
-    else if (loadp || qvalue(dfprint) == nil ||
-             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
-                            qcar(r) == lookup("faslend", 7, 2)))) {
-      r = eval(r);
-      if (unwindflag == unwindNONE && !loadp) {
-        linepos += printf("Value: ");
-#ifdef DEBUG
-        if (logfile != NULL)
-          fprintf(logfile, "Value: ");
-#endif // DEBUG
-        print(r);
+LispObject Lclose(LispObject lits, LispObject x)
+{
+    if (isFIXNUM(x))
+    {   int n = (int)qfixnum(x);
+        if (n > 3 && n < MAX_LISPFILES)
+        {   if (lispin == n) lispin = 3;
+            if (lispout == n) lispout = 1;
+            if (lispfiles[n] != NULL) fclose(lispfiles[n]);
+            lispfiles[n] = NULL;
+            file_direction &= ~(1<<n);
+        }
+    }
+    return nil;
+}
+
+void readevalprint(int loadp)
+{   while (symtype != EOF)
+    {   LispObject r;
+        LispObject save_echo = qvalue(echo);
+        unwindflag = unwindNONE;
+        if (loadp) qvalue(echo) = nil;
+        backtraceflag = backtraceHEADER | backtraceTRACE;
+        r = readS();
+        qvalue(echo) = save_echo;
         fflush(stdout);
-      }
-    } else {
-      r = cons(r, nil);
-      if (unwindflag == unwindNONE)
-        Lapply(nil, qvalue(dfprint), r);
+        if (unwindflag != unwindNONE) /* Do nothing */ ;
+        else if (loadp || qvalue(dfprint) == nil ||
+            (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
+                           qcar(r) == lookup("faslend", 7, 2))))
+        {   r = eval(r);
+            if (unwindflag == unwindNONE && !loadp)
+            {   linepos += printf("Value: ");
+#ifdef DEBUG
+                if (logfile != NULL) fprintf(logfile, "Value: ");
+#endif // DEBUG
+                print(r);
+                fflush(stdout);
+            }
+        }
+        else
+        {   r = cons(r, nil);
+            if (unwindflag == unwindNONE) Lapply(nil, qvalue(dfprint), r);
+        }
+        if ((unwindflag & (unwindPRESERVE | unwindRESTART)) != 0) return;
     }
-    if ((unwindflag & (unwindPRESERVE | unwindRESTART)) != 0)
-      return;
-  }
 }
 
-LispObject Lrdf(LispObject lits, LispObject x) {
-  int f, f1, savech = curchar, savetype = symtype;
-  f1 = Lopen(nil, x, input);
-  if (unwindflag != unwindNONE)
+LispObject Lrdf(LispObject lits, LispObject x)
+{   int f, f1, savech = curchar, savetype = symtype;
+    f1 = Lopen(nil, x, input);
+    if (unwindflag != unwindNONE) return nil;
+    f = Lrds(nil, f1);
+    readevalprint(0);
+    Lrds(nil, f);
+    Lclose(nil, f1);
+    curchar = savech;
+    symtype = savetype;
+    printf("+++ End of rdf\n");
     return nil;
-  f = Lrds(nil, f1);
-  readevalprint(0);
-  Lrds(nil, f);
-  Lclose(nil, f1);
-  curchar = savech;
-  symtype = savetype;
-  printf("+++ End of rdf\n");
-  return nil;
 }
 
-LispObject Lload_module(LispObject lits, LispObject x) {
-  int f, f1, savech = curchar, savetype = symtype;
-  f1 = Lopen_module(nil, x, input);
-  if (unwindflag != unwindNONE) {
-    printf("+++ Module could not be opened\n");
+LispObject Lload_module(LispObject lits, LispObject x)
+{   int f, f1, savech = curchar, savetype = symtype;
+    f1 = Lopen_module(nil, x, input);
+    if (unwindflag != unwindNONE)
+    {   printf("+++ Module could not be opened\n");
+        return nil;
+    }
+    f = Lrds(nil, f1);
+    readevalprint(1);
+    if (unwindflag != unwindNONE) printf("+++ Error loading module\n");
+    Lrds(nil, f);
+    Lclose(nil, f1);
+    curchar = savech;
+    symtype = savetype;
     return nil;
-  }
-  f = Lrds(nil, f1);
-  readevalprint(1);
-  if (unwindflag != unwindNONE)
-    printf("+++ Error loading module\n");
-  Lrds(nil, f);
-  Lclose(nil, f1);
-  curchar = savech;
-  symtype = savetype;
-  return nil;
 }
 
-LispObject Ltrace(LispObject lits, LispObject x) {
-  while (isCONS(x)) {
-    if (isSYMBOL(qcar(x)))
-      qflags(qcar(x)) |= flagTRACED;
-    x = qcdr(x);
-  }
-  return nil;
+LispObject Ltrace(LispObject lits, LispObject x)
+{
+    while (isCONS(x))
+    {   if (isSYMBOL(qcar(x))) qflags(qcar(x)) |= flagTRACED;
+        x = qcdr(x);
+    }
+    return nil;
 }
 
-LispObject Luntrace(LispObject lits, LispObject x) {
-  while (isCONS(x)) {
-    if (isSYMBOL(qcar(x)))
-      qflags(qcar(x)) &= ~flagTRACED;
-    x = qcdr(x);
-  }
-  return nil;
+LispObject Luntrace(LispObject lits, LispObject x)
+{
+    while (isCONS(x))
+    {   if (isSYMBOL(qcar(x))) qflags(qcar(x)) &= ~flagTRACED;
+        x = qcdr(x);
+    }
+    return nil;
 }
 
-LispObject Lerror_0(LispObject lits) {
-  return error1("error function called", nil);
+LispObject Lerror_0(LispObject lits)
+{
+    return error1("error function called", nil);
 }
 
-LispObject Lerror_1(LispObject lits, LispObject x) {
-  return error1("error function called", x);
+LispObject Lerror_1(LispObject lits, LispObject x)
+{
+    return error1("error function called", x);
 }
 
-LispObject Lerror_2(LispObject lits, LispObject x, LispObject y) {
-  return error1("error function called", list2star(x, y, nil));
+LispObject Lerror_2(LispObject lits, LispObject x, LispObject y)
+{
+    return error1("error function called", list2star(x,y,nil));
 }
 
-LispObject Lerrorset_3(LispObject lits, LispObject a1, LispObject a2,
-                       LispObject a3) {
-  int save = backtraceflag;
-  backtraceflag = 0;
-  if (a2 != nil)
-    backtraceflag |= backtraceHEADER;
-  if (a3 != nil)
-    backtraceflag |= backtraceTRACE;
-  a1 = eval(a1);
-  if (unwindflag == unwindERROR || unwindflag == unwindBACKTRACE) {
-    unwindflag = unwindNONE;
-    a1 = nil;
-  } else
-    a1 = cons(a1, nil);
-  backtraceflag = save;
-  return a1;
+LispObject Lerrorset_3(LispObject lits, LispObject a1,
+                       LispObject a2, LispObject a3)
+{   int save = backtraceflag;
+    backtraceflag = 0;
+    if (a2 != nil) backtraceflag |= backtraceHEADER;
+    if (a3 != nil) backtraceflag |= backtraceTRACE;
+    a1 = eval(a1);
+    if (unwindflag == unwindERROR ||
+        unwindflag == unwindBACKTRACE)
+    {   unwindflag = unwindNONE;
+        a1 = nil;
+    }
+    else a1 = cons(a1, nil);
+    backtraceflag = save;
+    return a1;
 }
 
-LispObject Lerrorset_2(LispObject lits, LispObject a1, LispObject a2) {
-  return Lerrorset_3(lits, a1, a2, nil);
+LispObject Lerrorset_2(LispObject lits, LispObject a1, LispObject a2)
+{   return Lerrorset_3(lits, a1, a2, nil);
 }
 
-LispObject Lerrorset_1(LispObject lits, LispObject a1) {
-  return Lerrorset_3(lits, a1, nil, nil);
+LispObject Lerrorset_1(LispObject lits, LispObject a1)
+{   return Lerrorset_3(lits, a1, nil, nil);
 }
 
-LispObject Lthread(LispObject lits, LispObject x) {
-    auto f = [=]() {
-        LispObject r = eval(x);
-        print(r);
-    };
+// LispObject Lthread(LispObject lits, LispObject x) {
+//     auto f = [=]() {
+//         LispObject r = eval(x);
+//         print(r);
+//     };
 
-    int tid = par::start_thread(f);
-    return makeinteger(tid);
-}
+//     int tid = par::start_thread(f);
+//     return makeinteger(tid);
+// }
 
-#define SETUPSPEC                                                              \
-  SETUP_TABLE_SELECT("quote", Lquote), SETUP_TABLE_SELECT("cond", Lcond),      \
-      SETUP_TABLE_SELECT("and", Land), SETUP_TABLE_SELECT("or", Lor),          \
-      SETUP_TABLE_SELECT("setq", Lsetq), SETUP_TABLE_SELECT("progn", Lprogn),  \
-      SETUP_TABLE_SELECT("go", Lgo),
+#define SETUPSPEC                                               \
+    SETUP_TABLE_SELECT("quote",             Lquote),            \
+    SETUP_TABLE_SELECT("cond",              Lcond),             \
+    SETUP_TABLE_SELECT("and",               Land),              \
+    SETUP_TABLE_SELECT("or",                Lor),               \
+    SETUP_TABLE_SELECT("setq",              Lsetq),             \
+    SETUP_TABLE_SELECT("progn",             Lprogn),            \
+    SETUP_TABLE_SELECT("go",                Lgo),
 
-#define SETUPSPECa                                                             \
-  SETUP_TABLE_SELECT("de", Lde), SETUP_TABLE_SELECT("df", Ldf),                \
-      SETUP_TABLE_SELECT("dm", Ldm), SETUP_TABLE_SELECT("prog", Lprog),
+#define SETUPSPECa                                              \
+    SETUP_TABLE_SELECT("de",                Lde),               \
+    SETUP_TABLE_SELECT("df",                Ldf),               \
+    SETUP_TABLE_SELECT("dm",                Ldm),               \
+    SETUP_TABLE_SELECT("prog",              Lprog),
 
-#define SETUP0                                                                 \
-  SETUP_TABLE_SELECT("date", Ldate), SETUP_TABLE_SELECT("list", Llist_0),      \
-      SETUP_TABLE_SELECT("iplus", Lplus_0),                                    \
-      SETUP_TABLE_SELECT("itimes", Ltimes_0),                                  \
-      SETUP_TABLE_SELECT("ilogand", Llogand_0),                                \
-      SETUP_TABLE_SELECT("ilogor", Llogor_0),                                  \
-      SETUP_TABLE_SELECT("ilogxor", Llogxor_0),                                \
-      SETUP_TABLE_SELECT("checkpoint", Lpreserve_0),                           \
-      SETUP_TABLE_SELECT("error", Lerror_0),                                   \
-      SETUP_TABLE_SELECT("gensym", Lgensym_0),                                 \
-      SETUP_TABLE_SELECT("oblist", Loblist),                                   \
-      SETUP_TABLE_SELECT("posn", Lposn),                                       \
-      SETUP_TABLE_SELECT("preserve", Lpreserve_0),                             \
-      SETUP_TABLE_SELECT("read", Lread),                                       \
-      SETUP_TABLE_SELECT("readch", Lreadch),                                   \
-      SETUP_TABLE_SELECT("readline", Lreadline),                               \
-      SETUP_TABLE_SELECT("reclaim", Lreclaim_0),                               \
-      SETUP_TABLE_SELECT("restart-csl", Lrestart_lisp_0),                      \
-      SETUP_TABLE_SELECT("restart-lisp", Lrestart_lisp_0),                     \
-      SETUP_TABLE_SELECT("return", Lreturn_0),                                 \
-      SETUP_TABLE_SELECT("stop", Lstop_0),                                     \
-      SETUP_TABLE_SELECT("terpri", Lterpri),                                   \
-      SETUP_TABLE_SELECT("time", Ltime),                                       \
-      SETUP_TABLE_SELECT("vector", Lvector_0),
+#define SETUP0                                                  \
+    SETUP_TABLE_SELECT("date",              Ldate),             \
+    SETUP_TABLE_SELECT("list",              Llist_0),           \
+    SETUP_TABLE_SELECT("iplus",             Lplus_0),           \
+    SETUP_TABLE_SELECT("itimes",            Ltimes_0),          \
+    SETUP_TABLE_SELECT("ilogand",           Llogand_0),         \
+    SETUP_TABLE_SELECT("ilogor",            Llogor_0),          \
+    SETUP_TABLE_SELECT("ilogxor",           Llogxor_0),         \
+    SETUP_TABLE_SELECT("checkpoint",        Lpreserve_0),       \
+    SETUP_TABLE_SELECT("error",             Lerror_0),          \
+    SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
+    SETUP_TABLE_SELECT("oblist",            Loblist),           \
+    SETUP_TABLE_SELECT("posn",              Lposn),             \
+    SETUP_TABLE_SELECT("preserve",          Lpreserve_0),       \
+    SETUP_TABLE_SELECT("read",              Lread),             \
+    SETUP_TABLE_SELECT("readch",            Lreadch),           \
+    SETUP_TABLE_SELECT("readline",          Lreadline),         \
+    SETUP_TABLE_SELECT("reclaim",           Lreclaim_0),        \
+    SETUP_TABLE_SELECT("restart-csl",       Lrestart_lisp_0),   \
+    SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_0),   \
+    SETUP_TABLE_SELECT("return",            Lreturn_0),         \
+    SETUP_TABLE_SELECT("stop",              Lstop_0),           \
+    SETUP_TABLE_SELECT("terpri",            Lterpri),           \
+    SETUP_TABLE_SELECT("time",              Ltime),             \
+    SETUP_TABLE_SELECT("vector",            Lvector_0),
 
 #define SETUP0a
 
-#define SETUP1                                                                 \
-  SETUP_TABLE_SELECT("list", Llist_1),                                         \
-      SETUP_TABLE_SELECT("list*", Lliststar_1),                                \
-      SETUP_TABLE_SELECT("iplus", Lplus_1),                                    \
-      SETUP_TABLE_SELECT("itimes", Ltimes_1),                                  \
-      SETUP_TABLE_SELECT("ilogand", Llogand_1),                                \
-      SETUP_TABLE_SELECT("ilogor", Llogor_1),                                  \
-      SETUP_TABLE_SELECT("ilogxor", Llogxor_1),                                \
-      SETUP_TABLE_SELECT("allocate-string", Lallocate_string),                 \
-      SETUP_TABLE_SELECT("atan", Latan), SETUP_TABLE_SELECT("atom", Latom),    \
-      SETUP_TABLE_SELECT("bignump", Lbignump),                                 \
-      SETUP_TABLE_SELECT("boundp", Lboundp), SETUP_TABLE_SELECT("car", Lcar),  \
-      SETUP_TABLE_SELECT("cdr", Lcdr),                                         \
-      SETUP_TABLE_SELECT("char-code", Lcharcode),                              \
-      SETUP_TABLE_SELECT("char-downcase", Lchar_downcase),                     \
-      SETUP_TABLE_SELECT("char-upcase", Lchar_upcase),                         \
-      SETUP_TABLE_SELECT("checkpoint", Lpreserve_1),                           \
-      SETUP_TABLE_SELECT("close", Lclose),                                     \
-      SETUP_TABLE_SELECT("code-char", Lcodechar),                              \
-      SETUP_TABLE_SELECT("compress", Lcompress),                               \
-      SETUP_TABLE_SELECT("cos", Lcos), SETUP_TABLE_SELECT("error", Lerror_1),  \
-      SETUP_TABLE_SELECT("errorset", Lerrorset_1),                             \
-      SETUP_TABLE_SELECT("eval", Leval), SETUP_TABLE_SELECT("exp", Lexp),      \
-      SETUP_TABLE_SELECT("explode", Lexplode),                                 \
-      SETUP_TABLE_SELECT("explodec", Lexplodec),                               \
-      SETUP_TABLE_SELECT("exploden", Lexploden),                               \
-      SETUP_TABLE_SELECT("explodecn", Lexplodecn),                             \
-      SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),                 \
-      SETUP_TABLE_SELECT("float-infinity-p", Lfp_infinite),                    \
-      SETUP_TABLE_SELECT("fp-infinite", Lfp_infinite),                         \
-      SETUP_TABLE_SELECT("fp-nan", Lfp_nan),                                   \
-      SETUP_TABLE_SELECT("fp-finite", Lfp_finite),                             \
-      SETUP_TABLE_SELECT("fp-subnorm", Lfp_subnorm),                           \
-      SETUP_TABLE_SELECT("fp-signbit", Lfp_signbit),                           \
-      SETUP_TABLE_SELECT("iadd1", Ladd1),                                      \
-      SETUP_TABLE_SELECT("iceiling", Lceiling),                                \
-      SETUP_TABLE_SELECT("ifix", Lfix), SETUP_TABLE_SELECT("ifixp", Lfixp),    \
-      SETUP_TABLE_SELECT("ifloat", Lfloat),                                    \
-      SETUP_TABLE_SELECT("ilognot", Llognot),                                  \
-      SETUP_TABLE_SELECT("iminus", Lminus),                                    \
-      SETUP_TABLE_SELECT("iminusp", Lminusp),                                  \
-      SETUP_TABLE_SELECT("inumberp", Lnumberp),                                \
-      SETUP_TABLE_SELECT("isub1", Lsub1),                                      \
-      SETUP_TABLE_SELECT("floatp", Lfloatp),                                   \
-      SETUP_TABLE_SELECT("ifloor", Lfloor),                                    \
-      SETUP_TABLE_SELECT("gensym", Lgensym_1),                                 \
-      SETUP_TABLE_SELECT("getd", Lgetd),                                       \
-      SETUP_TABLE_SELECT("length", Llength),                                   \
-      SETUP_TABLE_SELECT("list2string", Llist2string),                         \
-      SETUP_TABLE_SELECT("load-module", Lload_module),                         \
-      SETUP_TABLE_SELECT("log", Llog),                                         \
-      SETUP_TABLE_SELECT("mkhash", Lmkhash_1),                                 \
-      SETUP_TABLE_SELECT("mkvect", Lmkvect),                                   \
-      SETUP_TABLE_SELECT("null", Lnull), SETUP_TABLE_SELECT("onep", Lonep),    \
-      SETUP_TABLE_SELECT("plist", Lplist),                                     \
-      SETUP_TABLE_SELECT("preserve", Lpreserve_1),                             \
-      SETUP_TABLE_SELECT("prin", Lprin), SETUP_TABLE_SELECT("princ", Lprinc),  \
-      SETUP_TABLE_SELECT("prin1", Lprin), SETUP_TABLE_SELECT("prin2", Lprinc), \
-      SETUP_TABLE_SELECT("print", Lprint),                                     \
-      SETUP_TABLE_SELECT("printc", Lprintc), SETUP_TABLE_SELECT("rdf", Lrdf),  \
-      SETUP_TABLE_SELECT("rds", Lrds),                                         \
-      SETUP_TABLE_SELECT("reclaim", Lreclaim_1),                               \
-      SETUP_TABLE_SELECT("restart-csl", Lrestart_lisp_1),                      \
-      SETUP_TABLE_SELECT("restart-lisp", Lrestart_lisp_1),                     \
-      SETUP_TABLE_SELECT("return", Lreturn_1),                                 \
-      SETUP_TABLE_SELECT("sin", Lsin), SETUP_TABLE_SELECT("sqrt", Lsqrt),      \
-      SETUP_TABLE_SELECT("stop", Lstop_1),                                     \
-      SETUP_TABLE_SELECT("stringp", Lstringp),                                 \
-      SETUP_TABLE_SELECT("symbolp", Lsymbolp),                                 \
-      SETUP_TABLE_SELECT("thread", Lthread),                                   \
-      SETUP_TABLE_SELECT("trace", Ltrace),                                     \
-      SETUP_TABLE_SELECT("untrace", Luntrace),                                 \
-      SETUP_TABLE_SELECT("upbv", Lupbv),                                       \
-      SETUP_TABLE_SELECT("vectorp", Lvectorp),                                 \
-      SETUP_TABLE_SELECT("wrs", Lwrs),                                         \
-      SETUP_TABLE_SELECT("vector", Lvector_1),                                 \
-      SETUP_TABLE_SELECT("zerop", Lzerop),
+#define SETUP1                                                  \
+    SETUP_TABLE_SELECT("list",              Llist_1),           \
+    SETUP_TABLE_SELECT("list*",             Lliststar_1),       \
+    SETUP_TABLE_SELECT("iplus",             Lplus_1),           \
+    SETUP_TABLE_SELECT("itimes",            Ltimes_1),          \
+    SETUP_TABLE_SELECT("ilogand",           Llogand_1),         \
+    SETUP_TABLE_SELECT("ilogor",            Llogor_1),          \
+    SETUP_TABLE_SELECT("ilogxor",           Llogxor_1),         \
+    SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
+    SETUP_TABLE_SELECT("atan",              Latan),             \
+    SETUP_TABLE_SELECT("atom",              Latom),             \
+    SETUP_TABLE_SELECT("bignump",           Lbignump),          \
+    SETUP_TABLE_SELECT("boundp",            Lboundp),           \
+    SETUP_TABLE_SELECT("car",               Lcar),              \
+    SETUP_TABLE_SELECT("cdr",               Lcdr),              \
+    SETUP_TABLE_SELECT("char-code",         Lcharcode),         \
+    SETUP_TABLE_SELECT("char-downcase",     Lchar_downcase),    \
+    SETUP_TABLE_SELECT("char-upcase",       Lchar_upcase),      \
+    SETUP_TABLE_SELECT("checkpoint",        Lpreserve_1),       \
+    SETUP_TABLE_SELECT("close",             Lclose),            \
+    SETUP_TABLE_SELECT("code-char",         Lcodechar),         \
+    SETUP_TABLE_SELECT("compress",          Lcompress),         \
+    SETUP_TABLE_SELECT("cos",               Lcos),              \
+    SETUP_TABLE_SELECT("error",             Lerror_1),          \
+    SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
+    SETUP_TABLE_SELECT("eval",              Leval),             \
+    SETUP_TABLE_SELECT("exp",               Lexp),              \
+    SETUP_TABLE_SELECT("explode",           Lexplode),          \
+    SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
+    SETUP_TABLE_SELECT("exploden",          Lexploden),         \
+    SETUP_TABLE_SELECT("explodecn",         Lexplodecn),        \
+    SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
+    SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
+    SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
+    SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
+    SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
+    SETUP_TABLE_SELECT("fp-subnorm",        Lfp_subnorm),       \
+    SETUP_TABLE_SELECT("fp-signbit",        Lfp_signbit),       \
+    SETUP_TABLE_SELECT("iadd1",             Ladd1),             \
+    SETUP_TABLE_SELECT("iceiling",          Lceiling),          \
+    SETUP_TABLE_SELECT("ifix",              Lfix),              \
+    SETUP_TABLE_SELECT("ifixp",             Lfixp),             \
+    SETUP_TABLE_SELECT("ifloat",            Lfloat),            \
+    SETUP_TABLE_SELECT("ilognot",           Llognot),           \
+    SETUP_TABLE_SELECT("iminus",            Lminus),            \
+    SETUP_TABLE_SELECT("iminusp",           Lminusp),           \
+    SETUP_TABLE_SELECT("inumberp",          Lnumberp),          \
+    SETUP_TABLE_SELECT("isub1",             Lsub1),             \
+    SETUP_TABLE_SELECT("floatp",            Lfloatp),           \
+    SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
+    SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
+    SETUP_TABLE_SELECT("getd",              Lgetd),             \
+    SETUP_TABLE_SELECT("length",            Llength),           \
+    SETUP_TABLE_SELECT("list2string",       Llist2string),      \
+    SETUP_TABLE_SELECT("load-module",       Lload_module),      \
+    SETUP_TABLE_SELECT("log",               Llog),              \
+    SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
+    SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
+    SETUP_TABLE_SELECT("null",              Lnull),             \
+    SETUP_TABLE_SELECT("onep",              Lonep),             \
+    SETUP_TABLE_SELECT("plist",             Lplist),            \
+    SETUP_TABLE_SELECT("preserve",          Lpreserve_1),       \
+    SETUP_TABLE_SELECT("prin",              Lprin),             \
+    SETUP_TABLE_SELECT("princ",             Lprinc),            \
+    SETUP_TABLE_SELECT("prin1",             Lprin),             \
+    SETUP_TABLE_SELECT("prin2",             Lprinc),            \
+    SETUP_TABLE_SELECT("print",             Lprint),            \
+    SETUP_TABLE_SELECT("printc",            Lprintc),           \
+    SETUP_TABLE_SELECT("rdf",               Lrdf),              \
+    SETUP_TABLE_SELECT("rds",               Lrds),              \
+    SETUP_TABLE_SELECT("reclaim",           Lreclaim_1),        \
+    SETUP_TABLE_SELECT("restart-csl",       Lrestart_lisp_1),   \
+    SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_1),   \
+    SETUP_TABLE_SELECT("return",            Lreturn_1),         \
+    SETUP_TABLE_SELECT("sin",               Lsin),              \
+    SETUP_TABLE_SELECT("sqrt",              Lsqrt),             \
+    SETUP_TABLE_SELECT("stop",              Lstop_1),           \
+    SETUP_TABLE_SELECT("stringp",           Lstringp),          \
+    SETUP_TABLE_SELECT("symbolp",           Lsymbolp),          \
+    SETUP_TABLE_SELECT("trace",             Ltrace),            \
+    SETUP_TABLE_SELECT("untrace",           Luntrace),          \
+    SETUP_TABLE_SELECT("upbv",              Lupbv),             \
+    SETUP_TABLE_SELECT("vectorp",           Lvectorp),          \
+    SETUP_TABLE_SELECT("wrs",               Lwrs),              \
+    SETUP_TABLE_SELECT("vector",            Lvector_1),         \
+    SETUP_TABLE_SELECT("zerop",             Lzerop),
 
 #define SETUP1a
 
-#define SETUP2                                                                 \
-  SETUP_TABLE_SELECT("list", Llist_2),                                         \
-      SETUP_TABLE_SELECT("list*", Lliststar_2),                                \
-      SETUP_TABLE_SELECT("iplus", Lplus_2),                                    \
-      SETUP_TABLE_SELECT("itimes", Ltimes_2),                                  \
-      SETUP_TABLE_SELECT("ilogand", Llogand_2),                                \
-      SETUP_TABLE_SELECT("ilogor", Llogor_2),                                  \
-      SETUP_TABLE_SELECT("ilogxor", Llogxor_2),                                \
-      SETUP_TABLE_SELECT("apply", Lapply),                                     \
-      SETUP_TABLE_SELECT("checkpoint", Lpreserve_2),                           \
-      SETUP_TABLE_SELECT("cons", Lcons), SETUP_TABLE_SELECT("eq", Leq),        \
-      SETUP_TABLE_SELECT("equal", Lequal),                                     \
-      SETUP_TABLE_SELECT("error", Lerror_2),                                   \
-      SETUP_TABLE_SELECT("errorset", Lerrorset_2),                             \
-      SETUP_TABLE_SELECT("idifference", Ldifference),                          \
-      SETUP_TABLE_SELECT("idivide", Ldivide),                                  \
-      SETUP_TABLE_SELECT("iequal", Lequal), SETUP_TABLE_SELECT("igeq", Lgeq),  \
-      SETUP_TABLE_SELECT("igreaterp", Lgreaterp),                              \
-      SETUP_TABLE_SELECT("ileftshift", Lleftshift),                            \
-      SETUP_TABLE_SELECT("ileq", Lleq), SETUP_TABLE_SELECT("ilessp", Llessp),  \
-      SETUP_TABLE_SELECT("iquotient", Lquotient),                              \
-      SETUP_TABLE_SELECT("iremainder", Lremainder),                            \
-      SETUP_TABLE_SELECT("irightshift", Lrightshift),                          \
-      SETUP_TABLE_SELECT("get", Lget),                                         \
-      SETUP_TABLE_SELECT("gethash", Lgethash),                                 \
-      SETUP_TABLE_SELECT("getv", Lgetv),                                       \
-      SETUP_TABLE_SELECT("member", Lmember),                                   \
-      SETUP_TABLE_SELECT("memq", Lmemq),                                       \
-      SETUP_TABLE_SELECT("mkhash", Lmkhash_2),                                 \
-      SETUP_TABLE_SELECT("open", Lopen),                                       \
-      SETUP_TABLE_SELECT("open-module", Lopen_module),                         \
-      SETUP_TABLE_SELECT("preserve", Lpreserve_2),                             \
-      SETUP_TABLE_SELECT("prog1", Lprog1),                                     \
-      SETUP_TABLE_SELECT("prog2", Lprog2),                                     \
-      SETUP_TABLE_SELECT("remhash", Lremhash),                                 \
-      SETUP_TABLE_SELECT("remprop", Lremprop),                                 \
-      SETUP_TABLE_SELECT("restart-csl", Lrestart_lisp_2),                      \
-      SETUP_TABLE_SELECT("restart-lisp", Lrestart_lisp_2),                     \
-      SETUP_TABLE_SELECT("rplaca", Lrplaca),                                   \
-      SETUP_TABLE_SELECT("rplacd", Lrplacd), SETUP_TABLE_SELECT("set", Lset),  \
-      SETUP_TABLE_SELECT("vector", Lvector_2),
+#define SETUP2                                                  \
+    SETUP_TABLE_SELECT("list",              Llist_2),           \
+    SETUP_TABLE_SELECT("list*",             Lliststar_2),       \
+    SETUP_TABLE_SELECT("iplus",             Lplus_2),           \
+    SETUP_TABLE_SELECT("itimes",            Ltimes_2),          \
+    SETUP_TABLE_SELECT("ilogand",           Llogand_2),         \
+    SETUP_TABLE_SELECT("ilogor",            Llogor_2),          \
+    SETUP_TABLE_SELECT("ilogxor",           Llogxor_2),         \
+    SETUP_TABLE_SELECT("apply",             Lapply),            \
+    SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
+    SETUP_TABLE_SELECT("cons",              Lcons),             \
+    SETUP_TABLE_SELECT("eq",                Leq),               \
+    SETUP_TABLE_SELECT("equal",             Lequal),            \
+    SETUP_TABLE_SELECT("error",             Lerror_2),          \
+    SETUP_TABLE_SELECT("errorset",          Lerrorset_2),       \
+    SETUP_TABLE_SELECT("idifference",       Ldifference),       \
+    SETUP_TABLE_SELECT("idivide",           Ldivide),           \
+    SETUP_TABLE_SELECT("iequal",            Lequal),            \
+    SETUP_TABLE_SELECT("igeq",              Lgeq),              \
+    SETUP_TABLE_SELECT("igreaterp",         Lgreaterp),         \
+    SETUP_TABLE_SELECT("ileftshift",        Lleftshift),        \
+    SETUP_TABLE_SELECT("ileq",              Lleq),              \
+    SETUP_TABLE_SELECT("ilessp",            Llessp),            \
+    SETUP_TABLE_SELECT("iquotient",         Lquotient),         \
+    SETUP_TABLE_SELECT("iremainder",        Lremainder),        \
+    SETUP_TABLE_SELECT("irightshift",       Lrightshift),       \
+    SETUP_TABLE_SELECT("get",               Lget),              \
+    SETUP_TABLE_SELECT("gethash",           Lgethash),          \
+    SETUP_TABLE_SELECT("getv",              Lgetv),             \
+    SETUP_TABLE_SELECT("member",            Lmember),           \
+    SETUP_TABLE_SELECT("memq",              Lmemq),             \
+    SETUP_TABLE_SELECT("mkhash",            Lmkhash_2),         \
+    SETUP_TABLE_SELECT("open",              Lopen),             \
+    SETUP_TABLE_SELECT("open-module",       Lopen_module),      \
+    SETUP_TABLE_SELECT("preserve",          Lpreserve_2),       \
+    SETUP_TABLE_SELECT("prog1",             Lprog1),            \
+    SETUP_TABLE_SELECT("prog2",             Lprog2),            \
+    SETUP_TABLE_SELECT("remhash",           Lremhash),          \
+    SETUP_TABLE_SELECT("remprop",           Lremprop),          \
+    SETUP_TABLE_SELECT("restart-csl",       Lrestart_lisp_2),   \
+    SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_2),   \
+    SETUP_TABLE_SELECT("rplaca",            Lrplaca),           \
+    SETUP_TABLE_SELECT("rplacd",            Lrplacd),           \
+    SETUP_TABLE_SELECT("set",               Lset),              \
+    SETUP_TABLE_SELECT("vector",            Lvector_2),
 
 #define SETUP2a
 
-#define SETUP3                                                                 \
-  SETUP_TABLE_SELECT("list", Llist_3),                                         \
-      SETUP_TABLE_SELECT("list*", Lliststar_3),                                \
-      SETUP_TABLE_SELECT("iplus", Lplus_3),                                    \
-      SETUP_TABLE_SELECT("itimes", Ltimes_3),                                  \
-      SETUP_TABLE_SELECT("ilogand", Llogand_3),                                \
-      SETUP_TABLE_SELECT("ilogor", Llogor_3),                                  \
-      SETUP_TABLE_SELECT("ilogxor", Llogxor_3),                                \
-      SETUP_TABLE_SELECT("checkpoint", Lpreserve_3),                           \
-      SETUP_TABLE_SELECT("errorset", Lerrorset_3),                             \
-      SETUP_TABLE_SELECT("mkhash", Lmkhash_3),                                 \
-      SETUP_TABLE_SELECT("preserve", Lpreserve_3),                             \
-      SETUP_TABLE_SELECT("put", Lput), SETUP_TABLE_SELECT("putd", Lputd),      \
-      SETUP_TABLE_SELECT("puthash", Lputhash),                                 \
-      SETUP_TABLE_SELECT("putv", Lputv),                                       \
-      SETUP_TABLE_SELECT("string-store", Lstring_store1),                      \
-      SETUP_TABLE_SELECT("string-store1", Lstring_store1),                     \
-      SETUP_TABLE_SELECT("vector", Lvector_3),
+#define SETUP3                                                  \
+    SETUP_TABLE_SELECT("list",              Llist_3),           \
+    SETUP_TABLE_SELECT("list*",             Lliststar_3),       \
+    SETUP_TABLE_SELECT("iplus",             Lplus_3),           \
+    SETUP_TABLE_SELECT("itimes",            Ltimes_3),          \
+    SETUP_TABLE_SELECT("ilogand",           Llogand_3),         \
+    SETUP_TABLE_SELECT("ilogor",            Llogor_3),          \
+    SETUP_TABLE_SELECT("ilogxor",           Llogxor_3),         \
+    SETUP_TABLE_SELECT("checkpoint",        Lpreserve_3),       \
+    SETUP_TABLE_SELECT("errorset",          Lerrorset_3),       \
+    SETUP_TABLE_SELECT("mkhash",            Lmkhash_3),         \
+    SETUP_TABLE_SELECT("preserve",          Lpreserve_3),       \
+    SETUP_TABLE_SELECT("put",               Lput),              \
+    SETUP_TABLE_SELECT("putd",              Lputd),             \
+    SETUP_TABLE_SELECT("puthash",           Lputhash),          \
+    SETUP_TABLE_SELECT("putv",              Lputv),             \
+    SETUP_TABLE_SELECT("string-store",      Lstring_store1),    \
+    SETUP_TABLE_SELECT("string-store1",     Lstring_store1),    \
+    SETUP_TABLE_SELECT("vector",            Lvector_3),
 
 #define SETUP3a
 
-#define SETUP4                                                                 \
-  SETUP_TABLE_SELECT("list", Llist_4),                                         \
-      SETUP_TABLE_SELECT("list*", Lliststar_4),                                \
-      SETUP_TABLE_SELECT("iplus", Lplus_4),                                    \
-      SETUP_TABLE_SELECT("itimes", Ltimes_4),                                  \
-      SETUP_TABLE_SELECT("ilogand", Llogand_4),                                \
-      SETUP_TABLE_SELECT("ilogor", Llogor_4),                                  \
-      SETUP_TABLE_SELECT("ilogxor", Llogxor_4),                                \
-      SETUP_TABLE_SELECT("checkpoint", Lpreserve_4),                           \
-      SETUP_TABLE_SELECT("preserve", Lpreserve_4),                             \
-      SETUP_TABLE_SELECT("string-store2", Lstring_store2),                     \
-      SETUP_TABLE_SELECT("vector", Lvector_4),
+#define SETUP4                                                  \
+    SETUP_TABLE_SELECT("list",              Llist_4),           \
+    SETUP_TABLE_SELECT("list*",             Lliststar_4),       \
+    SETUP_TABLE_SELECT("iplus",             Lplus_4),           \
+    SETUP_TABLE_SELECT("itimes",            Ltimes_4),          \
+    SETUP_TABLE_SELECT("ilogand",           Llogand_4),         \
+    SETUP_TABLE_SELECT("ilogor",            Llogor_4),          \
+    SETUP_TABLE_SELECT("ilogxor",           Llogxor_4),         \
+    SETUP_TABLE_SELECT("checkpoint",        Lpreserve_4),       \
+    SETUP_TABLE_SELECT("preserve",          Lpreserve_4),       \
+    SETUP_TABLE_SELECT("string-store2",     Lstring_store2),    \
+    SETUP_TABLE_SELECT("vector",            Lvector_4),
 
 #define SETUP4a
 
-#define SETUP5UP                                                               \
-  SETUP_TABLE_SELECT("list", Llist_5up),                                       \
-      SETUP_TABLE_SELECT("list*", Lliststar_5up),                              \
-      SETUP_TABLE_SELECT("iplus", Lplus_5up),                                  \
-      SETUP_TABLE_SELECT("itimes", Ltimes_5up),                                \
-      SETUP_TABLE_SELECT("ilogand", Llogand_5up),                              \
-      SETUP_TABLE_SELECT("ilogor", Llogor_5up),                                \
-      SETUP_TABLE_SELECT("ilogxor", Llogxor_5up),                              \
-      SETUP_TABLE_SELECT("string-store3", Lstring_store3),                     \
-      SETUP_TABLE_SELECT("string-store4", Lstring_store4),                     \
-      SETUP_TABLE_SELECT("vector", Lvector_5up),
+#define SETUP5UP                                                \
+    SETUP_TABLE_SELECT("list",              Llist_5up),         \
+    SETUP_TABLE_SELECT("list*",             Lliststar_5up),     \
+    SETUP_TABLE_SELECT("iplus",             Lplus_5up),         \
+    SETUP_TABLE_SELECT("itimes",            Ltimes_5up),        \
+    SETUP_TABLE_SELECT("ilogand",           Llogand_5up),       \
+    SETUP_TABLE_SELECT("ilogor",            Llogor_5up),        \
+    SETUP_TABLE_SELECT("ilogxor",           Llogxor_5up),       \
+    SETUP_TABLE_SELECT("string-store3",     Lstring_store3),    \
+    SETUP_TABLE_SELECT("string-store4",     Lstring_store4),    \
+    SETUP_TABLE_SELECT("vector",            Lvector_5up),
 
 #define SETUP5UPa
 
@@ -5004,30 +5799,31 @@ LispObject Lthread(LispObject lits, LispObject x) {
 // They are listed here to cope with the needs of dumping and restoring
 // heap images.
 
-#define SETUP_INTERNAL                                                         \
-  SETUP_TABLE_SELECT("0undefined0", undefined0),                               \
-      SETUP_TABLE_SELECT("1undefined1", undefined1),                           \
-      SETUP_TABLE_SELECT("2undefined2", undefined2),                           \
-      SETUP_TABLE_SELECT("3undefined3", undefined3),                           \
-      SETUP_TABLE_SELECT("4undefined4", undefined4),                           \
-      SETUP_TABLE_SELECT("5undefined5", undefined5up),                         \
-      SETUP_TABLE_SELECT("0wrongnumber0", wrongnumber0),                       \
-      SETUP_TABLE_SELECT("1wrongnumber1", wrongnumber1),                       \
-      SETUP_TABLE_SELECT("2wrongnumber2", wrongnumber2),                       \
-      SETUP_TABLE_SELECT("3wrongnumber3", wrongnumber3),                       \
-      SETUP_TABLE_SELECT("4wrongnumber4", wrongnumber4),                       \
-      SETUP_TABLE_SELECT("5wrongnumber5", wrongnumber5up),                     \
-      SETUP_TABLE_SELECT("0interpreted0", interpreted0),                       \
-      SETUP_TABLE_SELECT("1interpreted1", interpreted1),                       \
-      SETUP_TABLE_SELECT("2interpreted2", interpreted2),                       \
-      SETUP_TABLE_SELECT("3interpreted3", interpreted3),                       \
-      SETUP_TABLE_SELECT("4interpreted4", interpreted4),                       \
-      SETUP_TABLE_SELECT("5interpreted5", interpreted5up)
+#define SETUP_INTERNAL                                          \
+    SETUP_TABLE_SELECT("0undefined0",       undefined0),        \
+    SETUP_TABLE_SELECT("1undefined1",       undefined1),        \
+    SETUP_TABLE_SELECT("2undefined2",       undefined2),        \
+    SETUP_TABLE_SELECT("3undefined3",       undefined3),        \
+    SETUP_TABLE_SELECT("4undefined4",       undefined4),        \
+    SETUP_TABLE_SELECT("5undefined5",       undefined5up),      \
+    SETUP_TABLE_SELECT("0wrongnumber0",     wrongnumber0),      \
+    SETUP_TABLE_SELECT("1wrongnumber1",     wrongnumber1),      \
+    SETUP_TABLE_SELECT("2wrongnumber2",     wrongnumber2),      \
+    SETUP_TABLE_SELECT("3wrongnumber3",     wrongnumber3),      \
+    SETUP_TABLE_SELECT("4wrongnumber4",     wrongnumber4),      \
+    SETUP_TABLE_SELECT("5wrongnumber5",     wrongnumber5up),    \
+    SETUP_TABLE_SELECT("0interpreted0",     interpreted0),      \
+    SETUP_TABLE_SELECT("1interpreted1",     interpreted1),      \
+    SETUP_TABLE_SELECT("2interpreted2",     interpreted2),      \
+    SETUP_TABLE_SELECT("3interpreted3",     interpreted3),      \
+    SETUP_TABLE_SELECT("4interpreted4",     interpreted4),      \
+    SETUP_TABLE_SELECT("5interpreted5",     interpreted5up)
 
 // In order that it is possible to save and restore images and end up with
 // function entrypoints correctly fixed up I need to be certain that the
 // version of vsl that saved an image has at least the same set of functions
-// provided as the version reloading.
+// provided as the version reloading. 
+
 
 // With subversion there is an unambiguos concept of "revision number" and
 // I can insert that here. If one used git the collection of checkins
@@ -5036,51 +5832,67 @@ LispObject Lthread(LispObject lits, LispObject x) {
 
 const char *setup_revision = "$Revision: 0000 $";
 
-#define MAX_NAMESIZE 24
+#define MAX_NAMESIZE  24
 
-const char setup_names[][MAX_NAMESIZE] = {
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "s" a }
-    SETUPSPEC SETUPSPECa
+const char setup_names[][MAX_NAMESIZE] =
+{
+#define SETUP_TABLE_SELECT(a, b) { "s" a }
+    SETUPSPEC
+    SETUPSPECa
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "0" a }
-        SETUP0 SETUP0a
+#define SETUP_TABLE_SELECT(a, b) { "0" a }
+    SETUP0
+    SETUP0a
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "1" a }
-            SETUP1 SETUP1a
+#define SETUP_TABLE_SELECT(a, b) { "1" a }
+    SETUP1
+    SETUP1a
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "2" a }
-                SETUP2 SETUP2a
+#define SETUP_TABLE_SELECT(a, b) { "2" a }
+    SETUP2
+    SETUP2a
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "3" a }
-                    SETUP3 SETUP3a
+#define SETUP_TABLE_SELECT(a, b) { "3" a }
+    SETUP3
+    SETUP3a
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "4" a }
-                        SETUP4 SETUP4a
+#define SETUP_TABLE_SELECT(a, b) { "4" a }
+    SETUP4
+    SETUP4a
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { "5" a }
-                            SETUP5UP SETUP5UPa{
-                                "x"}, // Marks end of real functions
+#define SETUP_TABLE_SELECT(a, b) { "5" a }
+    SETUP5UP
+    SETUP5UPa
+    { "x" },                      // Marks end of real functions
 #undef SETUP_TABLE_SELECT
-#define SETUP_TABLE_SELECT(a, b)                                               \
-  { a }
-    SETUP_INTERNAL};
+#define SETUP_TABLE_SELECT(a, b) { a }
+    SETUP_INTERNAL
+};
 
 #undef SETUP_TABLE_SELECT
 #define SETUP_TABLE_SELECT(a, b) (void *)b
 
-void *setup_defs[] = {
-    SETUPSPEC SETUPSPECa SETUP0 SETUP0a SETUP1 SETUP1a SETUP2 SETUP2a SETUP3
-        SETUP3a SETUP4 SETUP4a SETUP5UP SETUP5UPa NULL,
-    SETUP_INTERNAL};
+void *setup_defs[] =
+{
+    SETUPSPEC
+    SETUPSPECa
+    SETUP0
+    SETUP0a
+    SETUP1
+    SETUP1a
+    SETUP2
+    SETUP2a
+    SETUP3
+    SETUP3a
+    SETUP4
+    SETUP4a
+    SETUP5UP
+    SETUP5UPa
+    NULL,
+    SETUP_INTERNAL
+};
 
-#define SETUPSIZE ((int)(sizeof(setup_defs) / sizeof(void *)))
+#define SETUPSIZE  ((int)(sizeof(setup_defs)/sizeof(void *)))
 
 // The number of entries I have in my setup hash table will be about
 // twice the number of entries to put in it, and is not a multiple of
@@ -5088,133 +5900,120 @@ void *setup_defs[] = {
 // size is just established by the rounding-up procedure here, however
 // it should scale reasonably happily to almost any size of system.
 
-#define SETUPHASHSIZE (((2 * 3 * 5 * 7 * 11) * ((int)SETUPSIZE / 1000 + 1)) + 1)
-#define HASHPTR(x) ((int)(((uintptr_t)(x)*314159u) % SETUPHASHSIZE))
+#define SETUPHASHSIZE (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1)
+#define HASHPTR(x)    ((int)(((uintptr_t)(x)*314159u)%SETUPHASHSIZE))
 
-void setwrongnumbers(LispObject w) {
-  if (qdefn0(w) == undefined0)
-    qdefn0(w) = wrongnumber0;
-  if (qdefn1(w) == undefined1)
-    qdefn1(w) = wrongnumber1;
-  if (qdefn2(w) == undefined2)
-    qdefn2(w) = wrongnumber2;
-  if (qdefn3(w) == undefined3)
-    qdefn3(w) = wrongnumber3;
-  if (qdefn4(w) == undefined4)
-    qdefn4(w) = wrongnumber4;
-  if (qdefn5up(w) == undefined5up)
-    qdefn5up(w) = wrongnumber5up;
+void setwrongnumbers(LispObject w)
+{   if (qdefn0(w) == undefined0) qdefn0(w) = wrongnumber0;
+    if (qdefn1(w) == undefined1) qdefn1(w) = wrongnumber1;
+    if (qdefn2(w) == undefined2) qdefn2(w) = wrongnumber2;
+    if (qdefn3(w) == undefined3) qdefn3(w) = wrongnumber3;
+    if (qdefn4(w) == undefined4) qdefn4(w) = wrongnumber4;
+    if (qdefn5up(w) == undefined5up) qdefn5up(w) = wrongnumber5up;
 }
 
-void setup() {
-  // Ensure that initial symbols and functions are in place. Parts of this
-  // code are rather rambling and repetitive but this is at least a simple
-  // way to do things. I am going to assume that nothing can fail within this
-  // setup code, so I can omit all checks for error conditions.
-  int i;
-  undefined = lookup("~indefinite-value~", 18, 3);
-  qflags(undefined) |= flagGLOBAL;
-  qvalue(undefined) = undefined;
-  nil = lookup("nil", 3, 3);
-  qflags(nil) |= flagGLOBAL;
-  qvalue(nil) = nil;
-  lisptrue = lookup("t", 1, 3);
-  qflags(lisptrue) |= flagGLOBAL;
-  qvalue(lisptrue) = lisptrue;
-  qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
-  qflags(echo) |= flagFLUID;
-  {
-    LispObject nn;
-    qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
-    qflags(nn) |= flagFLUID;
-  }
-  qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
-      list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
-                list2star(lookup("embedded", 8, 1),
-                          cons(lookup("image", 5, 3),
-                               makestring(imagename, strlen(imagename))),
-                          nil));
-  qflags(lispsystem) |= flagGLOBAL;
-  quote = lookup("quote", 5, 3);
-  backquote = lookup("`", 1, 3);
-  comma = lookup(",", 1, 3);
-  comma_at = lookup(",@", 2, 3);
-  eofsym = lookup("$eof$", 5, 3);
-  qflags(eofsym) |= flagGLOBAL;
-  qvalue(eofsym) = eofsym;
-  lambda = lookup("lambda", 6, 3);
-  expr = lookup("expr", 4, 3);
-  subr = lookup("subr", 4, 3);
-  fexpr = lookup("fexpr", 5, 3);
-  fsubr = lookup("fsubr", 5, 3);
-  macro = lookup("macro", 5, 3);
-  input = lookup("input", 5, 3);
-  output = lookup("output", 6, 3);
-  pipe = lookup("pipe", 4, 3);
-  qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
-  qflags(dfprint) |= flagFLUID;
-  bignum = lookup("~bignum", 7, 3);
-  qvalue(raise = lookup("*raise", 6, 3)) = nil;
-  qvalue(lower = lookup("*lower", 6, 3)) = lisptrue;
-  qflags(raise) |= flagFLUID;
-  qflags(lower) |= flagFLUID;
-  cursym = nil;
-  work1 = work2 = nil;
-  for (i = 0; setup_names[i][0] != 'x'; i++) {
-    LispObject w = lookup(1 + setup_names[i], strlen(1 + setup_names[i]), 3);
-    if (qdefn0(w) == undefined0)
-      qdefn0(w) = wrongnumber0;
-    if (qdefn1(w) == undefined1)
-      qdefn1(w) = wrongnumber1;
-    if (qdefn2(w) == undefined2)
-      qdefn2(w) = wrongnumber2;
-    if (qdefn3(w) == undefined3)
-      qdefn3(w) = wrongnumber3;
-    if (qdefn4(w) == undefined4)
-      qdefn4(w) = wrongnumber4;
-    if (qdefn5up(w) == undefined5up)
-      qdefn5up(w) = wrongnumber5up;
-    switch (setup_names[i][0]) {
-    case '0':
-      qdefn0(w) = (LispFn0 *)setup_defs[i];
-      break;
-    case 's':
-      qflags(w) |= flagSPECFORM;
-      // drop through.
-    case '1':
-      qdefn1(w) = (LispFn1 *)setup_defs[i];
-      break;
-    case '2':
-      qdefn2(w) = (LispFn2 *)setup_defs[i];
-      break;
-    case '3':
-      qdefn3(w) = (LispFn3 *)setup_defs[i];
-      break;
-    case '4':
-      qdefn4(w) = (LispFn4 *)setup_defs[i];
-      break;
-    case '5':
-      qdefn5up(w) = (LispFn5up *)setup_defs[i];
-      break;
+void setup()
+{
+// Ensure that initial symbols and functions are in place. Parts of this
+// code are rather rambling and repetitive but this is at least a simple
+// way to do things. I am going to assume that nothing can fail within this
+// setup code, so I can omit all checks for error conditions.
+    int i;
+    undefined = lookup("~indefinite-value~", 18, 3);
+    qflags(undefined) |= flagGLOBAL;
+    qvalue(undefined) = undefined;
+    nil = lookup("nil", 3, 3);
+    qflags(nil) |= flagGLOBAL;
+    qvalue(nil) = nil;
+    lisptrue = lookup("t", 1, 3);
+    qflags(lisptrue) |= flagGLOBAL;
+    qvalue(lisptrue) = lisptrue;
+    qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
+    qflags(echo) |= flagFLUID;
+    {   LispObject nn;
+        qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
+        qflags(nn) |= flagFLUID;
     }
-  }
+    qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
+        list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
+                  list2star(lookup("embedded", 8, 1),
+                      cons(lookup("image", 5, 3),
+                           makestring(imagename, strlen(imagename))), nil));
+    qflags(lispsystem) |= flagGLOBAL;
+    quote = lookup("quote", 5, 3);
+    backquote = lookup("`", 1, 3);
+    comma = lookup(",", 1, 3);
+    comma_at = lookup(",@", 2, 3);
+    eofsym = lookup("$eof$", 5, 3);
+    qflags(eofsym) |= flagGLOBAL;
+    qvalue(eofsym) = eofsym;
+    lambda = lookup("lambda", 6, 3);
+    expr = lookup("expr", 4, 3);
+    subr = lookup("subr", 4, 3);
+    fexpr = lookup("fexpr", 5, 3);
+    fsubr = lookup("fsubr", 5, 3);
+    macro = lookup("macro", 5, 3);
+    input = lookup("input", 5, 3);
+    output = lookup("output", 6, 3);
+    pipe = lookup("pipe", 4, 3);
+    qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
+    qflags(dfprint) |= flagFLUID;
+    bignum = lookup("~bignum", 7, 3);
+    qvalue(raise = lookup("*raise", 6, 3)) = nil;
+    qvalue(lower = lookup("*lower", 6, 3)) = lisptrue;
+    qflags(raise) |= flagFLUID;
+    qflags(lower) |= flagFLUID;
+    cursym = nil;
+    work1 = work2 = nil;
+    for (i=0; setup_names[i][0]!='x'; i++)
+    {   LispObject w = lookup(1+setup_names[i], strlen(1+setup_names[i]), 3);
+        if (qdefn0(w) == undefined0) qdefn0(w) = wrongnumber0;
+        if (qdefn1(w) == undefined1) qdefn1(w) = wrongnumber1;
+        if (qdefn2(w) == undefined2) qdefn2(w) = wrongnumber2;
+        if (qdefn3(w) == undefined3) qdefn3(w) = wrongnumber3;
+        if (qdefn4(w) == undefined4) qdefn4(w) = wrongnumber4;
+        if (qdefn5up(w) == undefined5up) qdefn5up(w) = wrongnumber5up;
+        switch (setup_names[i][0])
+        {
+        case '0':
+            qdefn0(w) = (LispFn0 *)setup_defs[i];
+            break;
+        case 's':
+            qflags(w) |= flagSPECFORM;
+            // drop through.
+        case '1':
+            qdefn1(w) = (LispFn1 *)setup_defs[i];
+            break;
+        case '2':
+            qdefn2(w) = (LispFn2 *)setup_defs[i];
+            break;
+        case '3':
+            qdefn3(w) = (LispFn3 *)setup_defs[i];
+            break;
+        case '4':
+            qdefn4(w) = (LispFn4 *)setup_defs[i];
+            break;
+        case '5':
+            qdefn5up(w) = (LispFn5up *)setup_defs[i];
+            break;
+        }
+    }
 }
 
-void cold_start() {
-  // version of setup to call when there is no initial heap image at all.
-  int i;
-  // I make the object-hash-table lists end in a fixnum rather than nil
-  // because I want to create the hash table before even the symbol nil
-  // exists.
-  for (i = 0; i < OBHASH_SIZE; i++)
-    obhash[i] = tagFIXNUM;
-  for (i = 0; i < BASES_SIZE; i++)
-    bases[i] = NULLATOM;
-  setup();
-  // The following fields could not be set up quite early enough in the
-  // cold start case, so I repair them now.
-  restartfn = qplist(undefined) = qlits(undefined) = qplist(nil) = qlits(nil) =
-      nil;
+void cold_start()
+{
+// version of setup to call when there is no initial heap image at all.
+    int i;
+// I make the object-hash-table lists end in a fixnum rather than nil
+// because I want to create the hash table before even the symbol nil
+// exists.
+    for (i=0; i<OBHASH_SIZE; i++) obhash[i] = tagFIXNUM;
+    for (i=0; i<BASES_SIZE; i++) bases[i] = NULLATOM;
+    setup();
+// The following fields could not be set up quite early enough in the
+// cold start case, so I repair them now.
+    restartfn = qplist(undefined) = qlits(undefined) =
+        qplist(nil) = qlits(nil) = nil;
 }
 
 // I will comment here on some of the special features of VSL+ heap images.
@@ -5234,27 +6033,27 @@ void cold_start() {
 // (3) Image files will be compressed (using zlib) and so will tend to be
 //     compact.
 
-int32_t read32(gzFile f) {
-  unsigned char c[4];
-  if (gzread(f, c, 4) != 4)
-    return 0;
-  return (c[0] + (c[1] << 8) + (c[2] << 16) + (c[3] << 24));
+int32_t read32(gzFile f)
+{
+    unsigned char c[4];
+    if (gzread(f, c, 4) != 4) return 0;
+    return (c[0] + (c[1]<<8) + (c[2]<<16) + (c[3]<<24));
 }
 
 #define FILEID (('v' << 0) | ('s' << 8) | ('l' << 16) | ('+' << 24))
-#define ENDID (('\n' << 0) | ('e' << 8) | ('n' << 16) | ('d' << 24))
+#define ENDID  (('\n' << 0) | ('e' << 8) | ('n' << 16) | ('d' << 24))
 
 // Crude allocation for temporary space within the heap2 area.
 
-void *h2alloc(int n) {
-  void *r = (void *)fringe2;
-  if (fringe2 + n > limit2)
-    return NULL;
-  fringe2 += n;
-  return r;
+void *h2alloc(int n)
+{
+    void *r = (void *)fringe2;
+    if (fringe2+n > limit2) return NULL;
+    fringe2 += n;
+    return r;
 }
 
-uint32_t revision = 0, version = 0;
+uint32_t revision = 0, version=0;
 
 // This is the normal reload case where the word-width of the image
 // matches that of the system it is being used on. However it is
@@ -5268,629 +6067,591 @@ void **setuphash2v;
 // If the item that is sought is not found then this hash lookup code
 // will return NULL.
 
-void *setuphashlookup(void *k) {
-  int i = HASHPTR(k);
-  const uint64_t *p;
-  //@@    printf("Lookup function %#" PRIxPTR " with hash value %d\n",
-  //(uintptr_t)k, i);
-  //@@    {   int j;
-  //@@        printf("setup hash table contents\n");
-  //@@        for (j=0; j<SETUPHASHSIZE; j++)
-  //@@        {   void *k = setuphash1k[j];
-  //@@            const char *v = setuphash1v[j];
-  //@@            if (k != NULL) printf("%#" PRIxPTR " : %s\n", (uintptr_t)k,
-  //v);
-  //@@        }
-  //@@    }
-  while (setuphash1k[i] != k && setuphash1k[i] != NULL)
-    i = (i + 1) % SETUPHASHSIZE;
-  //@@    printf("Entrypoint %#" PRIxPTR " looks up as entry %d (%#" PRIxPTR
-  //")\n",
-  //@@        (uintptr_t)k, i, (uintptr_t)setuphash1k[i]);
-  if (setuphash1k[i] == NULL)
-    return NULL;
-  p = (uint64_t *)setuphash1v[i];
-  //@@    printf("name is <%.16s>\n", (const char *)p);
-  i = (int)((p[0] + p[1]) % SETUPHASHSIZE);
-  //@@    printf("namehash = %d, s2k=%#" PRIxPTR " s2v=%#" PRIxPTR "\n", i,
-  //(uintptr_t)setuphash2k, (uintptr_t)setuphash2v);
-  //@@    printf("setuphash2k[%d] = %#" PRIxPTR "\n", i,
-  //(uintptr_t)setuphash2k[i]);
-  //@@    printf("setuphash2k[%d] = <%.16s>\n", i, setuphash2k[i]);
-  while (setuphash2k[i] != NULL && memcmp(setuphash2k[i], p, MAX_NAMESIZE) != 0)
-    i = (i + 1) % SETUPHASHSIZE;
-  //@@    printf("converted entrypoint is %#" PRIxPTR "\n",
-  //(uintptr_t)setuphash2v[i]);
-  return setuphash2v[i];
+void *setuphashlookup(void *k)
+{
+    int i = HASHPTR(k);
+    const uint64_t *p;
+//@@    printf("Lookup function %#" PRIxPTR " with hash value %d\n", (uintptr_t)k, i);
+//@@    {   int j;
+//@@        printf("setup hash table contents\n");
+//@@        for (j=0; j<SETUPHASHSIZE; j++)
+//@@        {   void *k = setuphash1k[j];
+//@@            const char *v = setuphash1v[j];
+//@@            if (k != NULL) printf("%#" PRIxPTR " : %s\n", (uintptr_t)k, v);
+//@@        }
+//@@    }
+    while (setuphash1k[i] != k &&
+           setuphash1k[i] != NULL) i = (i + 1) % SETUPHASHSIZE;
+//@@    printf("Entrypoint %#" PRIxPTR " looks up as entry %d (%#" PRIxPTR ")\n",
+//@@        (uintptr_t)k, i, (uintptr_t)setuphash1k[i]);
+    if (setuphash1k[i] == NULL) return NULL;
+    p = (uint64_t *)setuphash1v[i];
+//@@    printf("name is <%.16s>\n", (const char *)p);
+    i = (int)((p[0] + p[1]) % SETUPHASHSIZE);
+//@@    printf("namehash = %d, s2k=%#" PRIxPTR " s2v=%#" PRIxPTR "\n", i, (uintptr_t)setuphash2k, (uintptr_t)setuphash2v);
+//@@    printf("setuphash2k[%d] = %#" PRIxPTR "\n", i, (uintptr_t)setuphash2k[i]);
+//@@    printf("setuphash2k[%d] = <%.16s>\n", i, setuphash2k[i]);
+    while (setuphash2k[i] != NULL &&
+           memcmp(setuphash2k[i], p, MAX_NAMESIZE) != 0)
+        i = (i + 1) % SETUPHASHSIZE;
+//@@    printf("converted entrypoint is %#" PRIxPTR "\n", (uintptr_t)setuphash2v[i]);
+    return setuphash2v[i];
 }
 
 uint32_t image_nblocks;
-uintptr_t image_blocks_by_age[16], image_blocks[16], image_bitmapsizes[16],
-    image_offsets[16], image_h1base[16];
+uintptr_t image_blocks_by_age[16], image_blocks[16],
+          image_bitmapsizes[16], image_offsets[16], image_h1base[16];
 uintptr_t image_fringe1;
 
-LispObject relocate(LispObject x) {
-  int i;
-  //@@     printf("\nrelocate x=%#" PRIxPTR "  %" PRIdPTR "\n", x, x);
-  switch (x & TAGBITS) {
-  case tagATOM:
-    if (x == NULLATOM)
-      return x;
-  case tagCONS:
-  case tagSYMBOL:
-  case tagFLOAT:
-    break; // These things actually need relocating.
-  default:
-    // case tagFIXNUM:
-    // case tagFORWARD:
-    // case tagHDR:
+LispObject relocate(LispObject x)
+{
+    int i;
+//@@     printf("\nrelocate x=%#" PRIxPTR "  %" PRIdPTR "\n", x, x);
+    switch (x & TAGBITS)
+    {   case tagATOM:
+           if (x == NULLATOM) return x;
+        case tagCONS:
+        case tagSYMBOL:
+        case tagFLOAT:
+            break; // These things actually need relocating.
+        default:
+//case tagFIXNUM:
+//case tagFORWARD:
+//case tagHDR:
+            return x;
+    }
+// Now x should be a reference into the image heap. I first want to
+// convert it into a simple offset from the start of the heap as if
+// the heap had all been put in a single contiguous chunk. If the
+// reference is not within the heap1 part of the image heap then I
+// have a corrupted image...
+    i = search16a((uintptr_t)x,
+        image_blocks[0], image_blocks[1], image_blocks[2], image_blocks[3],
+        image_blocks[4], image_blocks[5], image_blocks[6], image_blocks[7],
+        image_blocks[8], image_blocks[9], image_blocks[10],image_blocks[11],
+        image_blocks[12],image_blocks[13],image_blocks[14],image_blocks[15],
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+//@@     printf("i %x  %d\n", i, i);
+//@@     printf("image_offsets (x) = %#" PRIxPTR " image_blocks = %#" PRIxPTR "\n",
+//@@         image_offsets[i], image_blocks[i]);
+    x = image_offsets[i] + x - image_h1base[i];
+//@@     printf("x relative to image heap start = %#" PRIxPTR "\n", x);
+    i = search16a((uintptr_t)x,
+        blocks_offset[0], blocks_offset[1], blocks_offset[2], blocks_offset[3],
+        blocks_offset[4], blocks_offset[5], blocks_offset[6], blocks_offset[7],
+        blocks_offset[8], blocks_offset[9], blocks_offset[10],blocks_offset[11],
+        blocks_offset[12],blocks_offset[13],blocks_offset[14],blocks_offset[15],
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+//@@     printf("x will be in block %d (%#" PRIxPTR ")\n", i, blocks[i]);
+    x += ((block_header *)blocks[i])->h1base;
+//@@     printf("So relocated item is %" PRIdPTR " = %#" PRIxPTR "\n", x, x);
     return x;
-  }
-  // Now x should be a reference into the image heap. I first want to
-  // convert it into a simple offset from the start of the heap as if
-  // the heap had all been put in a single contiguous chunk. If the
-  // reference is not within the heap1 part of the image heap then I
-  // have a corrupted image...
-  i = search16a(
-      (uintptr_t)x, image_blocks[0], image_blocks[1], image_blocks[2],
-      image_blocks[3], image_blocks[4], image_blocks[5], image_blocks[6],
-      image_blocks[7], image_blocks[8], image_blocks[9], image_blocks[10],
-      image_blocks[11], image_blocks[12], image_blocks[13], image_blocks[14],
-      image_blocks[15], 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-  //@@     printf("i %x  %d\n", i, i);
-  //@@     printf("image_offsets (x) = %#" PRIxPTR " image_blocks = %#" PRIxPTR
-  //"\n",
-  //@@         image_offsets[i], image_blocks[i]);
-  x = image_offsets[i] + x - image_h1base[i];
-  //@@     printf("x relative to image heap start = %#" PRIxPTR "\n", x);
-  i = search16a((uintptr_t)x, blocks_offset[0], blocks_offset[1],
-                blocks_offset[2], blocks_offset[3], blocks_offset[4],
-                blocks_offset[5], blocks_offset[6], blocks_offset[7],
-                blocks_offset[8], blocks_offset[9], blocks_offset[10],
-                blocks_offset[11], blocks_offset[12], blocks_offset[13],
-                blocks_offset[14], blocks_offset[15], 0, 1, 2, 3, 4, 5, 6, 7, 8,
-                9, 10, 11, 12, 13, 14, 15);
-  //@@     printf("x will be in block %d (%#" PRIxPTR ")\n", i, blocks[i]);
-  x += ((block_header *)blocks[i])->h1base;
-  //@@     printf("So relocated item is %" PRIdPTR " = %#" PRIxPTR "\n", x, x);
-  return x;
 }
 
-void *relocate_fn(void *x) {
-  void *r = setuphashlookup(x);
-  uintptr_t rr;
-  if (r != NULL)
-    return r;
-  printf("Function entrypoint did not relocate\n");
-  rr = (LispObject)x;
-  // I must remove the tag bits before calling relocate because otherwise
-  // they might make the object appear to be a FIXNUM or other immediate
-  // data that would not need anything done to it.
-  rr = relocate(rr & ~(LispObject)TAGBITS) | (rr & TAGBITS);
-  // If, as here, the code pointer seemed to be in the heap I should probably
-  // verify that not only is it within heap1 but that it points at an
-  // object there that has a relevant header.
-  return (void *)rr;
+void *relocate_fn(void *x)
+{
+    void *r = setuphashlookup(x);
+    uintptr_t rr;
+    if (r != NULL) return r;
+    printf("Function entrypoint did not relocate\n");
+    rr = (LispObject)x;
+// I must remove the tag bits before calling relocate because otherwise
+// they might make the object appear to be a FIXNUM or other immediate
+// data that would not need anything done to it.
+    rr = relocate(rr & ~(LispObject)TAGBITS) | (rr & TAGBITS);
+// If, as here, the code pointer seemed to be in the heap I should probably
+// verify that not only is it within heap1 but that it points at an
+// object there that has a relevant header.
+    return (void *)rr;
 }
 
 // The following returns 0 on success and a line number on failure.
 
-int warm_start_1(gzFile f, int *errcode) {
-  uintptr_t i, b1;
-  uint32_t setupsize;
-  char(*imagesetup_names)[MAX_NAMESIZE];
-  void **imagesetup_defs;
-  uintptr_t fr1, lim1, total_size, remaining_size;
-  // I have the table of names of entrypoints that are defined by
-  // the kernel. Note that the table as present in the saved image may not
-  // be the same size as the one in the code I am executing, so I can not
-  // allocate fixed space for it. However while I reload an image file I will
-  // only be filling in heap1 with data, so the region that will count as
-  // heap2 is free. And since nothing at all is in that at present I can
-  // use it without formality. I am going to assume for now that I have
-  // more than enough space in the first block for all that I need.
-  fringe2 = ((block_header *)blocks_by_age[0])->h2base;
-  limit2 = ((block_header *)blocks_by_age[0])->h2top;
-  setupsize = read32(f);
-  // I will reject the image if the size of the setup table has changed by
-  // at least a factor of 2. That level of change would indicate such
-  // large adjustments that forcing all images to be re-built surely makes
-  // sense.
-  if (setupsize <= SETUPSIZE / 2 || setupsize >= 2 * SETUPSIZE)
-    return __LINE__;
-  imagesetup_names = (char(*)[MAX_NAMESIZE])h2alloc(setupsize * MAX_NAMESIZE);
-  if (imagesetup_names == NULL)
-    return __LINE__;
-  // Note that gzread and gzwrite return an int not an unsigned value, so
-  // when I want to check if they processed the expected number of bytes I
-  // cast the byte-count to an int even if it was a size_t to start with.
-  if (gzread(f, imagesetup_names, (unsigned int)(setupsize * MAX_NAMESIZE)) !=
-      (int)(setupsize * MAX_NAMESIZE))
-    return __LINE__;
-  imagesetup_defs = (void **)h2alloc(setupsize * sizeof(void *));
-  if (imagesetup_defs == NULL)
-    return __LINE__;
-  if (gzread(f, imagesetup_defs, (unsigned int)(setupsize * sizeof(void *))) !=
-      (int)(setupsize * sizeof(void *)))
-    return __LINE__;
-  //@@ // I will display the first 25 names just to convince myself that I have
-  //@@ // read them in OK.
-  //@@     for (i=0; i<setupsize && i<25; i++)
-  //@@     {   char *name = imagesetup_names[i];
-  //@@         printf("%d) %.*s %#" PRIxPTR "\n", i, MAX_NAMESIZE, name,
-  //(uintptr_t)imagesetup_defs[i]);
-  //@@     }
-  setuphash1k = (void **)h2alloc(SETUPHASHSIZE * sizeof(void *));
-  setuphash1v = (const char **)h2alloc(SETUPHASHSIZE * sizeof(char *));
-  setuphash2k = (const char **)h2alloc(SETUPHASHSIZE * sizeof(char *));
-  setuphash2v = (void **)h2alloc(SETUPHASHSIZE * sizeof(void *));
-  if (setuphash1k == NULL || setuphash1v == NULL || setuphash2k == NULL ||
-      setuphash2v == NULL)
-    return __LINE__;
-  memset(setuphash1k, 0, SETUPHASHSIZE * sizeof(void *));
-  memset(setuphash1v, 0, SETUPHASHSIZE * sizeof(char *));
-  memset(setuphash2k, 0, SETUPHASHSIZE * sizeof(char *));
-  memset(setuphash2v, 0, SETUPHASHSIZE * sizeof(void *));
-  // To map function entrypoints in the image file into ones in that are
-  // usable in the running system I first look up an associated name and then
-  // use that to find the new entrypoint. I have allocated and cleared the
-  // hash tables used for this - now populate them. The process should only
-  // ever insert items that are not already in the hash tables, and this
-  // simplifies the code somewhat.
-  for (i = 0; i < setupsize; i++) {
-    int h = HASHPTR(imagesetup_defs[i]);
-    //@@         printf("insert %.16s in imagehash\n", imagesetup_names[i]);
-    //@@         printf("def at %#" PRIxPTR " hashes to %d\n",
-    //(uintptr_t)imagesetup_defs[i], h);
-    while (setuphash1k[h] != NULL)
-      h = (h + 1) % SETUPHASHSIZE;
-    setuphash1k[h] = imagesetup_defs[i];
-    setuphash1v[h] = imagesetup_names[i];
-    //@@         printf("%d) %#" PRIxPTR " : %s\n", h,
-    //(uintptr_t)setuphash1k[h], setuphash1v[h]);
-  }
-  for (i = 0; i < SETUPSIZE; i++) {
-    const uint64_t *s = (const uint64_t *)setup_names[i];
-    // The next line computes a value based on the first 16 bytes of the
-    // name of an entrypoint. Since it is just used as as hash value the
-    // fact that the exact value loaded will depend on whether a big or
-    // little-endian machine is in use does not matter, and the fact that
-    // I insert each name just once means that it is Ok to avoid any
-    // real comparison of the strings concerned.
-    int h = (int)((s[0] + s[1]) % SETUPHASHSIZE);
-    while (setuphash2k[h] != NULL)
-      h = (h + 1) % SETUPHASHSIZE;
-    setuphash2k[h] = setup_names[i];
-    setuphash2v[h] = setup_defs[i];
-  }
-  printf("function pointer relocation tables now in place\n");
-  // The hash tables that cope with entrypoints are now in place - next
-  // the reliable heap bases can be reloaded. I am going to assume that
-  // the sizes of these match between image file and running system.
-  // I should probably encode the sizes as part of the image format so as
-  // to police that...
-  if (gzread(f, bases, (unsigned int)sizeof(bases)) != (int)sizeof(bases))
-    return __LINE__;
-  // A small reminder here: when I move to more complete Common Lisp
-  // support the single (and fixed size) hash table for use as an object
-  // list will need to be replaced with something much more elaborate.
-  // That change will render image files incompatible.
-  if (gzread(f, obhash, (unsigned int)sizeof(obhash)) != (int)sizeof(obhash))
-    return __LINE__;
-  printf("bases and obhash loaded\n");
-  if ((image_nblocks = read32(f)) == 0 || image_nblocks > 16)
-    return __LINE__;
-  printf("image_nblocks = %d\n", (int)image_nblocks);
-  if (gzread(f, image_blocks_by_age, (unsigned int)sizeof(blocks_by_age)) !=
-      (int)sizeof(blocks_by_age))
-    return __LINE__;
-  for (i = 0; i < image_nblocks; i++) {
-    uintptr_t nn;
-    if (gzread(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn))
-      return __LINE__;
-    image_bitmapsizes[i] = nn;
-  }
-  for (i = 0; i < image_nblocks; i++) {
-    uintptr_t nn;
-    if (gzread(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn))
-      return __LINE__;
-    image_h1base[i] = nn;
-  }
-  // image_fringe1 is the offset from h1base in the block that fringe1 is
-  // within.
-  if (gzread(f, &image_fringe1, (unsigned int)sizeof(image_fringe1)) !=
-      (int)sizeof(image_fringe1))
-    return __LINE__;
-  for (; i < 16; i++) {
-    image_h1base[i] = (uintptr_t)(-1);
-    image_bitmapsizes[i] = 0;
-  }
-  // I will now set up a map of offsets of the sections within the CURRENT
-  // heap...
-  total_size = 0;
-  for (i = 0; i < nblocks; i++) {
-    blocks_offset[i] = total_size;
-    total_size += 64 * ((block_header *)blocks_by_age[i])->halfbitmapsize;
-  }
-  for (; i < 16; i++)
-    blocks_offset[i] = total_size;
-  // Now back to dealing with the image heap.
-  total_size = 0;
-  for (i = 0; i < image_nblocks; i++) {
-    //@@        printf("block %#18" PRIxPTR " bitmapsize %#" PRIxPTR "\n",
-    //@@               image_blocks_by_age[i], image_bitmapsizes[i]);
-    image_offsets[i] = total_size * 64;
-    total_size += image_bitmapsizes[i];
-    printf("total size now %#" PRIxPTR "\n", total_size);
-  }
-  for (; i < 16; i++)
-    image_offsets[i] = total_size * 64;
-  //@@    for (i=0; i<16; i++)
-  //@@        printf("image_offset[%d] = %#" PRIxPTR "\n", i, image_offsets[i]);
-  // The total size recorded here is the size of bitmap data present in
-  // the image. The amount of heap will be 64 times as great.
-  // There is an issue whereby the final block dumped only had information
-  // written as far as data was valid.
-  total_size *= 64;
-  printf("size of whole image half-heap = %#" PRIxPTR "\n", total_size);
-  printf("final image block %#" PRIxPTR ", fringe1 = %#" PRIxPTR
-         ", length=%#" PRIxPTR "\n",
-         image_blocks_by_age[image_nblocks - 1], image_fringe1,
-         64 * image_bitmapsizes[image_nblocks - 1]);
-  assert(image_fringe1 >= 0);
-  assert(image_fringe1 < 64 * image_bitmapsizes[image_nblocks - 1]);
-  total_size -= (64 * image_bitmapsizes[image_nblocks - 1] - image_fringe1);
-  printf("Bytes of heap to reload = %" PRIdPTR "\n", total_size);
-  // Next I need to reload the body of the image. The version in the
-  // image file is a single chunk of bytes...
-  printf("Reloading the image will need around %#" PRIxPTR " bytes\n",
-         total_size);
-  // I suppose that if there was not enough memory already allocated I could
-  // try extending the heap somewhere around here. For now and for simplicity
-  // I will not do that.
-  //
-  // image_blocks needs to have the same blocks listed as image_blocks_by_age
-  // but sorted by address. Since there are at most 16 items I will use a simple
-  // insertion sort.
-  for (i = 0; i < image_nblocks; i++) {
-    uintptr_t j;
-    uintptr_t w;
-    w = image_blocks_by_age[i];
-    j = i;
-    while (j > 1 && w < image_blocks[j - 1]) {
-      image_blocks[j] = image_blocks[j - 1];
-      j = j - 1;
+int warm_start_1(gzFile f, int *errcode)
+{
+    uintptr_t i, b1;
+    uint32_t setupsize;
+    char (*imagesetup_names)[MAX_NAMESIZE];
+    void **imagesetup_defs;
+    uintptr_t fr1, lim1, total_size, remaining_size;
+// I have the table of names of entrypoints that are defined by
+// the kernel. Note that the table as present in the saved image may not
+// be the same size as the one in the code I am executing, so I can not
+// allocate fixed space for it. However while I reload an image file I will
+// only be filling in heap1 with data, so the region that will count as
+// heap2 is free. And since nothing at all is in that at present I can
+// use it without formality. I am going to assume for now that I have
+// more than enough space in the first block for all that I need.
+    fringe2 = ((block_header *)blocks_by_age[0])->h2base;
+    limit2 = ((block_header *)blocks_by_age[0])->h2top;
+    setupsize = read32(f);
+// I will reject the image if the size of the setup table has changed by
+// at least a factor of 2. That level of change would indicate such
+// large adjustments that forcing all images to be re-built surely makes
+// sense.
+    if (setupsize <= SETUPSIZE/2 || setupsize >= 2*SETUPSIZE) return __LINE__;
+    imagesetup_names = (char (*)[MAX_NAMESIZE])h2alloc(setupsize*MAX_NAMESIZE);    
+    if (imagesetup_names == NULL) return __LINE__;
+// Note that gzread and gzwrite return an int not an unsigned value, so
+// when I want to check if they processed the expected number of bytes I
+// cast the byte-count to an int even if it was a size_t to start with.
+    if (gzread(f, imagesetup_names, (unsigned int)(setupsize*MAX_NAMESIZE)) !=
+        (int)(setupsize*MAX_NAMESIZE)) return __LINE__;
+    imagesetup_defs = (void **)h2alloc(setupsize*sizeof(void *));
+    if (imagesetup_defs == NULL) return __LINE__;
+    if (gzread(f, imagesetup_defs, (unsigned int)(setupsize*sizeof(void *))) !=
+        (int)(setupsize*sizeof(void *))) return __LINE__;
+//@@ // I will display the first 25 names just to convince myself that I have
+//@@ // read them in OK.
+//@@     for (i=0; i<setupsize && i<25; i++)
+//@@     {   char *name = imagesetup_names[i];
+//@@         printf("%d) %.*s %#" PRIxPTR "\n", i, MAX_NAMESIZE, name, (uintptr_t)imagesetup_defs[i]);
+//@@     } 
+    setuphash1k = (void **)h2alloc(SETUPHASHSIZE*sizeof(void *));
+    setuphash1v = (const char **)h2alloc(SETUPHASHSIZE*sizeof(char *));
+    setuphash2k = (const char **)h2alloc(SETUPHASHSIZE*sizeof(char *));
+    setuphash2v = (void **)h2alloc(SETUPHASHSIZE*sizeof(void *));
+        if (setuphash1k == NULL ||
+        setuphash1v == NULL ||
+        setuphash2k == NULL ||
+        setuphash2v == NULL) return __LINE__;
+    memset(setuphash1k, 0, SETUPHASHSIZE*sizeof(void *));
+    memset(setuphash1v, 0, SETUPHASHSIZE*sizeof(char *));
+    memset(setuphash2k, 0, SETUPHASHSIZE*sizeof(char *));
+    memset(setuphash2v, 0, SETUPHASHSIZE*sizeof(void *));
+// To map function entrypoints in the image file into ones in that are
+// usable in the running system I first look up an associated name and then
+// use that to find the new entrypoint. I have allocated and cleared the
+// hash tables used for this - now populate them. The process should only
+// ever insert items that are not already in the hash tables, and this
+// simplifies the code somewhat.
+    for (i=0; i<setupsize; i++)
+    {   int h = HASHPTR(imagesetup_defs[i]);
+//@@         printf("insert %.16s in imagehash\n", imagesetup_names[i]);
+//@@         printf("def at %#" PRIxPTR " hashes to %d\n", (uintptr_t)imagesetup_defs[i], h);
+        while (setuphash1k[h] != NULL) h = (h + 1) % SETUPHASHSIZE;
+        setuphash1k[h] = imagesetup_defs[i];
+        setuphash1v[h] = imagesetup_names[i];
+//@@         printf("%d) %#" PRIxPTR " : %s\n", h, (uintptr_t)setuphash1k[h], setuphash1v[h]);
     }
-    image_blocks[j] = w;
-  }
-  // Fill out the end of image_blocks with an address higher than ay that
-  // I will ever use.
-  for (; i < 16; i++)
-    image_blocks[i] = (uintptr_t)(-1);
-  //@@    for (i=0; i<16; i++)
-  //@@        printf("image_blocks[%d] = %" PRIdPTR " = %#" PRIxPTR "\n",
-  //@@               i, image_blocks[i], image_blocks[i]);
-  // Now I need to load the heap data from my image file into the memory
-  // I have in the current running system.
-  block1 = 0;
-  fringe1 = ((block_header *)blocks_by_age[0])->h1base;
-  limit1 = ((block_header *)blocks_by_age[0])->h1top;
-  remaining_size = total_size;
-  while (remaining_size != 0) {
-    uintptr_t bs = remaining_size;
-    if (bs > 0x60000000)
-      bs = 0x40000000;
-    if (bs > limit1 - fringe1)
-      bs = limit1 - fringe1;
-    if (gzread(f, (void *)fringe1, (unsigned int)bs) != (int)bs)
-      return __LINE__;
-    fringe1 += bs;
-    remaining_size -= bs;
-    if (fringe1 == limit1) {
-      block1++;
-      if (block1 == nblocks) {
-        printf("Not enough memory allocated to reload this image\n");
-        // Allocate some more?
-        return __LINE__;
-      }
-      fringe1 = ((block_header *)blocks_by_age[block1])->h1base;
-      limit1 = ((block_header *)blocks_by_age[block1])->h1top;
+    for (i=0; i<SETUPSIZE; i++)
+    {   const uint64_t *s = (const uint64_t *)setup_names[i];
+// The next line computes a value based on the first 16 bytes of the
+// name of an entrypoint. Since it is just used as as hash value the
+// fact that the exact value loaded will depend on whether a big or
+// little-endian machine is in use does not matter, and the fact that
+// I insert each name just once means that it is Ok to avoid any
+// real comparison of the strings concerned.
+        int h = (int)((s[0] + s[1]) % SETUPHASHSIZE);
+        while (setuphash2k[h] != NULL) h = (h + 1) % SETUPHASHSIZE;
+        setuphash2k[h] = setup_names[i];
+        setuphash2v[h] = setup_defs[i];
     }
-  }
-  printf("heap1 data re-loaded\n");
-  // Note that the heap1 data may still be in a mangled byte-order, but I can
-  // not correct that without parsing it, and I can not do that until I have
-  // the associated bitmaps available.
-  // Now rather similar jobs to cope with the starts and fp bitmaps.
-  b1 = 0;
-  fr1 = (uintptr_t)((block_header *)blocks_by_age[0])->h1starts;
-  lim1 = ((block_header *)blocks_by_age[0])->halfbitmapsize;
-  memset((void *)fr1, 0, 2 * lim1);
-  lim1 += fr1;
-  remaining_size = (total_size + 63) / 64;
-  remaining_size = (remaining_size + 3) & ~(uintptr_t)3;
-  while (remaining_size != 0) {
-    uintptr_t bs = remaining_size;
-    if (bs > 0x60000000)
-      bs = 0x40000000;
-    if (bs > lim1 - fr1)
-      bs = lim1 - fr1;
-    if (gzread(f, (void *)fr1, (unsigned int)bs) != (int)bs)
-      return __LINE__;
-    fr1 += bs;
-    remaining_size -= bs;
-    if (fr1 == lim1) {
-      b1++;
-      if (b1 == nblocks)
-        return __LINE__; // inconsistency here.
-      fr1 = (uintptr_t)((block_header *)blocks_by_age[block1])->h1starts;
-      lim1 = fr1 + ((block_header *)blocks_by_age[block1])->halfbitmapsize;
-      memset((void *)fr1, 0, lim1 - fr1);
+    printf("function pointer relocation tables now in place\n");
+// The hash tables that cope with entrypoints are now in place - next
+// the reliable heap bases can be reloaded. I am going to assume that
+// the sizes of these match between image file and running system.
+// I should probably encode the sizes as part of the image format so as
+// to police that...
+    if (gzread(f, bases, (unsigned int)sizeof(bases)) !=
+        (int)sizeof(bases)) return __LINE__;
+// A small reminder here: when I move to more complete Common Lisp
+// support the single (and fixed size) hash table for use as an object
+// list will need to be replaced with something much more elaborate.
+// That change will render image files incompatible.
+    if (gzread(f, obhash, (unsigned int)sizeof(obhash)) !=
+        (int)sizeof(obhash)) return __LINE__;
+    printf("bases and obhash loaded\n");
+    if ((image_nblocks = read32(f)) == 0 ||
+         image_nblocks > 16) return __LINE__;
+    printf("image_nblocks = %d\n", (int)image_nblocks);
+    if (gzread(f, image_blocks_by_age,
+                  (unsigned int)sizeof(blocks_by_age)) !=
+        (int)sizeof(blocks_by_age)) return __LINE__;
+    for (i=0; i<image_nblocks; i++)
+    {   uintptr_t nn;
+        if (gzread(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn)) return __LINE__;
+        image_bitmapsizes[i] = nn;
     }
-  }
-  b1 = 0;
-  fr1 = (uintptr_t)((block_header *)blocks_by_age[0])->h1fp;
-  lim1 = ((block_header *)blocks_by_age[0])->halfbitmapsize;
-  memset((void *)fr1, 0, 2 * lim1);
-  lim1 += fr1;
-  remaining_size = (total_size + 63) / 64;
-  remaining_size = (remaining_size + 3) & ~(uintptr_t)3;
-  while (remaining_size != 0) {
-    uintptr_t bs = remaining_size;
-    if (bs > 0x60000000)
-      bs = 0x40000000;
-    if (bs > lim1 - fr1)
-      bs = lim1 - fr1;
-    if (gzread(f, (void *)fr1, (unsigned int)bs) != (int)bs)
-      return __LINE__;
-    fr1 += bs;
-    remaining_size -= bs;
-    if (fr1 == lim1) {
-      b1++;
-      if (b1 == nblocks)
-        return __LINE__; // inconsistency here.
-      fr1 = (uintptr_t)((block_header *)blocks_by_age[block1])->h1fp;
-      lim1 = fr1 + ((block_header *)blocks_by_age[block1])->halfbitmapsize;
-      memset((void *)fr1, 0, lim1 - fr1);
+    for (i=0; i<image_nblocks; i++)
+    {   uintptr_t nn;
+        if (gzread(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn)) return __LINE__;
+        image_h1base[i] = nn;
     }
-  }
-  // I will zero out the bitmaps in any blocks of memory that the image
-  // did not get as far as using.
-  for (i = b1 + 1; i < nblocks; i++) {
-    uint32_t *s = (uint32_t *)((block_header *)blocks_by_age[i])->h1starts;
-    uint32_t *f = (uint32_t *)((block_header *)blocks_by_age[i])->h1fp;
-    uintptr_t l = ((block_header *)blocks_by_age[i])->halfbitmapsize;
-    memset(s, 0, 2 * l);
-    memset(f, 0, 2 * l);
-  }
-  printf("heap1 data re-loaded\n");
-  // The FILEID at the end of an image file gives me a chance to confirm that
-  // I have kept in step while decoding it.
-  if (read32(f) != ENDID)
-    return __LINE__;
-  if (read32(f) != FILEID)
-    return __LINE__;
-  //@@    hexdump();
-  // Now the data is all in place, but heap1 may have its bytes in a bad order
-  // and it certainly contains address references that relate to the computer
-  // that created the image, not the one that is now running. So I need to
-  // scan and fix things up. First deal with the list bases...
-  for (i = 0; i < BASES_SIZE; i++)
-    bases[i] = relocate(bases[i]);
-  for (i = 0; i < OBHASH_SIZE; i++)
-    obhash[i] = relocate(obhash[i]);
-  // Now do a scan of the heap... There is a further horrid issue here. I
-  // reloaded the heap into what might have been several blocks, and
-  // it could be that some object (especially a vector) ended up straddling
-  // the end of one block and the start of the next. If the sequence of block
-  // sizes on the original and new machine are identical or if the whole
-  // reloaded image fits within a single block that will not happen, but
-  // I should not rely on those circumstances. When I come to reload a
-  // 32-bit image on a 64-bit computer or vice versa the chances of effective
-  // block sizes being different will increase. So in the scan here I
-  // just detect that case, and if it arises I will force a garbage
-  // collection just after the reload. The process of copying everything
-  // there will provide a chance to repair the mess.
-  b1 = 0;
-  fr1 = ((block_header *)blocks_by_age[b1])->h1base;
-  lim1 = ((block_header *)blocks_by_age[b1])->h1top;
-  while (fr1 != fringe1) {
-    LispObject h, w;
-    if (fr1 == lim1) {
-      b1++;
-      assert(b1 != nblocks);
-      fr1 = ((block_header *)blocks_by_age[b1])->h1base;
-      lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+// image_fringe1 is the offset from h1base in the block that fringe1 is
+// within.
+    if (gzread(f, &image_fringe1,
+                  (unsigned int)sizeof(image_fringe1)) !=
+        (int)sizeof(image_fringe1)) return __LINE__;
+    for (;i<16; i++)
+    {   image_h1base[i] = (uintptr_t)(-1);
+        image_bitmapsizes[i] = 0;
     }
-    if (getheapfp(fr1)) { // @@@@ re-byte-sex the float at fr1 here...
-      fr1 += 8;
-      continue;
+// I will now set up a map of offsets of the sections within the CURRENT
+// heap...
+    total_size = 0;
+    for (i=0; i<nblocks; i++)
+    {   blocks_offset[i] = total_size;
+        total_size += 64*((block_header *)blocks_by_age[i])->halfbitmapsize;
     }
-    if (!isHDR(h = qcar(fr1))) // A simple cons cell
+    for (;i<16; i++) blocks_offset[i] = total_size;
+// Now back to dealing with the image heap.
+    total_size = 0;
+    for (i=0; i<image_nblocks; i++)
     {
-      qcar(fr1) = relocate(h);
-      fr1 += sizeof(LispObject);
-      if (fr1 == lim1) {
-        b1++;
-        assert(b1 != nblocks);
-        fr1 = ((block_header *)blocks_by_age[b1])->h1base;
-        lim1 = ((block_header *)blocks_by_age[b1])->h1top;
-        abort();
-      }
-      qcar(fr1) = relocate(qcar(fr1));
-      fr1 += sizeof(LispObject);
-    } else // The item is one that uses a header
-      switch (h & TYPEBITS) {
-      case typeSYM:
-        w = fr1 + tagSYMBOL;
-        // qflags(w) does not need adjusting.
-        //
-        // If a symbol was represented as a C struct here I could use offsetof
-        // to control which fields needed copying while I cope with the mess of
-        // having memory in (possibly) several chunks. However it is not so the
-        // exact layout is relied upon here. The first chunk of code here
-        // relocates that part of the symbol that lies within the current
-        // segment of heap.
-        if (fr1 + sizeof(LispObject) < lim1)
-          qvalue(w) = relocate(qvalue(w));
-        if (fr1 + 2 * sizeof(LispObject) < lim1)
-          qplist(w) = relocate(qplist(w));
-        if (fr1 + 3 * sizeof(LispObject) < lim1)
-          qpname(w) = relocate(qpname(w));
-        if (fr1 + 4 * sizeof(LispObject) < lim1)
-          qlits(w) = relocate(qlits(w));
-        if (fr1 + 5 * sizeof(LispObject) < lim1)
-          qspare(w) = relocate(qspare(w));
-        if (fr1 + 6 * sizeof(LispObject) < lim1)
-          qdefn0(w) = (LispFn0 *)relocate_fn((void *)qdefn0(w));
-        if (fr1 + 7 * sizeof(LispObject) < lim1)
-          qdefn1(w) = (LispFn1 *)relocate_fn((void *)qdefn1(w));
-        if (fr1 + 8 * sizeof(LispObject) < lim1)
-          qdefn2(w) = (LispFn2 *)relocate_fn((void *)qdefn2(w));
-        if (fr1 + 9 * sizeof(LispObject) < lim1)
-          qdefn3(w) = (LispFn3 *)relocate_fn((void *)qdefn3(w));
-        if (fr1 + 10 * sizeof(LispObject) < lim1)
-          qdefn4(w) = (LispFn4 *)relocate_fn((void *)qdefn4(w));
-        if (fr1 + 11 * sizeof(LispObject) < lim1)
-          qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
-        fr1 += SYMSIZE * sizeof(LispObject);
-        // Now if the symbol was split across two heap segments I need to
-        // relocate the parts of it at the start of the next heap block. What a
-        // mess!
-        if (fr1 > lim1) {
-          uintptr_t leftover = fr1 - lim1, newblock;
-          b1++;
-          assert(b1 != nblocks);
-          fr1 = ((block_header *)blocks_by_age[b1])->h1base;
-          lim1 = ((block_header *)blocks_by_age[b1])->h1top;
-          newblock = fr1;
-          fr1 += (leftover - SYMSIZE * sizeof(LispObject));
-          w = fr1 + tagSYMBOL;
-          if (fr1 + sizeof(LispObject) >= newblock)
-            qvalue(w) = relocate(qvalue(w));
-          if (fr1 + 2 * sizeof(LispObject) >= newblock)
-            qplist(w) = relocate(qplist(w));
-          if (fr1 + 3 * sizeof(LispObject) >= newblock)
-            qpname(w) = relocate(qpname(w));
-          if (fr1 + 4 * sizeof(LispObject) >= newblock)
-            qlits(w) = relocate(qlits(w));
-          if (fr1 + 5 * sizeof(LispObject) >= newblock)
-            qspare(w) = relocate(qspare(w));
-          if (fr1 + 6 * sizeof(LispObject) >= newblock)
-            qdefn0(w) = (LispFn0 *)relocate_fn((void *)qdefn0(w));
-          if (fr1 + 7 * sizeof(LispObject) >= newblock)
-            qdefn1(w) = (LispFn1 *)relocate_fn((void *)qdefn1(w));
-          if (fr1 + 8 * sizeof(LispObject) >= newblock)
-            qdefn2(w) = (LispFn2 *)relocate_fn((void *)qdefn2(w));
-          if (fr1 + 9 * sizeof(LispObject) >= newblock)
-            qdefn3(w) = (LispFn3 *)relocate_fn((void *)qdefn3(w));
-          if (fr1 + 10 * sizeof(LispObject) >= newblock)
-            qdefn4(w) = (LispFn4 *)relocate_fn((void *)qdefn4(w));
-          if (fr1 + 11 * sizeof(LispObject) >= newblock)
-            qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
-          fr1 += SYMSIZE * sizeof(LispObject);
-          abort();
+//@@        printf("block %#18" PRIxPTR " bitmapsize %#" PRIxPTR "\n",
+//@@               image_blocks_by_age[i], image_bitmapsizes[i]);
+        image_offsets[i] = total_size*64;
+        total_size += image_bitmapsizes[i];
+        printf("total size now %#" PRIxPTR "\n", total_size);
+    }
+    for (;i<16; i++) image_offsets[i] = total_size*64;
+//@@    for (i=0; i<16; i++)
+//@@        printf("image_offset[%d] = %#" PRIxPTR "\n", i, image_offsets[i]);
+// The total size recorded here is the size of bitmap data present in
+// the image. The amount of heap will be 64 times as great.
+// There is an issue whereby the final block dumped only had information
+// written as far as data was valid.
+    total_size *= 64;
+    printf("size of whole image half-heap = %#" PRIxPTR "\n", total_size);
+    printf("final image block %#" PRIxPTR ", fringe1 = %#" PRIxPTR ", length=%#" PRIxPTR "\n",
+        image_blocks_by_age[image_nblocks-1],
+        image_fringe1,
+        64*image_bitmapsizes[image_nblocks-1]);
+    assert(image_fringe1 >= 0);
+    assert(image_fringe1 < 64*image_bitmapsizes[image_nblocks-1]);
+    total_size -=
+        (64*image_bitmapsizes[image_nblocks-1] - image_fringe1);
+    printf("Bytes of heap to reload = %" PRIdPTR "\n", total_size);
+// Next I need to reload the body of the image. The version in the
+// image file is a single chunk of bytes...
+    printf("Reloading the image will need around %#" PRIxPTR " bytes\n",
+           total_size);
+// I suppose that if there was not enough memory already allocated I could
+// try extending the heap somewhere around here. For now and for simplicity
+// I will not do that.
+//
+// image_blocks needs to have the same blocks listed as image_blocks_by_age
+// but sorted by address. Since there are at most 16 items I will use a simple
+// insertion sort.
+    for (i=0; i<image_nblocks; i++)
+    {   uintptr_t j;
+        uintptr_t w;
+        w = image_blocks_by_age[i];
+        j = i;
+        while (j>1 && w < image_blocks[j-1])
+        {   image_blocks[j] = image_blocks[j-1];
+            j = j-1;
         }
-        continue;
-      case typeSTRING:
-        // Pure byte-structured binary data, so nothing much to do here. But see
-        // the typeVEC code and think about VERY long strings that could overlap
-        // several memory blocks...
-        {
-          fr1 += ALIGN8(sizeof(LispObject) + veclength(h));
-          if (fr1 > lim1) {
-            uintptr_t leftover = fr1 - lim1;
-            b1++;
-            assert(b1 != nblocks);
-            fr1 = ((block_header *)blocks_by_age[b1])->h1base + leftover;
-            lim1 = ((block_header *)blocks_by_age[b1])->h1top;
-          }
-          continue;
+        image_blocks[j] = w;
+    }
+// Fill out the end of image_blocks with an address higher than ay that
+// I will ever use.
+    for (;i<16; i++) image_blocks[i] = (uintptr_t)(-1);
+//@@    for (i=0; i<16; i++)
+//@@        printf("image_blocks[%d] = %" PRIdPTR " = %#" PRIxPTR "\n",
+//@@               i, image_blocks[i], image_blocks[i]);
+// Now I need to load the heap data from my image file into the memory
+// I have in the current running system.
+    block1 = 0;
+    fringe1 = ((block_header *)blocks_by_age[0])->h1base;
+    limit1 = ((block_header *)blocks_by_age[0])->h1top;
+    remaining_size = total_size;
+    while (remaining_size != 0)
+    {   uintptr_t bs = remaining_size;
+        if (bs > 0x60000000) bs = 0x40000000;
+        if (bs > limit1 - fringe1) bs = limit1 - fringe1;
+        if (gzread(f, (void *)fringe1, (unsigned int)bs) != (int)bs) return __LINE__;
+        fringe1 += bs;
+        remaining_size -= bs;
+        if (fringe1 == limit1)
+        {   block1++;
+            if (block1 == nblocks)
+            {   printf("Not enough memory allocated to reload this image\n");
+// Allocate some more?
+                return __LINE__;
+            }
+            fringe1 = ((block_header *)blocks_by_age[block1])->h1base;
+            limit1 = ((block_header *)blocks_by_age[block1])->h1top;
         }
-      case typeBIGNUM:
-        // No relocation, but I need to fix up byte orders... This will all
-        // change soon as I move to supporting C-coded bignums using 32-bit
-        // digits, so I will not put a lot of work into it just now.
-        fr1 += ALIGN8(sizeof(LispObject) + veclength(h));
-        //@@ This does NOT cope with overlapping data in this case.
-        if (fr1 > lim1) {
-          uintptr_t leftover = fr1 - lim1;
-          assert(0); // Buggy at present.
-          b1++;
-          assert(b1 != nblocks);
-          fr1 = ((block_header *)blocks_by_age[b1])->h1base + leftover;
-          lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+    }
+    printf("heap1 data re-loaded\n");
+// Note that the heap1 data may still be in a mangled byte-order, but I can
+// not correct that without parsing it, and I can not do that until I have
+// the associated bitmaps available.
+// Now rather similar jobs to cope with the starts and fp bitmaps.
+    b1 = 0;
+    fr1 = (uintptr_t)((block_header *)blocks_by_age[0])->h1starts;
+    lim1 = ((block_header *)blocks_by_age[0])->halfbitmapsize;
+    memset((void *)fr1, 0, 2*lim1);
+    lim1 += fr1;
+    remaining_size = (total_size + 63)/64;
+    remaining_size = (remaining_size + 3) & ~(uintptr_t)3;
+    while (remaining_size != 0)
+    {   uintptr_t bs = remaining_size;
+        if (bs > 0x60000000) bs = 0x40000000;
+        if (bs > lim1 - fr1) bs = lim1 - fr1;
+        if (gzread(f, (void *)fr1, (unsigned int)bs) != (int)bs) return __LINE__;
+        fr1 += bs;
+        remaining_size -= bs;
+        if (fr1 == lim1)
+        {   b1++;
+            if (b1 == nblocks) return __LINE__; // inconsistency here.
+            fr1 = (uintptr_t)((block_header *)blocks_by_age[block1])->h1starts;
+            lim1 = fr1 + ((block_header *)blocks_by_age[block1])->halfbitmapsize;
+            memset((void *)fr1, 0, lim1-fr1);
         }
-        continue;
-      case typeVEC:
-      case typeEQHASH:
-      case typeEQHASHX:
-        fr1 += sizeof(LispObject);
-        w = veclength(h);
-        while (w > 0) {
-          if (fr1 == lim1) {
-            b1++;
+    }
+    b1 = 0;
+    fr1 = (uintptr_t)((block_header *)blocks_by_age[0])->h1fp;
+    lim1 = ((block_header *)blocks_by_age[0])->halfbitmapsize;
+    memset((void *)fr1, 0, 2*lim1);
+    lim1 += fr1;
+    remaining_size = (total_size + 63)/64;
+    remaining_size = (remaining_size + 3) & ~(uintptr_t)3;
+    while (remaining_size != 0)
+    {   uintptr_t bs = remaining_size;
+        if (bs > 0x60000000) bs = 0x40000000;
+        if (bs > lim1 - fr1) bs = lim1 - fr1;
+        if (gzread(f, (void *)fr1, (unsigned int)bs) != (int)bs) return __LINE__;
+        fr1 += bs;
+        remaining_size -= bs;
+        if (fr1 == lim1)
+        {   b1++;
+            if (b1 == nblocks) return __LINE__; // inconsistency here.
+            fr1 = (uintptr_t)((block_header *)blocks_by_age[block1])->h1fp;
+            lim1 = fr1 + ((block_header *)blocks_by_age[block1])->halfbitmapsize;
+            memset((void *)fr1, 0, lim1-fr1);
+        }
+    }
+// I will zero out the bitmaps in any blocks of memory that the image
+// did not get as far as using. 
+    for (i=b1+1; i<nblocks; i++)
+    {   uint32_t *s = (uint32_t *)((block_header *)blocks_by_age[i])->h1starts;
+        uint32_t *f = (uint32_t *)((block_header *)blocks_by_age[i])->h1fp;
+        uintptr_t l = ((block_header *)blocks_by_age[i])->halfbitmapsize;
+        memset(s, 0, 2*l);
+        memset(f, 0, 2*l);
+    }
+    printf("heap1 data re-loaded\n");
+// The FILEID at the end of an image file gives me a chance to confirm that
+// I have kept in step while decoding it.
+    if (read32(f) != ENDID) return __LINE__;
+    if (read32(f) != FILEID) return __LINE__;
+//@@    hexdump();
+// Now the data is all in place, but heap1 may have its bytes in a bad order
+// and it certainly contains address references that relate to the computer
+// that created the image, not the one that is now running. So I need to
+// scan and fix things up. First deal with the list bases...
+    for (i=0; i<BASES_SIZE; i++)
+        bases[i] = relocate(bases[i]);
+    for (i=0; i<OBHASH_SIZE; i++)
+        obhash[i] = relocate(obhash[i]);
+// Now do a scan of the heap... There is a further horrid issue here. I
+// reloaded the heap into what might have been several blocks, and
+// it could be that some object (especially a vector) ended up straddling
+// the end of one block and the start of the next. If the sequence of block
+// sizes on the original and new machine are identical or if the whole
+// reloaded image fits within a single block that will not happen, but
+// I should not rely on those circumstances. When I come to reload a
+// 32-bit image on a 64-bit computer or vice versa the chances of effective
+// block sizes being different will increase. So in the scan here I
+// just detect that case, and if it arises I will force a garbage
+// collection just after the reload. The process of copying everything
+// there will provide a chance to repair the mess.
+    b1 = 0;
+    fr1 = ((block_header *)blocks_by_age[b1])->h1base;
+    lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+    while (fr1 != fringe1)
+    {   LispObject h, w;
+        if (fr1 == lim1 )
+        {   b1++;
             assert(b1 != nblocks);
             fr1 = ((block_header *)blocks_by_age[b1])->h1base;
             lim1 = ((block_header *)blocks_by_age[b1])->h1top;
-          }
-          qcar(fr1) = relocate(qcar(fr1));
-          fr1 += sizeof(LispObject);
-          w -= sizeof(LispObject);
         }
-        fr1 = ALIGN8(fr1);
-        continue;
-      default:
-        // The spare codes!
-        assert(0);
-      }
-  }
-  printf("relocating code might be complete!!!\n");
-  // This setting may change from run to run so a setting saved in the
-  // image file should be clobbered here!
-  qvalue(echo) = interactive ? nil : lisptrue;
-  return 0;
+        if (getheapfp(fr1))
+        {   // @@@@ re-byte-sex the float at fr1 here...
+            fr1 += 8;
+            continue;
+        }
+        if (!isHDR(h = qcar(fr1))) // A simple cons cell
+        {   qcar(fr1) = relocate(h);
+            fr1 += sizeof(LispObject);
+            if (fr1 == lim1 )
+            {   b1++;
+                assert(b1 != nblocks);
+                fr1 = ((block_header *)blocks_by_age[b1])->h1base;
+                lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+                abort();
+            }
+            qcar(fr1) = relocate(qcar(fr1));
+            fr1 += sizeof(LispObject);
+        }
+        else              // The item is one that uses a header
+            switch (h & TYPEBITS)
+            {   case typeSYM:
+                    w = fr1 + tagSYMBOL;
+// qflags(w) does not need adjusting.
+//
+// If a symbol was represented as a C struct here I could use offsetof
+// to control which fields needed copying while I cope with the mess of
+// having memory in (possibly) several chunks. However it is not so the
+// exact layout is relied upon here. The first chunk of code here relocates
+// that part of the symbol that lies within the current segment of heap.
+                    if (fr1+sizeof(LispObject) < lim1)
+                        qvalue(w) = relocate(qvalue(w));
+                    if (fr1+2*sizeof(LispObject) < lim1)
+                        qplist(w) = relocate(qplist(w));
+                    if (fr1+3*sizeof(LispObject) < lim1)
+                        qpname(w) = relocate(qpname(w));
+                    if (fr1+4*sizeof(LispObject) < lim1)
+                        qlits(w)  = relocate(qlits(w));
+                    if (fr1+5*sizeof(LispObject) < lim1)
+                        qspare(w) = relocate(qspare(w));
+                    if (fr1+6*sizeof(LispObject) < lim1)
+                        qdefn0(w) = (LispFn0 *)relocate_fn((void *)qdefn0(w));
+                    if (fr1+7*sizeof(LispObject) < lim1)
+                        qdefn1(w) = (LispFn1 *)relocate_fn((void *)qdefn1(w));
+                    if (fr1+8*sizeof(LispObject) < lim1)
+                        qdefn2(w) = (LispFn2 *)relocate_fn((void *)qdefn2(w));
+                    if (fr1+9*sizeof(LispObject) < lim1)
+                        qdefn3(w) = (LispFn3 *)relocate_fn((void *)qdefn3(w));
+                    if (fr1+10*sizeof(LispObject) < lim1)
+                        qdefn4(w) = (LispFn4 *)relocate_fn((void *)qdefn4(w));
+                    if (fr1+11*sizeof(LispObject) < lim1)
+                        qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
+                    fr1 += SYMSIZE*sizeof(LispObject);
+// Now if the symbol was split across two heap segments I need to relocate
+// the parts of it at the start of the next heap block. What a mess!
+                    if (fr1 > lim1 )
+                    {   uintptr_t leftover = fr1 - lim1, newblock;
+                        b1++;
+                        assert(b1 != nblocks);
+                        fr1 = ((block_header *)blocks_by_age[b1])->h1base;
+                        lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+                        newblock = fr1;
+                        fr1 += (leftover - SYMSIZE*sizeof(LispObject));
+                        w = fr1 + tagSYMBOL;
+                        if (fr1+sizeof(LispObject) >= newblock)
+                            qvalue(w) = relocate(qvalue(w));
+                        if (fr1+2*sizeof(LispObject) >= newblock)
+                            qplist(w) = relocate(qplist(w));
+                        if (fr1+3*sizeof(LispObject) >= newblock)
+                            qpname(w) = relocate(qpname(w));
+                        if (fr1+4*sizeof(LispObject) >= newblock)
+                            qlits(w)  = relocate(qlits(w));
+                        if (fr1+5*sizeof(LispObject) >= newblock)
+                            qspare(w) = relocate(qspare(w));
+                        if (fr1+6*sizeof(LispObject) >= newblock)
+                            qdefn0(w) = (LispFn0 *)relocate_fn((void *)qdefn0(w));
+                        if (fr1+7*sizeof(LispObject) >= newblock)
+                            qdefn1(w) = (LispFn1 *)relocate_fn((void *)qdefn1(w));
+                        if (fr1+8*sizeof(LispObject) >= newblock)
+                            qdefn2(w) = (LispFn2 *)relocate_fn((void *)qdefn2(w));
+                        if (fr1+9*sizeof(LispObject) >= newblock)
+                            qdefn3(w) = (LispFn3 *)relocate_fn((void *)qdefn3(w));
+                        if (fr1+10*sizeof(LispObject) >= newblock)
+                            qdefn4(w) = (LispFn4 *)relocate_fn((void *)qdefn4(w));
+                        if (fr1+11*sizeof(LispObject) >= newblock)
+                            qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
+                        fr1 += SYMSIZE*sizeof(LispObject);
+                        abort();
+                    }
+                    continue;
+                case typeSTRING:
+// Pure byte-structured binary data, so nothing much to do here. But see
+// the typeVEC code and think about VERY long strings that could overlap
+// several memory blocks...
+                    {   fr1 += ALIGN8(sizeof(LispObject) + veclength(h));
+                        if (fr1 > lim1)
+                        {   uintptr_t leftover = fr1 - lim1;
+                            b1++;
+                            assert(b1 != nblocks);
+                            fr1 = ((block_header *)blocks_by_age[b1])->h1base + leftover;
+                            lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+                        }
+                        continue;
+                    }
+                case typeBIGNUM:
+// No relocation, but I need to fix up byte orders... This will all
+// change soon as I move to supporting C-coded bignums using 32-bit
+// digits, so I will not put a lot of work into it just now.
+                    fr1 += ALIGN8(sizeof(LispObject) + veclength(h));
+//@@ This does NOT cope with overlapping data in this case.
+                    if (fr1 > lim1)
+                    {   uintptr_t leftover = fr1 - lim1;
+                        assert(0); // Buggy at present.
+                        b1++;
+                        assert(b1 != nblocks);
+                        fr1 = ((block_header *)blocks_by_age[b1])->h1base + leftover;
+                        lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+                    }
+                    continue;
+                case typeVEC: case typeEQHASH: case typeEQHASHX:
+                    fr1 += sizeof(LispObject);
+                    w = veclength(h);
+                    while (w > 0)
+                    {   if (fr1 == lim1)
+                        {    b1++;
+                             assert(b1 != nblocks);
+                             fr1 = ((block_header *)blocks_by_age[b1])->h1base;
+                             lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+                        }
+                        qcar(fr1) = relocate(qcar(fr1));
+                        fr1 += sizeof(LispObject);
+                        w -= sizeof(LispObject);
+                    }
+                    fr1 = ALIGN8(fr1);
+                    continue;
+                default:
+                    // The spare codes!
+                    assert(0);
+            }
+    }
+    printf("relocating code might be complete!!!\n");
+// This setting may change from run to run so a setting saved in the
+// image file should be clobbered here!
+     qvalue(echo) = interactive ? nil : lisptrue;
+     return 0;
 }
 
-int warm_start(gzFile f, int *errcode) {
-  int32_t w;
-  char banner[64];
-  if (read32(f) != FILEID)
-    return 1;
-  if (gzread(f, &w, 4) != 4)
-    return 1;
-  if ((revision = read32(f)) == 0)
-    return 1;
-  version = (revision >>= 4) & 0x3fff;
-  revision >>= 14;
-  printf("Subversion revision %d VERSION %d.%.3d\n", revision, version / 1000,
-         version % 1000);
-  if (gzread(f, banner, 64) != 64)
-    return 1;
-  if (banner[0] != 0) {
-    printf("%.64s\n", banner);
-    fflush(stdout);
-  }
-  // The date and time of day that the image file was created, in textual
-  // form as in "Sat Apr 15 12:03:52 1972" (whatever the ctime() function
-  // delivers).
-  if (gzread(f, banner, 24) != 24)
-    return 1;
-  printf("Image created: %.24s\n", banner);
-  if (gzread(f, banner, 16) != 16)
-    return 1;
-  return warm_start_1(f, errcode);
+int warm_start(gzFile f, int *errcode)
+{
+    int32_t w;
+    char banner[64];
+    if (read32(f) != FILEID) return 1;
+    if (gzread(f, &w, 4) != 4) return 1;
+    if ((revision = read32(f)) == 0) return 1;
+    version = (revision >>= 4) & 0x3fff;
+    revision >>= 14;
+    printf("Subversion revision %d VERSION %d.%.3d\n",
+        revision, version/1000, version%1000);
+    if (gzread(f, banner, 64) != 64) return 1;
+    if (banner[0] != 0)
+    {   printf("%.64s\n", banner);
+        fflush(stdout);
+    }
+// The date and time of day that the image file was created, in textual
+// form as in "Sat Apr 15 12:03:52 1972" (whatever the ctime() function
+// delivers).
+    if (gzread(f, banner, 24) != 24) return 1;
+    printf("Image created: %.24s\n", banner);
+    if (gzread(f, banner, 16) != 16) return 1;
+    return warm_start_1(f, errcode);
 }
 
 // This writes out a 32-bit integer in a defined byte-order.
-int write32(gzFile f, uint32_t n) {
-  char b[4];
-  b[0] = n & 0xff;
-  b[1] = (n >> 8) & 0xff;
-  b[2] = (n >> 16) & 0xff;
-  b[3] = (n >> 24) & 0xff;
-  return gzwrite(f, b, 4);
+int write32(gzFile f, uint32_t n)
+{
+    char b[4];
+    b[0] = n & 0xff;
+    b[1] = (n >> 8) & 0xff;
+    b[2] = (n >> 16) & 0xff;
+    b[3] = (n >> 24) & 0xff;
+    return gzwrite(f, b, 4);
 }
+
 
 // The version number has an integer part and a fraction part, and I
 // want the fractional part to be in the range 100 to 999 please.
@@ -5898,7 +6659,7 @@ int write32(gzFile f, uint32_t n) {
 #define FVERSION 501
 #define stringify(x) #x
 char startup_banner[64] =
-    "VSL+ version " stringify(IVERSION) "." stringify(VERSION);
+   "VSL+ version " stringify(IVERSION) "." stringify(VERSION);
 
 // Return 0 on success, 1 on most failures and 2 if the gzclose failed.
 // In the case that things got as far as gzclose then errcode is set
@@ -5906,399 +6667,357 @@ char startup_banner[64] =
 // had gone wrong since gzerror can be used to discover what the problem
 // had been.
 
-static inline int write_image_1(gzFile f, int *errcode) {
-  size_t i;
-  // First a file-format identifier "vsl+"
-  if (write32(f, FILEID) != 4)
-    return 1;
-  // Next a 32-bit word that used to signal the byte-ordering and word-length
-  // of the machine that created the image.
-  {
-    int32_t n = 0x76543210;
-    if (gzwrite(f, &n, 4) != 4)
-      return 1;
-  }
-  // Another 32-bit word that has a revision number derived from subversion
-  // and information about the floating point format in use.
-  {
-    int revision;
-    char dollar[4];
-    // If I had a literal "$" at the start of the string I use to decode
-    // stuff here then overall it would be in exactly the format that subversion
-    // rewrites, and the "%d" in the middle would get replaced with a revision
-    // number next time I checked it in! So I match the "$" manually.
-    if (sscanf(setup_revision, "%cRevision: %d $", dollar, &revision) != 2 ||
-        dollar[0] != '$')
-      revision = 0;
-    int version = (1000 * IVERSION) + FVERSION;
-    if (write32(f, (revision << 18) | (version << 4)) != 4)
-      return 1;
-  }
-  // A banner of up to 64 characters that can be displayed early as the
-  // image starts to be loaded.
-  if (gzwrite(f, startup_banner, 64) != 64)
-    return 1;
-  // The date and time of day that the image file was created, in textual
-  // form as in "Sat Apr 15 12:03:52 1972" (whatever the ctime() function
-  // delivers).
-  {
-    time_t t0 = time(0);
-    const char *tt = ctime(&t0);
-    if (tt == NULL)
-      tt = "Mon Jan  1 00:00:00 1900"; // Date unknown
-    if (gzwrite(f, tt, 24) != 24)
-      return 1;
-  }
-  // 16 bytes whose purpose at present escapes me.
-  if (gzwrite(f, "0123456789abcdef", 16) != 16)
-    return 1; // junk at present
-  // Next I want to dump the table of entrypoints to functions that are
-  // built into the kernel. First I write an integer that indicates how
-  // many there are, then the table of their names and then the associated
-  // entry addresses. Note that the amount of data written for the table
-  // of entrypoints will be different as between 32 and 64-bit images.
-  if (write32(f, SETUPSIZE) != 4)
-    return 1; // items in setup table
-  if (gzwrite(f, setup_names, (unsigned int)sizeof(setup_names)) !=
-      (int)sizeof(setup_names))
-    return 1;
-  if (gzwrite(f, setup_defs, (unsigned int)sizeof(setup_defs)) !=
-      (int)sizeof(setup_defs))
-    return 1;
-  // There are a number of list bases that need to be saved. If the
-  // number or layout of these ever changes then it will be important to
-  // change VERSION, and a discrepancy in that must cause images to
-  // be rejected as un-re-loadable.
-  if (gzwrite(f, bases, (unsigned int)sizeof(bases)) != (int)sizeof(bases))
-    return 1;
-  if (gzwrite(f, obhash, (unsigned int)sizeof(obhash)) != (int)sizeof(obhash))
-    return 1;
-  // Finally I need to dump imformation relating to the heap. I need
-  // to record information about the way it was allocated in segments.
-  // Since there are at most 16 segments I will always write out the
-  // segment map information for all 16 potential segments.
-  if (write32(f, block1 + 1) != 4)
-    return 1;
-  if (gzwrite(f, blocks_by_age, (unsigned int)sizeof(blocks_by_age)) !=
-      (int)sizeof(blocks_by_age))
-    return 1;
-  for (i = 0; i <= block1; i++) {
-    block_header *b = (block_header *)blocks_by_age[i];
-    uintptr_t nn = b->halfbitmapsize;
-    printf("block size[%d] = %" PRIdPTR "\n", (int)i, nn);
-    if (gzwrite(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn))
-      return 1;
-  }
-  for (i = 0; i <= block1; i++) {
-    block_header *b = (block_header *)blocks_by_age[i];
-    uintptr_t nn = b->h1base;
-    printf("h1base[%d] = %#" PRIxPTR "\n", (int)i, nn);
-    if (gzwrite(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn))
-      return 1;
-  }
-  {
-    LispObject fringe1_offset =
-        fringe1 - ((block_header *)blocks_by_age[block1])->h1base;
-    printf("Write fringe1_offset = %#" PRIxPTR "\n", fringe1_offset);
-    if (gzwrite(f, &fringe1_offset, sizeof(fringe1_offset)) !=
-        (int)sizeof(fringe1_offset))
-      return 1;
-  }
-  for (i = 0; i <= block1; i++) {
-    block_header *b = (block_header *)blocks_by_age[i];
-    uintptr_t bs = 64 * b->halfbitmapsize;
-    char *p = (char *)b->h1base;
-    // I will write out the whole of most blocks, but for the final one
-    // (and fringe1 should point within it) I will only dump the part that
-    // is active.
-    if (i == block1)
-      bs = fringe1 - (b->h1base);
-    printf("Write out %" PRIdPTR " bytes of heap image\n", bs);
-    // Despite it feeling a bit ridiculous, I will allow for the possibility
-    // that a block that I am dumping is so large that mere 32-bit "unsigned
-    // int" values (as used by gzwrite for length information) will prove
-    // inadequate. In extreme cases I will write things out in multiple chunks
-    // of about a gigabyte each, with the final write using up to 1.5 Gbytes.
-    while (bs >= 0x60000000) {
-      if (gzwrite(f, p, 0x40000000) != 0x40000000)
-        return 1;
-      p += 0x40000000;
-      bs -= 0x40000000;
+static inline int write_image_1(gzFile f, int *errcode)
+{
+    size_t i;
+// First a file-format identifier "vsl+"
+    if (write32(f, FILEID) != 4) return 1;
+// Next a 32-bit word that used to signal the byte-ordering and word-length
+// of the machine that created the image.
+    {   int32_t n = 0x76543210;
+        if (gzwrite(f, &n, 4) != 4) return 1;
     }
-    if (gzwrite(f, p, (unsigned int)bs) != (int)bs)
-      return 1;
-  }
-  printf("Main heap bit written\n");
-  // Next bitmap information about the places where objects start in the heap.
-  // A bitmap is (1/64)th of the size of a main memory block, so by the
-  // time a bitmap is bigger than the Gigabyte that I use for writing
-  // chunks I will have 64G for one half of my main memory block, in
-  // other words I will be using over 128G in all. What is more that has to
-  // be a situation where I have at least 64G of ACTIVE data at the end of
-  // a garbage collection and that I wish to preserve.
-  for (i = 0; i <= block1; i++) {
-    block_header *b = (block_header *)blocks_by_age[i];
-    uintptr_t bs = b->halfbitmapsize;
-    char *p = (char *)b->h1starts;
-    // I will write out bytes from the bitmap sufficient to cover the
-    // active region of the final active segment of memory, and will always
-    // write a number of bytes that is a multiple of 4.
-    if (i == block1) {
-      bs = (fringe1 - (b->h1base) + 63) / 64;
-      bs = (bs + 3) & ~(uintptr_t)3;
+// Another 32-bit word that has a revision number derived from subversion
+// and information about the floating point format in use.
+    {   int revision;
+        char dollar[4];
+// If I had a literal "$" at the start of the string I use to decode
+// stuff here then overall it would be in exactly the format that subversion
+// rewrites, and the "%d" in the middle would get replaced with a revision
+// number next time I checked it in! So I match the "$" manually.
+        if (sscanf(setup_revision, "%cRevision: %d $", dollar, &revision)!=2 ||
+            dollar[0] != '$')
+            revision = 0;
+        int version = (1000*IVERSION) + FVERSION;
+        if (write32(f, (revision<<18) | (version<<4)) != 4)
+            return 1;
     }
-    while (bs >= 0x60000000) {
-      if (gzwrite(f, p, 0x40000000) != 0x40000000)
-        return 1;
-      p += 0x40000000;
-      bs -= 0x40000000;
+// A banner of up to 64 characters that can be displayed early as the
+// image starts to be loaded.
+    if (gzwrite(f, startup_banner, 64) != 64) return 1;
+// The date and time of day that the image file was created, in textual
+// form as in "Sat Apr 15 12:03:52 1972" (whatever the ctime() function
+// delivers).
+    {   time_t t0 = time(0);
+        const char *tt = ctime(&t0);
+        if (tt == NULL) tt = "Mon Jan  1 00:00:00 1900"; // Date unknown
+        if (gzwrite(f, tt, 24) != 24) return 1;
     }
-    if (gzwrite(f, p, (unsigned int)bs) != (int)bs)
-      return 1;
-  }
-  printf("starts bitmap done\n");
-  // Bitmap information about where there are floating point numbers stored.
-  for (i = 0; i <= block1; i++) {
-    block_header *b = (block_header *)blocks_by_age[i];
-    uintptr_t bs = b->halfbitmapsize;
-    char *p = (char *)b->h1fp;
-    if (i == block1) {
-      bs = (fringe1 - (b->h1base) + 63) / 64;
-      bs = (bs + 3) & ~(uintptr_t)3;
+// 16 bytes whose purpose at present escapes me.
+    if (gzwrite(f, "0123456789abcdef", 16) != 16) return 1; // junk at present
+// Next I want to dump the table of entrypoints to functions that are
+// built into the kernel. First I write an integer that indicates how
+// many there are, then the table of their names and then the associated
+// entry addresses. Note that the amount of data written for the table
+// of entrypoints will be different as between 32 and 64-bit images.
+    if (write32(f, SETUPSIZE) != 4) return 1; // items in setup table
+    if (gzwrite(f, setup_names, (unsigned int)sizeof(setup_names)) !=
+        (int)sizeof(setup_names)) return 1;
+    if (gzwrite(f, setup_defs, (unsigned int)sizeof(setup_defs)) !=
+        (int)sizeof(setup_defs)) return 1;
+// There are a number of list bases that need to be saved. If the
+// number or layout of these ever changes then it will be important to
+// change VERSION, and a discrepancy in that must cause images to
+// be rejected as un-re-loadable.
+    if (gzwrite(f, bases, (unsigned int)sizeof(bases)) !=
+        (int)sizeof(bases)) return 1;
+    if (gzwrite(f, obhash, (unsigned int)sizeof(obhash)) !=
+        (int)sizeof(obhash)) return 1;
+// Finally I need to dump imformation relating to the heap. I need
+// to record information about the way it was allocated in segments.
+// Since there are at most 16 segments I will always write out the
+// segment map information for all 16 potential segments.
+    if (write32(f, block1+1) != 4) return 1;
+    if (gzwrite(f, blocks_by_age, (unsigned int)sizeof(blocks_by_age)) !=
+        (int)sizeof(blocks_by_age)) return 1;
+    for (i=0; i<=block1; i++)
+    {   block_header *b = (block_header *)blocks_by_age[i];
+        uintptr_t nn = b->halfbitmapsize;
+        printf("block size[%d] = %" PRIdPTR "\n", (int)i, nn);
+        if (gzwrite(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn)) return 1;
     }
-    while (bs >= 0x60000000) {
-      if (gzwrite(f, p, 0x40000000) != 0x40000000)
-        return 1;
-      p += 0x40000000;
-      bs -= 0x40000000;
+    for (i=0; i<=block1; i++)
+    {   block_header *b = (block_header *)blocks_by_age[i];
+        uintptr_t nn = b->h1base;
+        printf("h1base[%d] = %#" PRIxPTR "\n", (int)i, nn);
+        if (gzwrite(f, &nn, (unsigned int)sizeof(nn)) != (int)sizeof(nn)) return 1;
     }
-    if (gzwrite(f, p, (unsigned int)bs) != (int)bs)
-      return 1;
-  }
-  printf("fp bitmap done\n");
-  // That is the lot. I will write a second copy of the marker word
-  // since that will help verify that everything is present.
-  if (write32(f, ENDID) != 4)
-    return 1;
-  if (write32(f, FILEID) != 4)
-    return 1;
-  if ((*errcode = gzclose(f)) == Z_OK)
-    return 0; // Success!
-  return 2;
+    {   LispObject fringe1_offset = fringe1 -
+           ((block_header *)blocks_by_age[block1])->h1base;
+        printf("Write fringe1_offset = %#" PRIxPTR "\n", fringe1_offset);
+        if (gzwrite(f, &fringe1_offset, sizeof(fringe1_offset)) !=
+            (int)sizeof(fringe1_offset)) return 1;
+    }
+    for (i=0; i<=block1; i++)
+    {   block_header *b = (block_header *)blocks_by_age[i];
+        uintptr_t bs = 64*b->halfbitmapsize;
+        char *p = (char *)b->h1base;
+// I will write out the whole of most blocks, but for the final one
+// (and fringe1 should point within it) I will only dump the part that
+// is active.
+        if (i==block1) bs = fringe1-(b->h1base);
+        printf("Write out %" PRIdPTR " bytes of heap image\n", bs);
+// Despite it feeling a bit ridiculous, I will allow for the possibility
+// that a block that I am dumping is so large that mere 32-bit "unsigned int"
+// values (as used by gzwrite for length information) will prove inadequate.
+// In extreme cases I will write things out in multiple chunks of
+// about a gigabyte each, with the final write using up to 1.5 Gbytes.
+        while (bs >= 0x60000000)
+        {   if (gzwrite(f, p, 0x40000000) != 0x40000000) return 1;
+            p += 0x40000000;
+            bs -= 0x40000000;
+        }
+        if (gzwrite(f, p, (unsigned int)bs) != (int)bs) return 1;
+    }
+    printf("Main heap bit written\n");
+// Next bitmap information about the places where objects start in the heap.
+// A bitmap is (1/64)th of the size of a main memory block, so by the
+// time a bitmap is bigger than the Gigabyte that I use for writing
+// chunks I will have 64G for one half of my main memory block, in
+// other words I will be using over 128G in all. What is more that has to
+// be a situation where I have at least 64G of ACTIVE data at the end of
+// a garbage collection and that I wish to preserve.
+    for (i=0; i<=block1; i++)
+    {   block_header *b = (block_header *)blocks_by_age[i];
+        uintptr_t bs = b->halfbitmapsize;
+        char *p = (char *)b->h1starts;
+// I will write out bytes from the bitmap sufficient to cover the
+// active region of the final active segment of memory, and will always
+// write a number of bytes that is a multiple of 4.
+        if (i==block1)
+        {   bs = (fringe1-(b->h1base) + 63)/64;
+            bs = (bs + 3) & ~(uintptr_t)3;
+        }
+        while (bs >= 0x60000000)
+        {   if (gzwrite(f, p, 0x40000000) != 0x40000000) return 1;
+            p += 0x40000000;
+            bs -= 0x40000000;
+        }
+        if (gzwrite(f, p, (unsigned int)bs) != (int)bs) return 1;
+    }
+    printf("starts bitmap done\n");
+// Bitmap information about where there are floating point numbers stored.
+    for (i=0; i<=block1; i++)
+    {   block_header *b = (block_header *)blocks_by_age[i];
+        uintptr_t bs = b->halfbitmapsize;
+        char *p = (char *)b->h1fp;
+        if (i==block1)
+        {   bs = (fringe1-(b->h1base) + 63)/64;
+            bs = (bs + 3) & ~(uintptr_t)3;
+        }
+        while (bs >= 0x60000000)
+        {   if (gzwrite(f, p, 0x40000000) != 0x40000000) return 1;
+            p += 0x40000000;
+            bs -= 0x40000000;
+        }
+        if (gzwrite(f, p, (unsigned int)bs) != (int)bs) return 1;
+    }
+    printf("fp bitmap done\n");
+// That is the lot. I will write a second copy of the marker word
+// since that will help verify that everything is present.
+    if (write32(f, ENDID) != 4) return 1;
+    if (write32(f, FILEID) != 4) return 1;
+    if ((*errcode = gzclose(f)) == Z_OK) return 0; // Success!
+    return 2;
 }
 
-void write_image(gzFile f) {
-  int errcode;
-  inner_reclaim(C_stackbase); // To compact memory.
-  inner_reclaim(C_stackbase); // in the conservative case GC twice.
-  hexdump();
-  switch (write_image_1(f, &errcode)) {
-  default:
+void write_image(gzFile f)
+{
+    int errcode;
+    inner_reclaim(C_stackbase); // To compact memory.
+    inner_reclaim(C_stackbase); // in the conservative case GC twice.
+    hexdump();
+    switch (write_image_1(f, &errcode))
+    {
+    default:
     // case 0:
-    printf("image written OK\n");
-    return;
-  case 1:
-    gzerror(f, &errcode);
-    gzclose(f);
-    // drop through;
-  case 2:
-    if (errcode == Z_ERRNO)
-      printf("+++ Error writing image file (code=%d)\n", errno);
-    else
-      printf("+++ Error compressing image file (code=%d)\n", errcode);
-    my_exit(EXIT_FAILURE);
-  }
+        printf("image written OK\n");
+        return;
+    case 1:
+        gzerror(f, &errcode);
+        gzclose(f);
+        // drop through;
+    case 2:
+        if (errcode == Z_ERRNO)
+            printf("+++ Error writing image file (code=%d)\n", errno);
+        else printf("+++ Error compressing image file (code=%d)\n", errcode);
+        my_exit(EXIT_FAILURE);
+    }
 }
 
 static void el_tidy() {
-  el_end(el_struct);
-  history_end(el_history);
+    el_end(el_struct);
+    history_end(el_history);
 }
 
 char the_prompt[] = "> ";
 
-static char *get_prompt(EditLine *el) { return the_prompt; }
-
-void setup_prompt() {
-  stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
-  if (stdin_tty) {
-    el_struct = el_init("vsl", stdin, stdout, stderr);
-    el_history = history_init();
-
-    atexit(el_tidy);
-    history(el_history, &el_history_event, H_SETSIZE, 1000);
-    el_set(el_struct, EL_PROMPT, get_prompt);
-    el_set(el_struct, EL_HIST, history, el_history);
-    el_set(el_struct, EL_EDITOR, "emacs"); // perhaps more intuitive than vim
-  }
+static char *get_prompt(EditLine *el)
+{   return the_prompt;
 }
 
-int main(int argc, char *argv[]) {
-  setup_prompt();
-  const char *inputfilename = NULL;
-  void *pool;
-  //@@#ifdef DEBUG
-  setvbuf(stdout, NULL, _IONBF, 0);
-  //@@#endif // DEBUG
-  //
-  // The "+16" here is to allow for aliging up memory to be at addresses
-  // that are multiples of 8.
-  pool = allocate_memory(sizeof(block_header) + (2 * 64 + 5) * HALFBITMAPSIZE +
-                         16);
-  if (pool == NULL) {
-    printf("Not enough memory available: Unable to proceed\n");
-    my_exit(EXIT_FAILURE);
-  }
-  // I only fill in one entry in the memory block at this stage.
-  ((block_header *)pool)->halfbitmapsize = HALFBITMAPSIZE;
-  blocks[0] = blocks_by_age[0] = (uintptr_t)pool;
-  // All others point to the top of virtual memory.
-  for (size_t i = 1; i < 16; i++)
-    blocks[i] = blocks_by_age[i] = (uintptr_t)(-1);
-  nblocks = 1;
-  C_stackbase = (LispObject *)((intptr_t)&inputfilename & -sizeof(LispObject));
-  coldstart = 0;
-  interactive = 1;
+void setup_prompt() {
+    stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
+    if (stdin_tty) {
+        el_struct = el_init("vsl", stdin, stdout, stderr);
+        el_history = history_init();
+
+        atexit(el_tidy);
+        history(el_history, &el_history_event, H_SETSIZE, 1000);
+        el_set(el_struct, EL_PROMPT, get_prompt);
+        el_set(el_struct, EL_HIST, history, el_history);
+        el_set(el_struct, EL_EDITOR, "emacs"); // perhaps more intuitive than vim
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    setup_prompt();
+    const char *inputfilename = NULL;
+    void *pool;
+//@@#ifdef DEBUG
+    setvbuf(stdout, NULL, _IONBF, 0);
+//@@#endif // DEBUG
+//
+// The "+16" here is to allow for aliging up memory to be at addresses
+// that are multiples of 8.
+    pool = allocate_memory(sizeof(block_header) +
+                           (2*64 + 5)*HALFBITMAPSIZE + 16);
+    if (pool == NULL)
+    {   printf("Not enough memory available: Unable to proceed\n");
+        my_exit(EXIT_FAILURE);
+    }
+// I only fill in one entry in the memory block at this stage.
+    ((block_header *)pool)->halfbitmapsize = HALFBITMAPSIZE;
+    blocks[0] = blocks_by_age[0] = (uintptr_t)pool;
+// All others point to the top of virtual memory.
+    for (size_t i=1; i<16; i++) blocks[i] = blocks_by_age[i] = (uintptr_t)(-1);
+    nblocks = 1;
+    C_stackbase = (LispObject *)((intptr_t)&inputfilename &
+                                    -sizeof(LispObject));
+    coldstart = 0;
+    interactive = 1;
 #ifdef DEBUG
-  logfile = fopen("vsl.log", "w");
+    logfile = fopen("vsl.log", "w");
 #endif // DEBUG
 #ifdef __WIN32__
-  size_t i = strlen(argv[0]);
-  if (strcmp(argv[0] + i - 4, ".exe") == 0)
-    i -= 4;
-  sprintf(imagename, "%.*s.img", i, argv[0]);
-#else  // __WIN32__
-  sprintf(imagename, "%s.img", argv[0]);
+    size_t i = strlen(argv[0]);
+    if (strcmp(argv[0]+i-4, ".exe") == 0) i -= 4;
+    sprintf(imagename, "%.*s.img", i, argv[0]);
+#else // __WIN32__
+    sprintf(imagename, "%s.img", argv[0]);
 #endif // __WIN32__
-  for (int i = 1; i < argc; i++) {
-    // I have some VERY simple command-line options here.
-    //        -z         do a "cold start".
-    //        -ifilename use that as image file
-    //        filename   read from that file rather than from the standard
-    //        input.
-    if (strcmp(argv[i], "-z") == 0)
-      coldstart = 1;
-    else if (strncmp(argv[i], "-i", 2) == 0)
-      strcpy(imagename, argv[i] + 2);
-    else if (argv[i][0] != '-')
-      inputfilename = argv[i], interactive = 0;
-  }
-  printf("VSL version %d.%.3d\n", IVERSION, FVERSION);
-  fflush(stdout);
-  linepos = 0;
-  for (size_t i = 0; i < MAX_LISPFILES; i++)
-    lispfiles[i] = 0;
-  lispfiles[0] = stdin;
-  lispfiles[1] = stdout;
-  lispfiles[2] = stderr;
-  lispfiles[3] = stdin;
-  file_direction = (1 << 1) | (1 << 2); // 1 bits for writable files.
-  lispin = 3;
-  lispout = 1;
-  if (inputfilename != NULL) {
-    FILE *in = fopen(inputfilename, "r");
-    if (in == NULL)
-      printf("Unable to read from %s, so using standard input\n",
-             inputfilename);
-    else
-      lispfiles[3] = in;
-  }
-  boffop = 0;
-  for (;;) // This loop is for restart-lisp and preserve.
-  {
-    allocateheap();
-    // A warm start will read an image file which it expects to have been
-    // made by a previous use of vsl.
-    if (coldstart)
-      cold_start();
-    else {
-      gzFile f = gzopen(imagename, "rb");
-      int i, errcode;
-      if (f == NULL) {
-        printf("Error: unable to open image for reading\n");
-        my_exit(EXIT_FAILURE);
-      }
-      if ((i = warm_start(f, &errcode)) != 0) {
-        gzerror(f, &errcode);
-        gzclose(f);
-        // First case is when gzread has not reported any problems but when the
-        // internal logic in warm_start has detected some inconsiency.
-        if (errcode == Z_OK)
-          printf("+++ Error parsing file (code=%d)\n", i);
-        // Second case is if the operating system reported trouble reading the
-        // image file.
-        else if (errcode == Z_ERRNO)
-          printf("+++ Error reading image file (code=%d/%d)\n", errno, i);
-        // Third case is when gzread finds data in a format that it objects to.
-        else
-          printf("+++ Error decompressing image file (code=%d/%d)\n", errcode,
-                 i);
-        my_exit(EXIT_FAILURE);
-      }
-    }
-    // Any predefined specified on the command-line using -Dxx=yy are
-    // instated or re-instated here so they apply even after restart!-lisp.
-    for (int i = 1; i < argc; i++) {
-      if (argv[i][0] == '-' && argv[i][1] == 'D') {
-        const char *d1 = strchr(argv[i], '=');
-        if (d1 == NULL)
-          continue;
-        // In general through setup (and I count this as still being setup)
-        // I will code on the basis that there will not be any garbage
-        // collection so I do not need to think about the effects of data
-        // movement during GC.
-        qvalue(lookup(argv[i] + 2, (d1 - argv[i]) - 2, 3)) =
-            makestring(d1 + 1, strlen(d1 + 1));
-      }
-    }
-    fflush(stdout);
-    curchar = '\n';
-    symtype = '?';
-    cursym = nil;
-    if (boffop == 0) // Use standard restart function from image.
+    for (int i=1; i<argc; i++)
     {
-      if (restartfn == nil)
-        readevalprint(0);
-      else
-        Lapply(nil, restartfn, nil);
-    } else {
-      LispObject x, data = makestring(boffo, boffop);
-      data = Lcompress(nil, Lexplodec(nil, data));
-      x = qcar(data); // 'fn or '(module fn)
-      if (isCONS(x)) {
-        Lload_module(nil, qcar(x));
-        x = qcar(qcdr(x));
-      }
-      Lapply(nil, x, qcdr(data));
+// I have some VERY simple command-line options here.
+//        -z         do a "cold start".
+//        -ifilename use that as image file
+//        filename   read from that file rather than from the standard input.
+        if (strcmp(argv[i], "-z") == 0) coldstart = 1;
+        else if (strncmp(argv[i], "-i", 2) == 0) strcpy(imagename, argv[i]+2);
+        else if (argv[i][0] != '-') inputfilename = argv[i], interactive = 0;
     }
-    if ((unwindflag & unwindPRESERVE) != 0) {
-      gzFile f = gzopen(imagename, "wbT");
-      if (f == NULL)
-        printf("\n+++ Unable to open %s for writing\n", imagename);
-      else
-        write_image(f);
-
-      // A cautious person would have checked for error codes returned by the
-      // above calls to write and close. I omit that here to be concise.
+    printf("VSL version %d.%.3d\n", IVERSION, FVERSION); fflush(stdout);
+    linepos = 0;
+    for (size_t i=0; i<MAX_LISPFILES; i++) lispfiles[i] = 0;
+    lispfiles[0] = stdin;   lispfiles[1] = stdout;
+    lispfiles[2] = stderr;  lispfiles[3] = stdin;
+    file_direction = (1<<1) | (1<<2); // 1 bits for writable files.
+    lispin = 3; lispout = 1;
+    if (inputfilename != NULL)
+    {   FILE *in = fopen(inputfilename, "r");
+        if (in == NULL)
+            printf("Unable to read from %s, so using standard input\n",
+                   inputfilename);
+        else lispfiles[3] = in;
     }
-    if ((unwindflag & unwindRESTART) == 0)
-      break;
-    unwindflag = unwindNONE;
     boffop = 0;
-    if (qcar(work1) == nil)
-      coldstart = 1;
-    else if (qcar(work1) == lisptrue)
-      coldstart = 0;
-    else {
-      int save = lispout;
-      lispout = -2;
-      internalprint(work1);
-      wrch(0);
-      lispout = save;
-      coldstart = 0;
+    for (;;) // This loop is for restart-lisp and preserve.
+    {   allocateheap();
+// A warm start will read an image file which it expects to have been
+// made by a previous use of vsl.
+        if (coldstart) cold_start();
+        else
+        {   gzFile f = gzopen(imagename, "rb");
+            int i, errcode;
+            if (f == NULL)
+            {   printf("Error: unable to open image for reading\n");
+                my_exit(EXIT_FAILURE);
+            }
+            if ((i = warm_start(f, &errcode)) != 0)
+            {
+                gzerror(f, &errcode);
+                gzclose(f);
+// First case is when gzread has not reported any problems but when the
+// internal logic in warm_start has detected some inconsiency.
+                if (errcode == Z_OK)
+                    printf("+++ Error parsing file (code=%d)\n", i);
+// Second case is if the operating system reported trouble reading the
+// image file.
+                else if (errcode == Z_ERRNO)
+                    printf("+++ Error reading image file (code=%d/%d)\n",
+                           errno, i);
+// Third case is when gzread finds data in a format that it objects to.
+                else printf("+++ Error decompressing image file (code=%d/%d)\n",
+                            errcode, i);
+                my_exit(EXIT_FAILURE);
+            }
+        }
+// Any predefined specified on the command-line using -Dxx=yy are
+// instated or re-instated here so they apply even after restart!-lisp.
+        for (int i=1; i<argc; i++)
+        {   if (argv[i][0] == '-' && argv[i][1] == 'D')
+            {   const char *d1 = strchr(argv[i], '=');
+                if (d1 == NULL) continue;
+// In general through setup (and I count this as still being setup)
+// I will code on the basis that there will not be any garbage collection
+// so I do not need to think about the effects of data movement during GC.
+                qvalue(lookup(argv[i]+2, (d1-argv[i])-2, 3)) =
+                    makestring(d1+1, strlen(d1+1));
+            }
+        }
+        fflush(stdout);
+        curchar = '\n'; symtype = '?'; cursym = nil;
+        if (boffop == 0) // Use standard restart function from image.
+        {   if (restartfn == nil) readevalprint(0);
+            else Lapply(nil, restartfn, nil);
+        }
+        else
+        {   LispObject x, data = makestring(boffo, boffop);
+            data = Lcompress(nil, Lexplodec(nil, data));
+            x = qcar(data);   // 'fn or '(module fn)
+            if (isCONS(x))
+            {   Lload_module(nil, qcar(x));
+                x = qcar(qcdr(x));
+            }
+            Lapply(nil, x, qcdr(data));
+        }
+        if ((unwindflag & unwindPRESERVE) != 0)
+        {   gzFile f = gzopen(imagename, "wbT");
+            if (f == NULL)
+                printf("\n+++ Unable to open %s for writing\n", imagename);
+            else write_image(f);
+
+// A cautious person would have checked for error codes returned by the
+// above calls to write and close. I omit that here to be concise.
+        }
+        if ((unwindflag & unwindRESTART) == 0) break;
+        unwindflag = unwindNONE;
+        boffop = 0;
+        if (qcar(work1) == nil) coldstart = 1;
+        else if (qcar(work1) == lisptrue) coldstart = 0;
+        else
+        {   int save = lispout;
+            lispout = -2;
+            internalprint(work1);
+            wrch(0);
+            lispout = save;
+            coldstart = 0;
+        }
     }
-  }
-  return 0;
+    return 0;
 }
 
 // end of main source file.
+
+
