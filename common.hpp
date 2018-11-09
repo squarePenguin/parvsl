@@ -151,7 +151,7 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-#define MEM 128
+#define MEM 1024
 #endif // MEM
 
 #define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))

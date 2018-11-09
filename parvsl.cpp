@@ -463,6 +463,7 @@ printf("allocateheap: b=h2[%" PRIdPTR "] = %#" PRIxPTR "\n", i, b->h2base);
     limit1  = ((block_header *)blocks_by_age[0])->h1top;
     limit2  = ((block_header *)blocks_by_age[0])->h2top;
     heap1_pinchain = heap2_pinchain = packfixnum(0);
+    par::reset_segments();
 }
 
 // Now I have enough to let me define various allocation functions.
@@ -1190,9 +1191,6 @@ volatile int volatile_variable = 12345;
 // VB: For now I naively lock this. Will probably very slow.
 std::mutex check_space_mutex;
 
-int num_allocs = 0;
-int alc = 0;
-
 void check_space(int len, int line)
 {
 // The value passed will always be a multiple of 8. Ensure that that
@@ -1203,10 +1201,6 @@ void check_space(int len, int line)
 // memory blocks here will be a little tedious and coule be improved by
 // checking the bitmap word at a time not bit at a time.
 
-    // assert(len <= par::Thread_data::SEGMENT_SIZE); // TODO VB: ow to fix this?
-    // VB: Maybe allocate multiple segments at once
-    // printf("check_space len %d\n", len);
-    num_allocs += 1;
     intptr_t i;
     for (;;) // loop for when pinned items intrude.
     {
@@ -1214,23 +1208,14 @@ void check_space(int len, int line)
         if (par::thread_data.segment_fringe + len >= par::thread_data.segment_limit) {
 
             std::lock_guard<std::mutex> lock(check_space_mutex);
-            int a = par::Thread_data::SEGMENT_SIZE;
+            int a = par::Thread_data::SEGMENT_SIZE; // Doesn't compile without the indirection
             uintptr_t size = std::max(a, len);
 
-            // printf("segfringe %llu seglimit %llu size %d \n", par::thread_data.segment_fringe, par::thread_data.segment_limit, size);
-
             if (fringe1 + size >= limit1) {
-                // printf("fringe %llu limit %llu size %d \n", fringe1, limit1, size);
-                std::cout << "fringe " << fringe1 << " limit " << limit1 << " diff " << limit1 - fringe1 << " size " << size << std::endl;
-                std::cout << "allocs since last time " << num_allocs - alc << std::endl;
-                alc = num_allocs;
                 reclaim(line);
                 if (fringe1 + size >= limit1) {
-                    // not enough memoty
+                    // not enough memory
                     my_exit(137);
-                } else {
-                    std::cout << "phew diff " << limit1 - fringe1 << " size " << size << std::endl;
-                    // printf("phew %d size %d \n", (int)limit1 - fringe1, size);
                 }
                 continue;
             } else {
@@ -6895,6 +6880,12 @@ int main(int argc, char *argv[])
     nblocks = 1;
     C_stackbase = (LispObject *)((intptr_t)&inputfilename &
                                     -sizeof(LispObject));
+
+    // VB: Need to handle main thread separately                                
+    par::thread_data.C_stackbase = C_stackbase;
+    par::thread_data.id = 0;
+    par::thread_table.emplace(0, par::thread_data);
+
     coldstart = 0;
     interactive = 1;
 #ifdef DEBUG
@@ -6963,6 +6954,7 @@ int main(int argc, char *argv[])
                 my_exit(EXIT_FAILURE);
             }
         }
+        par::reset_segments();
 // Any predefined specified on the command-line using -Dxx=yy are
 // instated or re-instated here so they apply even after restart!-lisp.
         for (int i=1; i<argc; i++)
