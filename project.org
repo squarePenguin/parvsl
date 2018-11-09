@@ -41,6 +41,8 @@ All fluid and local symbols need to be stored in thread-local storage. However,
 symbols are modified to fluid/global only by interpreted call.
 Idea: Make fluid and global builtin functions so I can have more control.
 
+However, if the user can modify these flags, then how do I get control over them?
+
 ** Dealing with multiple stacks
 
 To run the conservative GC, we have a pointer to the beginning of the stack
@@ -61,3 +63,14 @@ code or one of a few builtin functions. We need to treat each builtin separately
 and check the flag while running. 
 
 
+Add entry of fluid and global.
+Original one didn't matter.
+Symbol enter hashtable when read, and never collected.
+(Interesting to have weak symbol table)
+
+lisp was restarting
+
+comment about these lisps
+treat value cell as ambiguous?
+look for global in gc?
+use fixnum?

@@ -40,14 +40,24 @@ typedef intptr_t LispObject;
 // This contains extra information about the exact form of data present.
 
 #define TYPEBITS    0x78
+#define TYPEBITSX   0x70
 
 #define typeSYM     0x00
 #define typeSTRING  0x08
 #define typeVEC     0x10
-#define typeBIGNUM  0x18
-#define typeEQHASH  0x20
-#define typeEQHASHX 0x28
-// Codes 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
+// In a first version a BIGNUM only uses typeBIGNUM and the payload it
+// carries is an int64_t. In some future version I MAY represent bignums
+// in sign-and-magnitude form to arbitrary precision, and in that case
+// I MAY use typeBIGNUMX to indicate that a value is negative.
+#define typeBIGNUM  0x20
+#define typeBIGNUMX 0x28
+// EQHASH is a hash table that is in a good state and that is ready
+// for use. EQHASHX is one that contains all the correct data but that
+// needs re-hashing before it is used. This case arises because garbage
+// collection can rearrange memory and thus leave hash-codes out of date.
+#define typeEQHASH  0x30
+#define typeEQHASHX 0x38
+// Codes 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
 // 0x70 and 0x78 spare!
 
 #define veclength(h)  (((uintptr_t)(h)) >> 7)
@@ -128,7 +138,7 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 
 #define qfloat(x)      (((double *)((x)-tagFLOAT))[0])
 
-#define isBIGNUM(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeBIGNUM))
+#define isBIGNUM(x) (isATOM(x) && ((qheader(x) & TYPEBITSX) == typeBIGNUM))
 #define qint64(x) (*(int64_t *)((x) - tagATOM + 8))
 
 #define isSTRING(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeSTRING))
@@ -137,6 +147,19 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 #define isVEC(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeVEC))
 #define isEQHASH(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH))
 #define isEQHASHX(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX))
+
+// The Lisp heap will have fixed size.
+
+#ifndef MEM
+#define MEM 1024
+#endif // MEM
+
+#define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))
+// Each byte in the bitmap will allow marking for 8 entities, and each
+// entity is 8 bytes wide (both on 32 and 64-bit systems), hence each
+// bitmap uses 1/64th of the memory used by the region it maps.
+
+LispObject *C_stackbase;
 
 // This sets the size of the hash table used to store all the symbols
 // that Lisp knows about. I note that if I built a serious application
