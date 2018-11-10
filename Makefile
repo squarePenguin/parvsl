@@ -1,7 +1,7 @@
 # Makefile for vsl
 
 CFLAGS = -O0 -g -Wall
-#CFLAGS = -O3 -Wall
+FASTCFLAGS = -O3 -Wall
 
 ifeq ($(shell uname),Darwin)
 LIBS=-lm -lz -ledit -lncurses -ltermcap
@@ -20,28 +20,32 @@ vsl:	vsl.cpp
 		vsl.cpp $(LIBS) -o vsl \
 		2>&1 | tee vsl.log
 
-bvsl:	vsl.cpp
-	g++ -fno-diagnostics-color $(CFLAGS) \
-		-I./bigint-2010.04.30 -DVSL=1 \
-		vsl.cpp \
-		bigint-2010.04.30/BigInteger.cc \
-		bigint-2010.04.30/BigIntegerAlgorithms.cc \
-		bigint-2010.04.30/BigIntegerUtils.cc \
-		bigint-2010.04.30/BigUnsigned.cc \
-		bigint-2010.04.30/BigUnsignedInABase.cc\
-		$(LIBS) -o bvsl \
-		2>&1 | tee bvsl.log
+fastvsl:	vsl.cpp
+	g++ -fno-diagnostics-color $(FASTCFLAGS) \
+		vsl.cpp $(LIBS) -o fastvsl \
+		2>&1 | tee fastvsl.log
 
 parvsl:    parvsl.cpp common.hpp thread_data.hpp
 	g++ -fno-diagnostics-color -pthread $(CFLAGS) \
 		parvsl.cpp $(LIBS) -o parvsl \
 		2>&1 | tee parvsl.log
 
+fastparvsl:    parvsl.cpp common.hpp thread_data.hpp
+	g++ -fno-diagnostics-color -pthread $(FASTCFLAGS) \
+		parvsl.cpp $(LIBS) -o fastparvsl \
+		2>&1 | tee fastparvsl.log
+
 vsl.img:	vsl library.lsp vsl.lsp
 	./vsl -z library.lsp | tee vsl.img.log
 
+fastvsl.img:	fastvsl library.lsp vsl.lsp
+	./fastvsl -z library.lsp | tee fastvsl.img.log
+
 parvsl.img:	parvsl library.lsp vsl.lsp
 	./parvsl -z library.lsp | tee parvsl.img.log
+
+fastparvsl.img:	fastparvsl library.lsp vsl.lsp
+	./fastparvsl -z library.lsp | tee fastparvsl.img.log
 
 reduce:	vsl
 	mkdir -p reduce.img.modules
@@ -50,12 +54,26 @@ reduce:	vsl
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
 
+fastreduce:	fastvsl
+	mkdir -p fastreduce.img.modules
+	rm -f fastreduce.img.modules/* fastreduce.img inline-defs.dat
+	./fastvsl -z -ifastreduce.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce.lsp | tee fastreduce.log
+
 parreduce:	parvsl
 	mkdir -p parreduce.img.modules
 	rm -f parreduce.img.modules/* parreduce.img inline-defs.dat
 	./parvsl -z -iparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee parreduce.log
+
+fastparreduce:	fastparvsl
+	mkdir -p fastparreduce.img.modules
+	rm -f fastparreduce.img.modules/* fastparreduce.img inline-defs.dat
+	./fastparvsl -z -ifastparreduce.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce.lsp | tee fastparreduce.log
 
 
 debug_reduce:	vsl

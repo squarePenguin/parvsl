@@ -851,6 +851,25 @@ static thread_local std::mt19937_64 mersenne_twister(random_seed);
 // useful for users, but they will alo be very useful while tetsing this
 // code.
 
+// Return a random integer in the range 0 ... n-1.
+uint64_t uniform_uint64(uint64_t n)
+{   if (n <= 1) return 0;
+// I I want the remainder operation on the last line of this function to
+// return a uniformly distributed result. To ensure that I want r to be
+// drawn uniformly from a range that is a multiple of n.
+    uint64_t q = UINT64_MAX/n;
+    uint64_t w = n*q;
+    uint64_t r;
+// In the worst case here n was just over UINT64_MAX/2 and q came out
+// as 1. In that case on average I will need to call mersenne_twister
+// twice. Either larger or smaller inputs will behave better, and rather
+// small inputs will mean I hardly ever need to re-try.
+    do
+    {   r = mersenne_twister();
+    } while (r >= w);
+    return r%n;
+}
+
 // A uniform distribution across the range [0 .. 2^bits-1], ie
 // a bignum using (up to) the given number of bits. So eg uniform_positive(3)
 // should return 0,1,2,3,4,5,6 or 7.
@@ -867,9 +886,18 @@ void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
     while (r!=0 && r[lenr-1] == 0) lenr--;
 }
 
+number_representation uniform_positive(size_t n)
+{   size_t lenr = (n + 63)/64;
+    if (lenr == 0) lenr = 1; // special case!
+    size_t save = lenr;
+    uint64_t *r = preallocate(lenr);
+    uniform_positive(r, lenr, n);
+    return confirm_size(r, save, lenr);
+}
+
 // As above but returning a value that may be negative. uniform_signed(3)
 // could return -8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6 or 7.
-// Note that whuke uniform_unsigned(0) can only return the value 0,
+// Note that while uniform_unsigned(0) can only return the value 0,
 // uniform_signed(0) can return -1 or 0.
 
 void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
@@ -890,6 +918,73 @@ void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
     }
 }
 
+number_representation uniform_signed(size_t n)
+{   size_t lenr = n/64+1;
+    size_t save = lenr;
+    uint64_t *r = preallocate(lenr);
+    uniform_signed(r, lenr, n);
+    return confirm_size(r, save, lenr);
+}
+
+size_t bignum_bits(const uint64_t *a, size_t lena);
+
+// Generate a a value in the range 0 .. a-1 using a uniform distribution
+
+void uniform_upto(uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
+{   size_t n = bignum_bits(a, lena);
+// I will repeatedly generate numbers that have as many bits as a until
+// I get one that has a value less than a has. On average that should only
+// take two tries.
+    for (;;)
+    {   uniform_positive(r, lenr, n);
+        if (lena > lenr) return;
+// Here lena == lenb.
+        for (;;)
+        {   lena--;
+            if (a[lena] > r[lenr]) return;
+            if (lena == 0) break;
+        }
+    }
+}
+
+number_representation uniform_upto(number_representation aa)
+{   size_t lena = number_size(aa);
+    uint64_t *a = number_data(aa);
+    uint64_t *r = preallocate(lena);
+    size_t lenr;
+    uniform_upto(a, lena, r, lenr);
+    return confirm_size(r, lena, lenr);
+}
+
+// Generate a value in the range 0 .. 2^bits-1 using a distribution such
+// numbers with each bit-length are equally probable. This works by
+// selecting a big-length uniformly and then creating a number uniformly
+// distributed across all those with that exact bit-width. This is perhaps
+// not a very nice distribution from a mathematical perspective, but is is
+// perhaps a useful one to have in some test code.
+
+void random_upto_bits(uint64_t *r, size_t lenr, size_t n)
+{   size_t bits = (size_t)uniform_uint64(n);
+    if (bits == 0)
+    {   r[0] = 0;
+        lenr = 1;
+        return;
+    }
+    lenr = (bits+63)/64;
+    for (size_t i=0; i<lenr; i++)
+        r[i] = mersenne_twister();
+    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
+    r[lenr-1] |= UINT64_C(1) << (63-bits%64);
+}
+
+number_representation random_upto_bits(size_t bits)
+{   size_t m = (bits + 63)/64;
+    if (m == 0) m = 1;
+    uint64_t *r = preallocate(m);
+    size_t lenr;
+    random_upto_bits(r, lenr, bits);
+    return confirm_size(r, m, lenr);
+}
 
 // Convert a 64-bit integer to a bignum.
 
@@ -1039,34 +1134,50 @@ static inline int nlz(uint64_t x)
 
 #endif // __GNUC__
 
-// I want an estimate of the number of bytes that it will take to
-// represent a number when I convert it to a string.
+// Note that if a bignum occupies over 1/8 of your total memory that
+// the number of bits it uses might overflow size_t. On a 32-bit system
+// this might happen if the numberf occupies over 512Mbytes and I view
+// that as a situation I will accept as a limit for 32-bit platforms.
 
-static size_t predict_size_in_bytes(const uint64_t *a, size_t n)
-{   uint64_t r;
-    if (n == 0) return 1;
-// I am first going to estimate the size in BITS and then I will
-// see how that maps onto bytes.
-    uint64_t top = a[n-1];  // top digit.
+size_t bignum_bits(const uint64_t *a, size_t lena)
+{   size_t r;
+    if (lena == 0 && a[0] == 0) return 1;
+    uint64_t top = a[lena-1];  // top digit.
+// The exact interpretation of "the length in bits of a negative number"
+// is something I need to think through.
     if (negative(top))
     {   top = -top;
         r = 8;       // 8 bits for a "-" sign.
     }
     else r = 0;
-    r = r + 64*(n-1) + (top==0 ? 0 : 64-nlz(top));
-// This risks overflow if the string was going to be over 2^51 bytes long!
-    return 1+(617*r)/2048;
+    r = r + 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
+}
+
+// I want an estimate of the number of bytes that it will take to
+// represent a number when I convert it to a string.
+
+static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
+{
+// I am first going to estimate the size in BITS and then I will
+// see how that maps onto bytes.
+    size_t r = bignum_bits(a, lena);
+// I need to do the calculation in uint64_t to avoid overflow at
+// sized that would embarass me. Well even with that there would be
+// overflow well before the full 64-bits or result, but that would only
+// arise for bignum inputs that are way beyond the memory ranges supported
+// at present by any extant hardware.
+    return (size_t)(1+(617*(uint64_t)r)/2048);
 } 
 
 // The "as_unsigned" option here is not for general use - it is JUST for
 // internal debugging because at times I work with values that are known
 // to be positive and so where the top digit must be treated as unsigned...
 
-string_representation bignum_to_string(const uint64_t *a, size_t n,
+string_representation bignum_to_string(const uint64_t *a, size_t lena,
                                        bool as_unsigned=false)
 {
 // Making the value zero a special case simplifies things later on!
-    if (n == 1 && a[0] == 0)
+    if (lena == 1 && a[0] == 0)
     {   uint64_t *r = preallocate(1);
         strcpy((char *)r, "0");
         return confirm_size_string(r, 1, 1);
@@ -1074,7 +1185,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t n,
 // The size (m) for the block of memory that I put my result in is
 // such that it could hold the string representation of my input, and
 // I estimate that via predict_size_in_bytes().
-    uint64_t m = (7 + predict_size_in_bytes(a, n))/8;
+    uint64_t m = (7 + predict_size_in_bytes(a, lena))/8;
 // I am going to build up (decimal) digits of the converted number by
 // repeatedly dividing by 10^19. Each time I do that the remainder I
 // amd left with is the next low 19 decimal digits of my number. Doing the
@@ -1085,27 +1196,27 @@ string_representation bignum_to_string(const uint64_t *a, size_t n,
 // its top bit set - that will not worry me because I view it as unsigned.
     uint64_t *r = preallocate(m);
     size_t i;
-    for (i=0; i<n; i++) r[i] = a[i];
+    for (i=0; i<lena; i++) r[i] = a[i];
     for (; i<m; i++) r[i] = 0;
 // Make it positive
     bool sign = false;
-    if (negative(r[n-1]) && !as_unsigned)
+    if (negative(r[lena-1]) && !as_unsigned)
     {   sign = true;
         uint64_t carry = 1;
-        for (i=0; i<n; i++)
+        for (i=0; i<lena; i++)
         {   uint64_t w = r[i] = ~r[i] + carry;
             carry = (w < carry ? 1 : 0);
         }
     }
-// Now my number is positive and is of length n, but the vector it is
-// stored in is length m with m usefully larger than n. I will repeatedly
+// Now my number is positive and is of length lena, but the vector it is
+// stored in is length m with m usefully larger than lena. I will repeatedly
 // divide by 10^19 and each time I do that I can store the remainder working
 // down from the top of the vector. That should JUST keep up so that I
 // never overwrite digits of the reducing part! I will stop when the
 // number I have been working with end up < 10^19.
     size_t p = m-1; // indicates where to put next output digit
-    while (n > 1 || r[0] > ten19)
-    {   uint64_t d = short_divide_ten_19(r, n);
+    while (lena > 1 || r[0] > ten19)
+    {   uint64_t d = short_divide_ten_19(r, lena);
         r[p--] = d;
     }
     r[p] = r[0];
@@ -2387,6 +2498,8 @@ public:
     {   val = string_to_bignum(s);
     }
 
+    
+
     void operator = (const Bignum &x)
     {   if (this == &x) return; // assign to self - a silly case!
         free_bignum(val);
@@ -2472,6 +2585,30 @@ public:
 
 const char *to_string(Bignum x)
 {   return bignum_to_string(x.val);
+}
+
+Bignum uniform_positive_bignum(size_t n)
+{   Bignum r;
+    r.val = uniform_positive(n);
+    return r;
+}
+
+Bignum uniform_signed_bignum(size_t n)
+{   Bignum r;
+    r.val = uniform_signed(n);
+    return r;
+}
+
+Bignum uniform_upto_bignum(Bignum a)
+{   Bignum r;
+    r.val = uniform_upto(a.val);
+    return r;
+}
+
+Bignum random_upto_bits_bignum(size_t n)
+{   Bignum r;
+    r.val = random_upto_bits(n);
+    return r;
 }
 
 inline Bignum Bignum::operator +(const Bignum &x) const
@@ -2565,9 +2702,6 @@ inline bool Bignum::operator <(const Bignum &x) const
 inline bool Bignum::operator <=(const Bignum &x) const
 {   return bigleq(this->val, x.val);
 }
-
-
-
 
 inline void Bignum::operator +=(const Bignum &x)
 {   number_representation r = bigadd(val, x.val);
@@ -2699,11 +2833,19 @@ void display(const char *label, const Bignum &a)
 int main(int argc, char *argv[])
 {
     Bignum a, b, c;
+    for (size_t i=0; i<20; i++)
+        std::cout << i << " " << uniform_positive_bignum(i) << std::endl;
+    for (size_t i=0; i<20; i++)
+        std::cout << i << " " << uniform_signed_bignum(i) << std::endl;
     a = "100000000000000000000000000";
-    b = "100000000000000000000000000000000";
-    c = b / a;
-    display("c", c);
-    std::cout << c << std::endl;
+    for (size_t i=0; i<20; i++)
+        std::cout << i << " " << uniform_upto_bignum(a) << std::endl;
+
+
+//    b = "100000000000000000000000000000000";
+//    c = b / a;
+//    display("c", c);
+//    std::cout << c << std::endl;
 
 //    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
 //    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
