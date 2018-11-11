@@ -2634,9 +2634,7 @@ LispObject eval(LispObject x)
     if (isSYMBOL(x))
     {   LispObject v = qvalue(x);
         if (v == undefined)
-        {   backtraceflag |= backtraceHEADER | backtraceTRACE; // @@@
             return error1("undefined variable", x);
-        }
         else return v;
     }
     else if (!isCONS(x)) return x;
@@ -2952,8 +2950,6 @@ LispObject eval(LispObject x)
 
 LispObject Lprogn(LispObject lits, LispObject x);
 
-
-// @@@ interpret used to live here...
 
 LispObject interpretspecform(LispObject lits, LispObject x)
 {   // lits should be ((var) body...)
@@ -5470,20 +5466,17 @@ LispObject Lcompress(LispObject lits, LispObject x)
 LispObject Lrds(LispObject lits, LispObject x)
 {   int old = lispin;
     if (x == nil) x = packfixnum(3);
-printf("@@ rds from %d to %d\n", old, (int)qfixnum(x));
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
             (file_direction & (1<<n)) == 0)
         {   filecurchar[old] = curchar;
             filesymtype[old] = symtype;
-printf("input stream save curchar=%.2x symtype=%.2x\n", curchar, symtype);
             lispin = n;
             curchar = filecurchar[n];
             symtype = filesymtype[n];
-printf("set new curchar=%.2x symtype=%.2x\n", curchar, symtype);
-fflush(stdout);
             if (curchar == EOF) curchar = '\n';
+            if (symtype == EOF) symtype = '?';
             return packfixnum(old);
         }
     }
@@ -5651,21 +5644,19 @@ void readevalprint(int loadp)
 }
 
 LispObject Lrdf(LispObject lits, LispObject x)
-{   int f, f1, savech = curchar, savetype = symtype;
+{   int f, f1;
     f1 = Lopen(nil, x, input);
     if (unwindflag != unwindNONE) return nil;
     f = Lrds(nil, f1);
     readevalprint(0);
     Lrds(nil, f);
     Lclose(nil, f1);
-    curchar = savech;
-    symtype = savetype;
     printf("+++ End of rdf\n");
     return nil;
 }
 
 LispObject Lload_module(LispObject lits, LispObject x)
-{   int f, f1, savech = curchar, savetype = symtype;
+{   int f, f1;
     f1 = Lopen_module(nil, x, input);
     if (unwindflag != unwindNONE)
     {   printf("+++ Module could not be opened\n");
@@ -5676,14 +5667,11 @@ LispObject Lload_module(LispObject lits, LispObject x)
     if (unwindflag != unwindNONE) printf("+++ Error loading module\n");
     Lrds(nil, f);
     Lclose(nil, f1);
-    curchar = savech;
-    symtype = savetype;
     return nil;
 }
 
 LispObject Ltrace(LispObject lits, LispObject x)
-{
-    while (isCONS(x))
+{   while (isCONS(x))
     {   if (isSYMBOL(qcar(x))) qflags(qcar(x)) |= flagTRACED;
         x = qcdr(x);
     }
@@ -5691,8 +5679,7 @@ LispObject Ltrace(LispObject lits, LispObject x)
 }
 
 LispObject Luntrace(LispObject lits, LispObject x)
-{
-    while (isCONS(x))
+{   while (isCONS(x))
     {   if (isSYMBOL(qcar(x))) qflags(qcar(x)) &= ~flagTRACED;
         x = qcdr(x);
     }
@@ -5700,25 +5687,21 @@ LispObject Luntrace(LispObject lits, LispObject x)
 }
 
 LispObject Lerror_0(LispObject lits)
-{
-    return error1("error function called", nil);
+{   return error1("error function called", nil);
 }
 
 LispObject Lerror_1(LispObject lits, LispObject x)
-{
-    return error1("error function called", x);
+{   return error1("error function called", x);
 }
 
 LispObject Lerror_2(LispObject lits, LispObject x, LispObject y)
-{
-    return error1("error function called", list2star(x,y,nil));
+{   return error1("error function called", list2star(x,y,nil));
 }
 
 LispObject Lerrorset_3(LispObject lits, LispObject a1,
                        LispObject a2, LispObject a3)
 {   int save = backtraceflag;
     backtraceflag = 0;
-a2 = a3 = lisptrue; // @@@@
     if (a2 != nil) backtraceflag |= backtraceHEADER;
     if (a3 != nil) backtraceflag |= backtraceTRACE;
     a1 = eval(a1);
