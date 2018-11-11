@@ -1582,10 +1582,16 @@ top (cond ((atom a) (return (reversip r))))
 
 (de getenv (x) nil)
 
-(de filep (x)
-   (let!* ((h (errorset (list 'open x ''input) nil nil)))
-      (if (atom h) nil
-          (progn (close (car h)) t))))
+% Because I have onnly just migrated a version of filep into the kernel
+% I leave the Lisp-coded copy here for use when I have an old copy of vsl
+% in use. In a while I will just remove this!
+
+(cond
+  ((null (getd 'filep))
+   (de filep (x)
+      (let!* ((h (errorset (list 'open x ''input) nil nil)))
+         (if (atom h) nil
+             (progn (close (car h)) t))))))
 
 (de lengthc (x) (length (explodec x)))
 

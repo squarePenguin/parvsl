@@ -36,42 +36,42 @@ fastparvsl:    parvsl.cpp common.hpp thread_data.hpp
 		2>&1 | tee fastparvsl.log
 
 vsl.img:	vsl library.lsp vsl.lsp
-	./vsl -z library.lsp | tee vsl.img.log
+	time ./vsl -z library.lsp | tee vsl.img.log
 
 fastvsl.img:	fastvsl library.lsp vsl.lsp
-	./fastvsl -z library.lsp | tee fastvsl.img.log
+	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
 parvsl.img:	parvsl library.lsp vsl.lsp
-	./parvsl -z library.lsp | tee parvsl.img.log
+	time ./parvsl -z library.lsp | tee parvsl.img.log
 
 fastparvsl.img:	fastparvsl library.lsp vsl.lsp
-	./fastparvsl -z library.lsp | tee fastparvsl.img.log
+	time ./fastparvsl -z library.lsp | tee fastparvsl.img.log
 
 reduce:	vsl
 	mkdir -p reduce.img.modules
 	rm -f reduce.img.modules/* reduce.img inline-defs.dat
-	./vsl -z -ireduce.img -D@srcdir=. -D@reduce=.. \
+	time ./vsl -z -ireduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
 
 fastreduce:	fastvsl
 	mkdir -p fastreduce.img.modules
 	rm -f fastreduce.img.modules/* fastreduce.img inline-defs.dat
-	./fastvsl -z -ifastreduce.img -D@srcdir=. -D@reduce=.. \
+	time ./fastvsl -z -ifastreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee fastreduce.log
 
 parreduce:	parvsl
 	mkdir -p parreduce.img.modules
 	rm -f parreduce.img.modules/* parreduce.img inline-defs.dat
-	./parvsl -z -iparreduce.img -D@srcdir=. -D@reduce=.. \
+	time ./parvsl -z -iparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee parreduce.log
 
 fastparreduce:	fastparvsl
 	mkdir -p fastparreduce.img.modules
 	rm -f fastparreduce.img.modules/* fastparreduce.img inline-defs.dat
-	./fastparvsl -z -ifastparreduce.img -D@srcdir=. -D@reduce=.. \
+	time ./fastparvsl -z -ifastparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee fastparreduce.log
 
@@ -89,21 +89,21 @@ debug_reduce:	vsl
 rcore:	vsl
 	mkdir -p rcore.img.modules
 	rm -f rcore.img.modules/* rcore.img inline-defs.dat
-	./vsl -z -ircore.img -D@srcdir=. -D@reduce=.. \
+	time ./vsl -z -ircore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildrcore.lsp | tee rcore.log
 
 parrcore:	parvsl
 	mkdir -p parrcore.img.modules
 	rm -f parrcore.img.modules/* parrcore.img inline-defs.dat
-	./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=.. \
+	time ./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildrcore.lsp | tee parrcore.log
 
 step2:	vsl
 	cp rcore.img step2.img
 	cp -r rcore.img.modules step2.img.modules
-	./vsl -istep2.img -D@srcdir=. -D@reduce=.. \
+	time ./vsl -istep2.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		step2.red | tee step2.log
 
@@ -111,7 +111,7 @@ arith:	arith.cpp
 	g++ -O0 -g -DTEST=1 arith.cpp -o arith
 
 testlogs/%.log:
-	./test.sh $@
+	time ./test.sh $@
 
 clean:
 	rm -rf vsl *.exe *.log *.bak reduce.img* vsl.img* *.o *~ \

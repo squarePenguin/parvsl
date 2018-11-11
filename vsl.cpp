@@ -1713,6 +1713,7 @@ FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
 int32_t file_direction = 0, interactive = 0;
 int lispin = 0, lispout = 1;
+int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch(int c)
 {
@@ -5469,12 +5470,19 @@ LispObject Lcompress(LispObject lits, LispObject x)
 LispObject Lrds(LispObject lits, LispObject x)
 {   int old = lispin;
     if (x == nil) x = packfixnum(3);
+printf("@@ rds from %d to %d\n", old, (int)qfixnum(x));
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
             (file_direction & (1<<n)) == 0)
-        {   lispin = n;
-            symtype = '?';
+        {   filecurchar[old] = curchar;
+            filesymtype[old] = symtype;
+printf("input stream save curchar=%.2x symtype=%.2x\n", curchar, symtype);
+            lispin = n;
+            curchar = filecurchar[n];
+            symtype = filesymtype[n];
+printf("set new curchar=%.2x symtype=%.2x\n", curchar, symtype);
+fflush(stdout);
             if (curchar == EOF) curchar = '\n';
             return packfixnum(old);
         }
@@ -5515,6 +5523,9 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
           (y == output && (how=2)!=0) ||
           (y == pipe && (how=3)!=0)))
         return error1("bad arg for open", cons(x, y));
+// If the filename that is passed is something like "$word/rest" then I look
+// for a Lisp variable "@word" and look at its value. If that value is a
+// string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   sprintf(filename, "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
         lits = qvalue(lookup(filename, strlen(filename), 0));
@@ -5534,9 +5545,35 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
     if (n<MAX_LISPFILES)
     {   lispfiles[n] = f;
         if (y != input) file_direction |= (1 << n);
+        filecurchar[n] = '\n';
+        filesymtype[n] = '?';
         return packfixnum(n);
     }
     return error1("too many open files", x);
+}
+
+LispObject Lfilep(LispObject lits, LispObject x)
+{   FILE *f;
+    char *p;
+    if (isSYMBOL(x)) x = qpname(x);
+    if (!isSTRING(x))
+        return error1("bad arg for filep", x);
+    if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
+    {   sprintf(filename, "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+        lits = qvalue(lookup(filename, strlen(filename), 0));
+        if (isSTRING(lits)) sprintf(filename, "%.*s%.*s",
+           (int)veclength(qheader(lits)), qstring(lits),
+           (int)(veclength(qheader(x)) - (p-qstring(x))), p);
+        else sprintf(filename, "%.*s", (int)veclength(qheader(x)), qstring(x));
+    }
+    else sprintf(filename, "%.*s", (int)veclength(qheader(x)), qstring(x));
+#ifdef __WIN32__
+//  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
+#endif // __WIN32__
+    f = fopen(filename, "r");
+    if (f == NULL) return nil;
+    fclose(f);
+    return lisptrue;
 }
 
 LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
@@ -5778,6 +5815,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
     SETUP_TABLE_SELECT("exploden",          Lexploden),         \
     SETUP_TABLE_SELECT("explodecn",         Lexplodecn),        \
+    SETUP_TABLE_SELECT("filep",             Lfilep),            \
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
@@ -7549,6 +7587,10 @@ void set_up_lispdir(int argc, const char *argv[])
 
 int main(int argc, char *argv[])
 {   set_up_lispdir(argc, (const char **)argv);
+    for (int i=0; i<MAX_LISPFILES; i++)
+    {   filecurchar[i] = '\n';
+        filesymtype[i] = '?';
+    }
     setup_prompt();
     const char *inputfilename = NULL;
     void *pool;
