@@ -670,6 +670,7 @@ top (cond ((atom a) (return (reversip r))))
 
 (de fixp (u) (and (inumberp u) (not (floatp u))))
 (de numberp (u) (or (inumberp u) (bignump u)))
+(de complexp (u) nil)
 
 % There are two representations of numbers. The one used in the
 % main parts of the code are
