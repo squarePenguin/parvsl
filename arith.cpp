@@ -801,7 +801,6 @@ static inline int read_u3(const uint64_t *v, size_t n, size_t i)
 // If I needed to shift by 62 or 63 bits then the octal digit I am interested
 // in needs some bits from the next word up.
     if (s0 >= 62) w |= (virtual_digit64(v, n, n0+1) << (64-s0));
-logprintf("digit %d (of %d words) = %d\n", (int)i, (int)n, (int)(w & 0x7));
     return (int)(w & 0x7);
 }
     
@@ -2477,6 +2476,38 @@ number_representation bigdivide(number_representation a, number_representation b
 
 #ifndef VSL
 
+struct  radix
+{
+public:
+// I would like setting hex or oct or dec to disable this, but at present
+// I do not know how to do that. So I will arrange that binary output is
+// only generated if none of those flags are set, because I can clear
+// them here. Then when I restore one of them I disable the test for binary.
+// I will arrange that if bobody has ever asked for binary they do not get it,
+// just so I feel safe.
+    static void set_binary_output(std::ios_base &s)
+    {   flag(s) = 1;
+        logprintf("setting binary mode\n");
+        s.unsetf(std::ios_base::dec);
+        s.unsetf(std::ios_base::oct);
+        s.unsetf(std::ios_base::hex);
+    }
+    static bool is_binary_output(std::ios_base &s)
+    {   logprintf("testing binary mode %d\n", (int)flag(s));
+        return flag(s) != 0;
+    }
+private:
+    static long & flag(std::ios_base &s)
+    {   static int n = std::ios_base::xalloc();
+        logprintf("access binary flag at %d, val=%d\n", n, s.iword(n));
+        return s.iword(n);
+    }
+};
+
+std::ostream bin(std::ostream &os)
+{   radix::set_binary_output(os);
+}
+
 class Bignum
 {
 public:
@@ -2497,8 +2528,6 @@ public:
     Bignum(const char *s)
     {   val = string_to_bignum(s);
     }
-
-    
 
     void operator = (const Bignum &x)
     {   if (this == &x) return; // assign to self - a silly case!
@@ -2563,11 +2592,16 @@ public:
     friend std::ostream & operator << (std::ostream &out, const Bignum &a)
     {   std::ios_base::fmtflags fg = out.flags();
         string_representation s;
+        logprintf("io flags = %x\n", (int)fg);
         if ((fg & std::ios_base::hex) != 0)
             s = bignum_to_string_hex(a.val);
         else if ((fg & std::ios_base::oct) != 0)
             s = bignum_to_string_octal(a.val);
-        else s = bignum_to_string(a.val); // decimal
+        else if ((fg & std::ios_base::dec) != 0)
+            s = bignum_to_string(a.val);
+        else if (radix::is_binary_output(out))
+            s = bignum_to_string_binary(a.val);
+        else s = bignum_to_string(a.val);
         out << std::setw(string_size(s)) << string_data(s);
         free_string(s);
         return out;
@@ -2833,6 +2867,18 @@ void display(const char *label, const Bignum &a)
 int main(int argc, char *argv[])
 {
     Bignum a, b, c;
+    a = 12345;
+    std::cout << "plain " << a
+              << " oct " << std::oct << a
+              << " hex " << std::hex << a
+              << " dec " << std::dec << a
+              << " bin " << bin      << a
+              << " oct " << std::oct << a
+              << " hex " << std::hex << a
+              << " dec " << std::dec << a
+              << std::endl;
+      
+
     for (size_t i=0; i<20; i++)
         std::cout << i << " " << uniform_positive_bignum(i) << std::endl;
     for (size_t i=0; i<20; i++)

@@ -280,7 +280,7 @@ typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-#define MEM 128
+#define MEM 256
 #endif // MEM
 
 #define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))
@@ -302,6 +302,7 @@ LispObject *C_stackbase;
 // 40K distinct symbols...
 
 #define OBHASH_SIZE 10007
+#define MAX_LISPFILES 30
 
 // Some Lisp values that I will use frequently...
 
@@ -332,7 +333,9 @@ LispObject *C_stackbase;
 #define lower      bases[24]
 #define dfprint    bases[25]
 #define bignum     bases[26]
-#define BASES_SIZE       27
+#define BASES_SIZE       (MAX_LISPFILES+27)
+
+#define filecursym (&bases[27])
 
 LispObject bases[BASES_SIZE];
 LispObject obhash[OBHASH_SIZE];
@@ -461,8 +464,7 @@ void hexdump()
 {
     uintptr_t i;
     uintptr_t j, k;
-    return;
-//@@
+    return;   //@@
     for (i=0; i<nblocks; i++)
     {   block_header *b = (block_header *)blocks_by_age[i];
         printf("Block %" PRIdPTR "\n", i);
@@ -630,7 +632,6 @@ void allocateheap()
     for (i=0; i<nblocks; i++)
     {   uintptr_t bi = blocks[i];
         block_header *b = (block_header *)bi;
-printf("allocateheap: b[%" PRIdPTR "] = %#" PRIxPTR "\n", i, bi);
         b->hbase = b->h1base = ALIGN8(bi + sizeof(block_header));
         b->h1top = b->h2base = b->h1base + 64*b->halfbitmapsize;
         b->h2top = b->htop = b->h2base + 64*b->halfbitmapsize;
@@ -639,8 +640,6 @@ printf("allocateheap: b[%" PRIdPTR "] = %#" PRIxPTR "\n", i, bi);
         b->h1fp = b->hfp = (uint32_t *)((uintptr_t)b->hstarts + 2*b->halfbitmapsize);
         b->h2fp = (uint32_t *)((uintptr_t)b->hfp + b->halfbitmapsize);
         b->pinned = (uint32_t *)((uintptr_t)b->hfp + 2*b->halfbitmapsize);
-printf("allocateheap: b=h1[%" PRIdPTR "] = %#" PRIxPTR "\n", i, b->h1base);
-printf("allocateheap: b=h2[%" PRIdPTR "] = %#" PRIxPTR "\n", i, b->h2base);
         clearheapstarts(b);
         clearheapfp(b);
     }
@@ -1114,7 +1113,6 @@ void *allocate_memory(uintptr_t n)
 #endif // __WIN32__
     mem_base = (uintptr_t)p;
     mem_end = mem_base + n;
-printf("n = %" PRIxPTR " base = %" PRIxPTR " end = %" PRIxPTR "\n", n, mem_base, mem_end);
     return p;
 }
 
@@ -1705,7 +1703,6 @@ static inline LispObject copycontent(LispObject s)
 // done.
 int linelength = 80, linepos = 0, printflags = printESCAPES;
 
-#define MAX_LISPFILES 30
 #ifdef DEBUG
 FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 #else // DEBUG
@@ -1759,6 +1756,18 @@ static HistEvent el_history_event;
 #define INPUT_LINE_SIZE 256
 static char input_line[INPUT_LINE_SIZE];
 static int input_ptr = 0, input_max = 0;
+char the_prompt[80] = "> ";
+
+
+LispObject Lsetpchar(LispObject lits, LispObject a)
+{   LispObject r = makestring(the_prompt, strlen(the_prompt));
+    if (isSYMBOL(a)) a = qpname(a);
+    if (!isSTRING(a)) return error1("bad arg to setpchar", a);
+    uintptr_t len = veclength(qheader(a));
+    if (len > sizeof(the_prompt)-1) len = sizeof(the_prompt)-1;
+    sprintf(the_prompt, "%.*s", (int)len, qstring(a));
+    return r;
+}
 
 int rdch()
 {   LispObject w;
@@ -2602,7 +2611,7 @@ LispObject eval(LispObject x)
 {
 #ifdef TRACEALL
     if (isCONS(x))
-    {  printf("eval: "); print(qcar(x)); // Eek! @@@@
+    {  printf("eval: "); print(qcar(x)); // Eek! for desparate debugging
     }
 #endif
 // The intent of fname is that when running VSL under a debugger it can
@@ -5468,13 +5477,18 @@ LispObject Lrds(LispObject lits, LispObject x)
     if (x == nil) x = packfixnum(3);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
-        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
+        if (n == old) return packfixnum(old);  // selecting current stream
+        if (0 <= n &&
+            n < MAX_LISPFILES &&
+            lispfiles[n] != NULL &&
             (file_direction & (1<<n)) == 0)
         {   filecurchar[old] = curchar;
             filesymtype[old] = symtype;
+            filecursym[old] = cursym;
             lispin = n;
             curchar = filecurchar[n];
             symtype = filesymtype[n];
+            cursym = filecursym[n];
             if (curchar == EOF) curchar = '\n';
             if (symtype == EOF) symtype = '?';
             return packfixnum(old);
@@ -5540,6 +5554,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
         if (y != input) file_direction |= (1 << n);
         filecurchar[n] = '\n';
         filesymtype[n] = '?';
+        filecursym[n] = nil;
         return packfixnum(n);
     }
     return error1("too many open files", x);
@@ -5601,15 +5616,18 @@ LispObject Lclose(LispObject lits, LispObject x)
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (n > 3 && n < MAX_LISPFILES)
-        {   if (lispin == n) lispin = 3;
-            if (lispout == n) lispout = 1;
+        {   if (lispin == n) Lrds(nil, packfixnum(3));
+            if (lispout == n) Lwrs(nil, packfixnum(1));
             if (lispfiles[n] != NULL) fclose(lispfiles[n]);
             lispfiles[n] = NULL;
             file_direction &= ~(1<<n);
-        }
+       }
     }
     return nil;
 }
+
+// flag on next line for desparate debugging
+static bool showallreads = false;
 
 void readevalprint(int loadp)
 {   while (symtype != EOF)
@@ -5617,16 +5635,21 @@ void readevalprint(int loadp)
         LispObject save_echo = qvalue(echo);
         unwindflag = unwindNONE;
         if (loadp) qvalue(echo) = nil;
+        if (showallreads) qvalue(echo) = lisptrue;
         backtraceflag = backtraceHEADER | backtraceTRACE;
         r = readS();
         qvalue(echo) = save_echo;
+        if (showallreads)
+        {   printf("item read was: ");
+            print(r);
+        }
         fflush(stdout);
         if (unwindflag != unwindNONE) /* Do nothing */ ;
         else if (loadp || qvalue(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
         {   r = eval(r);
-            if (unwindflag == unwindNONE && !loadp)
+            if (showallreads || (unwindflag == unwindNONE && !loadp))
             {   linepos += printf("Value: ");
 #ifdef DEBUG
                 if (logfile != NULL) fprintf(logfile, "Value: ");
@@ -5698,12 +5721,16 @@ LispObject Lerror_2(LispObject lits, LispObject x, LispObject y)
 {   return error1("error function called", list2star(x,y,nil));
 }
 
+// This flag lets me make every error noisy. For desparate debugging
+static bool debugFlag = false;
+
 LispObject Lerrorset_3(LispObject lits, LispObject a1,
                        LispObject a2, LispObject a3)
 {   int save = backtraceflag;
     backtraceflag = 0;
-    if (a2 != nil) backtraceflag |= backtraceHEADER;
-    if (a3 != nil) backtraceflag |= backtraceTRACE;
+    if (a2 != nil || debugFlag) backtraceflag |= backtraceHEADER;
+    if (a3 != nil || debugFlag) backtraceflag |= backtraceTRACE;
+    if (debugFlag) backtraceflag = backtraceHEADER | backtraceTRACE;
     a1 = eval(a1);
     if (unwindflag == unwindERROR ||
         unwindflag == unwindBACKTRACE)
@@ -5842,6 +5869,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("restart-csl",       Lrestart_lisp_1),   \
     SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_1),   \
     SETUP_TABLE_SELECT("return",            Lreturn_1),         \
+    SETUP_TABLE_SELECT("setpchar",          Lsetpchar),         \
     SETUP_TABLE_SELECT("sin",               Lsin),              \
     SETUP_TABLE_SELECT("sqrt",              Lsqrt),             \
     SETUP_TABLE_SELECT("stop",              Lstop_1),           \
@@ -6233,30 +6261,14 @@ void *setuphashlookup(void *k)
 {
     int i = HASHPTR(k);
     const uint64_t *p;
-//@@    printf("Lookup function %#" PRIxPTR " with hash value %d\n", (uintptr_t)k, i);
-//@@    {   int j;
-//@@        printf("setup hash table contents\n");
-//@@        for (j=0; j<SETUPHASHSIZE; j++)
-//@@        {   void *k = setuphash1k[j];
-//@@            const char *v = setuphash1v[j];
-//@@            if (k != NULL) printf("%#" PRIxPTR " : %s\n", (uintptr_t)k, v);
-//@@        }
-//@@    }
     while (setuphash1k[i] != k &&
            setuphash1k[i] != NULL) i = (i + 1) % SETUPHASHSIZE;
-//@@    printf("Entrypoint %#" PRIxPTR " looks up as entry %d (%#" PRIxPTR ")\n",
-//@@        (uintptr_t)k, i, (uintptr_t)setuphash1k[i]);
     if (setuphash1k[i] == NULL) return NULL;
     p = (uint64_t *)setuphash1v[i];
-//@@    printf("name is <%.16s>\n", (const char *)p);
     i = (int)((p[0] + p[1]) % SETUPHASHSIZE);
-//@@    printf("namehash = %d, s2k=%#" PRIxPTR " s2v=%#" PRIxPTR "\n", i, (uintptr_t)setuphash2k, (uintptr_t)setuphash2v);
-//@@    printf("setuphash2k[%d] = %#" PRIxPTR "\n", i, (uintptr_t)setuphash2k[i]);
-//@@    printf("setuphash2k[%d] = <%.16s>\n", i, setuphash2k[i]);
     while (setuphash2k[i] != NULL &&
            memcmp(setuphash2k[i], p, MAX_NAMESIZE) != 0)
         i = (i + 1) % SETUPHASHSIZE;
-//@@    printf("converted entrypoint is %#" PRIxPTR "\n", (uintptr_t)setuphash2v[i]);
     return setuphash2v[i];
 }
 
@@ -6268,7 +6280,6 @@ uintptr_t image_fringe1;
 LispObject relocate(LispObject x)
 {
     int i;
-//@@     printf("\nrelocate x=%#" PRIxPTR "  %" PRIdPTR "\n", x, x);
     switch (x & TAGBITS)
     {   case tagATOM:
            if (x == NULLATOM) return x;
@@ -6293,20 +6304,14 @@ LispObject relocate(LispObject x)
         image_blocks[8], image_blocks[9], image_blocks[10],image_blocks[11],
         image_blocks[12],image_blocks[13],image_blocks[14],image_blocks[15],
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-//@@     printf("i %x  %d\n", i, i);
-//@@     printf("image_offsets (x) = %#" PRIxPTR " image_blocks = %#" PRIxPTR "\n",
-//@@         image_offsets[i], image_blocks[i]);
     x = image_offsets[i] + x - image_h1base[i];
-//@@     printf("x relative to image heap start = %#" PRIxPTR "\n", x);
     i = search16a((uintptr_t)x,
         blocks_offset[0], blocks_offset[1], blocks_offset[2], blocks_offset[3],
         blocks_offset[4], blocks_offset[5], blocks_offset[6], blocks_offset[7],
         blocks_offset[8], blocks_offset[9], blocks_offset[10],blocks_offset[11],
         blocks_offset[12],blocks_offset[13],blocks_offset[14],blocks_offset[15],
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-//@@     printf("x will be in block %d (%#" PRIxPTR ")\n", i, blocks[i]);
     x += ((block_header *)blocks[i])->h1base;
-//@@     printf("So relocated item is %" PRIdPTR " = %#" PRIxPTR "\n", x, x);
     return x;
 }
 
@@ -6363,12 +6368,6 @@ int warm_start_1(gzFile f, int *errcode)
     if (imagesetup_defs == NULL) return __LINE__;
     if (gzread(f, imagesetup_defs, (unsigned int)(setupsize*sizeof(void *))) !=
         (int)(setupsize*sizeof(void *))) return __LINE__;
-//@@ // I will display the first 25 names just to convince myself that I have
-//@@ // read them in OK.
-//@@     for (i=0; i<setupsize && i<25; i++)
-//@@     {   char *name = imagesetup_names[i];
-//@@         printf("%d) %.*s %#" PRIxPTR "\n", i, MAX_NAMESIZE, name, (uintptr_t)imagesetup_defs[i]);
-//@@     } 
     setuphash1k = (void **)h2alloc(SETUPHASHSIZE*sizeof(void *));
     setuphash1v = (const char **)h2alloc(SETUPHASHSIZE*sizeof(char *));
     setuphash2k = (const char **)h2alloc(SETUPHASHSIZE*sizeof(char *));
@@ -6389,12 +6388,9 @@ int warm_start_1(gzFile f, int *errcode)
 // simplifies the code somewhat.
     for (i=0; i<setupsize; i++)
     {   int h = HASHPTR(imagesetup_defs[i]);
-//@@         printf("insert %.16s in imagehash\n", imagesetup_names[i]);
-//@@         printf("def at %#" PRIxPTR " hashes to %d\n", (uintptr_t)imagesetup_defs[i], h);
         while (setuphash1k[h] != NULL) h = (h + 1) % SETUPHASHSIZE;
         setuphash1k[h] = imagesetup_defs[i];
         setuphash1v[h] = imagesetup_names[i];
-//@@         printf("%d) %#" PRIxPTR " : %s\n", h, (uintptr_t)setuphash1k[h], setuphash1v[h]);
     }
     for (i=0; i<SETUPSIZE; i++)
     {   const uint64_t *s = (const uint64_t *)setup_names[i];
@@ -6409,7 +6405,6 @@ int warm_start_1(gzFile f, int *errcode)
         setuphash2k[h] = setup_names[i];
         setuphash2v[h] = setup_defs[i];
     }
-    printf("function pointer relocation tables now in place\n");
 // The hash tables that cope with entrypoints are now in place - next
 // the reliable heap bases can be reloaded. I am going to assume that
 // the sizes of these match between image file and running system.
@@ -6423,10 +6418,8 @@ int warm_start_1(gzFile f, int *errcode)
 // That change will render image files incompatible.
     if (gzread(f, obhash, (unsigned int)sizeof(obhash)) !=
         (int)sizeof(obhash)) return __LINE__;
-    printf("bases and obhash loaded\n");
     if ((image_nblocks = read32(f)) == 0 ||
          image_nblocks > 16) return __LINE__;
-    printf("image_nblocks = %d\n", (int)image_nblocks);
     if (gzread(f, image_blocks_by_age,
                   (unsigned int)sizeof(blocks_by_age)) !=
         (int)sizeof(blocks_by_age)) return __LINE__;
@@ -6461,30 +6454,19 @@ int warm_start_1(gzFile f, int *errcode)
     total_size = 0;
     for (i=0; i<image_nblocks; i++)
     {
-//@@        printf("block %#18" PRIxPTR " bitmapsize %#" PRIxPTR "\n",
-//@@               image_blocks_by_age[i], image_bitmapsizes[i]);
         image_offsets[i] = total_size*64;
         total_size += image_bitmapsizes[i];
-        printf("total size now %#" PRIxPTR "\n", total_size);
     }
     for (;i<16; i++) image_offsets[i] = total_size*64;
-//@@    for (i=0; i<16; i++)
-//@@        printf("image_offset[%d] = %#" PRIxPTR "\n", i, image_offsets[i]);
 // The total size recorded here is the size of bitmap data present in
 // the image. The amount of heap will be 64 times as great.
 // There is an issue whereby the final block dumped only had information
 // written as far as data was valid.
     total_size *= 64;
-    printf("size of whole image half-heap = %#" PRIxPTR "\n", total_size);
-    printf("final image block %#" PRIxPTR ", fringe1 = %#" PRIxPTR ", length=%#" PRIxPTR "\n",
-        image_blocks_by_age[image_nblocks-1],
-        image_fringe1,
-        64*image_bitmapsizes[image_nblocks-1]);
     assert(image_fringe1 >= 0);
     assert(image_fringe1 < 64*image_bitmapsizes[image_nblocks-1]);
     total_size -=
         (64*image_bitmapsizes[image_nblocks-1] - image_fringe1);
-    printf("Bytes of heap to reload = %" PRIdPTR "\n", total_size);
 // Next I need to reload the body of the image. The version in the
 // image file is a single chunk of bytes...
     printf("Reloading the image will need around %#" PRIxPTR " bytes\n",
@@ -6510,9 +6492,6 @@ int warm_start_1(gzFile f, int *errcode)
 // Fill out the end of image_blocks with an address higher than ay that
 // I will ever use.
     for (;i<16; i++) image_blocks[i] = (uintptr_t)(-1);
-//@@    for (i=0; i<16; i++)
-//@@        printf("image_blocks[%d] = %" PRIdPTR " = %#" PRIxPTR "\n",
-//@@               i, image_blocks[i], image_blocks[i]);
 // Now I need to load the heap data from my image file into the memory
 // I have in the current running system.
     block1 = 0;
@@ -6537,7 +6516,6 @@ int warm_start_1(gzFile f, int *errcode)
             limit1 = ((block_header *)blocks_by_age[block1])->h1top;
         }
     }
-    printf("heap1 data re-loaded\n");
 // Note that the heap1 data may still be in a mangled byte-order, but I can
 // not correct that without parsing it, and I can not do that until I have
 // the associated bitmaps available.
@@ -6595,12 +6573,10 @@ int warm_start_1(gzFile f, int *errcode)
         memset(s, 0, 2*l);
         memset(f, 0, 2*l);
     }
-    printf("heap1 data re-loaded\n");
 // The FILEID at the end of an image file gives me a chance to confirm that
 // I have kept in step while decoding it.
     if (read32(f) != ENDID) return __LINE__;
     if (read32(f) != FILEID) return __LINE__;
-//@@    hexdump();
 // Now the data is all in place, but heap1 may have its bytes in a bad order
 // and it certainly contains address references that relate to the computer
 // that created the image, not the one that is now running. So I need to
@@ -6771,7 +6747,6 @@ int warm_start_1(gzFile f, int *errcode)
                     assert(0);
             }
     }
-    printf("relocating code might be complete!!!\n");
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
      qvalue(echo) = interactive ? nil : lisptrue;
@@ -6787,8 +6762,8 @@ int warm_start(gzFile f, int *errcode)
     if ((revision = read32(f)) == 0) return 1;
     version = (revision >>= 4) & 0x3fff;
     revision >>= 14;
-    printf("Subversion revision %d VERSION %d.%.3d\n",
-        revision, version/1000, version%1000);
+//@    printf("Subversion revision %d VERSION %d.%.3d\n",
+//@        revision, version/1000, version%1000);
     if (gzread(f, banner, 64) != 64) return 1;
     if (banner[0] != 0)
     {   printf("%.64s\n", banner);
@@ -6819,9 +6794,10 @@ int write32(gzFile f, uint32_t n)
 // want the fractional part to be in the range 100 to 999 please.
 #define IVERSION 1
 #define FVERSION 501
-#define stringify(x) #x
+#define stringify(x) stringify1(x)
+#define stringify1(x) #x
 char startup_banner[64] =
-   "VSL+ version " stringify(IVERSION) "." stringify(VERSION);
+   "VSL+ version " stringify(IVERSION) "." stringify(FVERSION);
 
 // Return 0 on success, 1 on most failures and 2 if the gzclose failed.
 // In the case that things got as far as gzclose then errcode is set
@@ -7011,8 +6987,6 @@ static void el_tidy() {
     el_end(el_struct);
     history_end(el_history);
 }
-
-char the_prompt[] = "> ";
 
 static char *get_prompt(EditLine *el)
 {   return the_prompt;
@@ -7573,6 +7547,7 @@ int main(int argc, char *argv[])
     for (int i=0; i<MAX_LISPFILES; i++)
     {   filecurchar[i] = '\n';
         filesymtype[i] = '?';
+        filecursym[i] = nil;
     }
     setup_prompt();
     const char *inputfilename = NULL;
