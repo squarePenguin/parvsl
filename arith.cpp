@@ -869,6 +869,8 @@ uint64_t uniform_uint64(uint64_t n)
     return r%n;
 }
 
+extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
+
 // A uniform distribution across the range [0 .. 2^bits-1], ie
 // a bignum using (up to) the given number of bits. So eg uniform_positive(3)
 // should return 0,1,2,3,4,5,6 or 7.
@@ -881,8 +883,8 @@ void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
     lenr = (bits+63)/64;
     for (size_t i=0; i<lenr; i++)
         r[i] = mersenne_twister();
-    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
-    while (r!=0 && r[lenr-1] == 0) lenr--;
+    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
+    while (lenr!=0 && r[lenr-1] == 0) lenr--;
 }
 
 number_representation uniform_positive(size_t n)
@@ -906,13 +908,12 @@ void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
         r[i] = mersenne_twister();
 // Now if the "extra" bit is zero my number will end up positive.
     if ((r[lenr-1] & UINT64_C(0x8000000000000000) >> (bits%64)) == 0)
-    {   r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
+    {   r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
         while (r!=0 && r[lenr-1] == 0) lenr--;
     }
 // Otherwise the result will end up negative.
     else
-    {   if (bits%64 != 0)
-            r[lenr-1] |= UINT64_C(0xffffffffffffffff) << (64-bits%64);
+    {   r[lenr-1] |= UINT64_C(0xffffffffffffffff) << (bits%64);
         while (r!=0 && r[lenr-1] == UINT64_C(0xffffffffffffffff)) lenr--;
     }
 }
@@ -1149,7 +1150,7 @@ size_t bignum_bits(const uint64_t *a, size_t lena)
         r = 8;       // 8 bits for a "-" sign.
     }
     else r = 0;
-    r = r + 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
+    return r + 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
 }
 
 // I want an estimate of the number of bytes that it will take to
@@ -1921,8 +1922,6 @@ number_representation bigrevsubtract(number_representation a, number_representat
     return confirm_size(p, n, final_n);
 }
 
-extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
-
 // The next is temporary and is for debugging!
 static void temp(const char *label, const uint64_t *a, size_t lena)
 {   display(label, a, lena);
@@ -2487,25 +2486,23 @@ public:
 // just so I feel safe.
     static void set_binary_output(std::ios_base &s)
     {   flag(s) = 1;
-        logprintf("setting binary mode\n");
         s.unsetf(std::ios_base::dec);
         s.unsetf(std::ios_base::oct);
         s.unsetf(std::ios_base::hex);
     }
     static bool is_binary_output(std::ios_base &s)
-    {   logprintf("testing binary mode %d\n", (int)flag(s));
-        return flag(s) != 0;
+    {   return flag(s) != 0;
     }
 private:
     static long & flag(std::ios_base &s)
     {   static int n = std::ios_base::xalloc();
-        logprintf("access binary flag at %d, val=%d\n", n, s.iword(n));
         return s.iword(n);
     }
 };
 
-std::ostream bin(std::ostream &os)
+std::ostream &bin(std::ostream &os)
 {   radix::set_binary_output(os);
+    return os;
 }
 
 class Bignum
@@ -2592,7 +2589,6 @@ public:
     friend std::ostream & operator << (std::ostream &out, const Bignum &a)
     {   std::ios_base::fmtflags fg = out.flags();
         string_representation s;
-        logprintf("io flags = %x\n", (int)fg);
         if ((fg & std::ios_base::hex) != 0)
             s = bignum_to_string_hex(a.val);
         else if ((fg & std::ios_base::oct) != 0)
