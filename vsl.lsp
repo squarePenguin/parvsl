@@ -1614,9 +1614,11 @@ top (cond ((atom a) (return (reversip r))))
 
 (de gctime () 0)
 
-(de setpchar (x) nil)
-
 (de eqn (a b) (equal a b))
+
+(cond
+  ((null (getd 'setpchar))
+   (de setpchar (u) nil)))
 
 (de threevectorp (x)
    (and (vectorp x) (equal (upbv x) 2)))
