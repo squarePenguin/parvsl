@@ -81,7 +81,11 @@
 
 static FILE *logfile = NULL;
 
-static void logprintf(const char *fmt, ...)
+// Making this "inline" results in no warning messages if it is not
+// used. So even though this may somewhat waste space when it is used,
+// I like this option.
+
+static inline void logprintf(const char *fmt, ...)
 {   if (logfile == NULL) logfile = std::fopen("arith.log", "w");
     std::va_list args;
     va_start(args, fmt);
@@ -255,6 +259,7 @@ static inline LispObject boxfloat(double a)
 //   void free_string(string_representation s)
 //       Release memory for the string.
 
+extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
 
 #ifdef VSL
 
@@ -382,9 +387,9 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return (LispObject)&bignum_header(p) + tagATOM;
 }
 
-number_representation sometimes_copy_bignum(number_representation p)
-{
-    return p;
+number_representation
+    copy_bignum_if_no_garbage_collector(number_representation p)
+{   return p;
 }
 
 void free_bignum(number_representation p)
@@ -471,14 +476,16 @@ uint64_t *preallocate(size_t n)
 }
 
 number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
-{   p = (uint64_t *)(*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+{   p = (uint64_t *)
+        (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
 }
 
 number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{   p = (uint64_t *)(*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+{   p = (uint64_t *)
+        (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
@@ -511,8 +518,9 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return cc;
 }
 
-number_representation sometimes_copy_bignum(number_representation p)
-{
+number_representation
+    copy_bignum_if_no_garbage_collector(number_representation p)
+{   if (p == (number_representation)0) return p;
     size_t n = number_size(p);
     uint64_t *d = number_data(p);
     uint64_t *r = preallocate(n);
@@ -881,8 +889,8 @@ void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
     lenr = (bits+63)/64;
     for (size_t i=0; i<lenr; i++)
         r[i] = mersenne_twister();
-    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
-    while (r!=0 && r[lenr-1] == 0) lenr--;
+    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
+    while (lenr!=1 && r[lenr-1] == 0) lenr--;
 }
 
 number_representation uniform_positive(size_t n)
@@ -900,20 +908,18 @@ number_representation uniform_positive(size_t n)
 // uniform_signed(0) can return -1 or 0.
 
 void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
-{   bits++; // I will first generate an unsigned value with one extra bit.
-    lenr = (bits+63)/64;
+{   lenr = 1 + bits/64;
     for (size_t i=0; i<lenr; i++)
         r[i] = mersenne_twister();
 // Now if the "extra" bit is zero my number will end up positive.
-    if ((r[lenr-1] & UINT64_C(0x8000000000000000) >> (bits%64)) == 0)
-    {   r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
-        while (r!=0 && r[lenr-1] == 0) lenr--;
+    if ((r[lenr-1] & (UINT64_C(1) << (bits%64))) == 0)
+    {   r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (63-bits%64);
+        while (lenr!=1 && r[lenr-1] == 0) lenr--;
     }
 // Otherwise the result will end up negative.
     else
-    {   if (bits%64 != 0)
-            r[lenr-1] |= UINT64_C(0xffffffffffffffff) << (64-bits%64);
-        while (r!=0 && r[lenr-1] == UINT64_C(0xffffffffffffffff)) lenr--;
+    {   r[lenr-1] |= UINT64_C(0xffffffffffffffff) << (bits%64);
+        while (lenr!=1 && r[lenr-1] == UINT64_C(0xffffffffffffffff)) lenr--;
     }
 }
 
@@ -937,11 +943,10 @@ void uniform_upto(uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     for (;;)
     {   uniform_positive(r, lenr, n);
         if (lena > lenr) return;
-// Here lena == lenb.
-        for (;;)
-        {   lena--;
-            if (a[lena] > r[lenr]) return;
-            if (lena == 0) break;
+        for (size_t len=lena;;)
+        {   len--;
+            if (a[len] > r[len]) return;
+            if (a[len] < r[len] || len == 0) break;
         }
     }
 }
@@ -962,7 +967,7 @@ number_representation uniform_upto(number_representation aa)
 // not a very nice distribution from a mathematical perspective, but is is
 // perhaps a useful one to have in some test code.
 
-void random_upto_bits(uint64_t *r, size_t lenr, size_t n)
+void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
 {   size_t bits = (size_t)uniform_uint64(n);
     if (bits == 0)
     {   r[0] = 0;
@@ -1135,21 +1140,15 @@ static inline int nlz(uint64_t x)
 
 // Note that if a bignum occupies over 1/8 of your total memory that
 // the number of bits it uses might overflow size_t. On a 32-bit system
-// this might happen if the numberf occupies over 512Mbytes and I view
+// this might happen if the number occupies over 512 Mbytes and I view
 // that as a situation I will accept as a limit for 32-bit platforms.
 
 size_t bignum_bits(const uint64_t *a, size_t lena)
-{   size_t r;
-    if (lena == 0 && a[0] == 0) return 1;
+{   if (lena == 0 && a[0] == 0) return 1; // say that 0 has 1 bit.
     uint64_t top = a[lena-1];  // top digit.
 // The exact interpretation of "the length in bits of a negative number"
 // is something I need to think through.
-    if (negative(top))
-    {   top = -top;
-        r = 8;       // 8 bits for a "-" sign.
-    }
-    else r = 0;
-    r = r + 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
+    return 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
 }
 
 // I want an estimate of the number of bytes that it will take to
@@ -1160,6 +1159,7 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // I am first going to estimate the size in BITS and then I will
 // see how that maps onto bytes.
     size_t r = bignum_bits(a, lena);
+    if (negative(a[lena-1])) r += 8; // allow space for a "-" sign.
 // I need to do the calculation in uint64_t to avoid overflow at
 // sized that would embarass me. Well even with that there would be
 // overflow well before the full 64-bits or result, but that would only
@@ -1224,6 +1224,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
 // to character data. I write in the string data just over what has been
 // digits data, and I have arranged to position everything to (just)
 // avoid overwriting myself.
+    uint64_t top = r[p++];
     char *p1 = (char *)r;
     size_t len = 0;
     if (sign)
@@ -1235,7 +1236,6 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
 // overhead.
     char buffer[24];
     int bp = 0;
-    uint64_t top = r[p++];
     do
     {   buffer[bp++] = '0' + top%10;
         top = top/10;
@@ -1413,26 +1413,25 @@ bool bigeqn(number_representation a, number_representation b)
 
 bool biggreaterp(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb)
-{   uint64_t a0, b0;
+{   uint64_t a0 = a[lena-1], b0 = b[lenb-1];
 // If one of the numbers has more digits than the other then the sign of
 // the longer one gives my the answer.
-    if (lena > lenb) return positive(a0 = a[lena-1]);
-    else if (lenb > lena) return negative(b0 = b[lenb-1]);
+    if (lena > lenb) return positive(a0);
+    else if (lenb > lena) return negative(b0);
 // When the two numbers are the same length but the top digits differ
 // then comparing those digits tells me all I need to know.
     if ((int64_t)a0 > (int64_t)b0) return true;
     if ((int64_t)a0 < (int64_t)b0) return false;
 // Otherwise I need to scan down through digits...
     lena--;
-    while (lena != 0)
+    for (;;)
     {   lena--;
         a0 = a[lena];
         b0 = b[lena];
         if (a0 > b0) return true;
         if (a0 < b0) return false;
+        if (lena == 0) return false;
     }
-// If the two values are the same return false
-    return false;
 }
 
 bool biggreaterp(number_representation a, number_representation b)
@@ -1445,20 +1444,20 @@ bool biggreaterp(number_representation a, number_representation b)
 
 bool biggeq(const uint64_t *a, size_t lena,
             const uint64_t *b, size_t lenb)
-{   uint64_t a0, b0;
-    if (lena > lenb) return positive(a0 = a[lena-1]);
-    else if (lenb > lena) return negative(b0 = b[lenb-1]);
+{   uint64_t a0 = a[lena-1], b0 = b[lenb-1];
+    if (lena > lenb) return positive(a0);
+    else if (lenb > lena) return negative(b0);
     if ((int64_t)a0 > (int64_t)b0) return true;
     if ((int64_t)a0 < (int64_t)b0) return false;
     lena--;
-    while (lena != 0)
+    for (;;)
     {   lena--;
         a0 = a[lena];
         b0 = b[lena];
         if (a0 > b0) return true;
         if (a0 < b0) return false;
+        if (lena == 0) return true;
     }
-    return true;
 }
 
 bool biggeq(number_representation a, number_representation b)
@@ -1717,11 +1716,11 @@ void bigrightshift(const uint64_t *a, size_t lena,
     size_t words = n/64;
     size_t bits = n % 64;
     if (bits == 0)
-    {   for (int i=0; i<lena-words; i++)
+    {   for (size_t i=0; i<lena-words; i++)
            r[i] = a[i+words];
     }
     else
-    {   for (int i=0; i<lena-words-1; i++)
+    {   for (size_t i=0; i<lena-words-1; i++)
            r[i] = (a[i+words]>>bits) |
                   (a[i+words+1]<<(64-bits));
         r[lena-words-1] = (uint64_t)((int64_t)a[lena-1]>>bits);
@@ -1921,8 +1920,6 @@ number_representation bigrevsubtract(number_representation a, number_representat
     return confirm_size(p, n, final_n);
 }
 
-extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
-
 // The next is temporary and is for debugging!
 static void temp(const char *label, const uint64_t *a, size_t lena)
 {   display(label, a, lena);
@@ -2024,7 +2021,7 @@ void bigsquare(const uint64_t *a, size_t lena,
 // Now add in the bits that do not get doubled.
     carry = 0;
     for (size_t i=0; i<lena; i++)
-    {   uint64_t hi, lo, w;
+    {   uint64_t hi, lo;
         multiply64(a[i], a[i], hi, lo);
 // Add (hi,lo) + carry in at r[2*i+1], r[2*i]
         carry = add_with_carry(lo, r[2*i], carry, r[2*i]);
@@ -2487,25 +2484,28 @@ public:
 // just so I feel safe.
     static void set_binary_output(std::ios_base &s)
     {   flag(s) = 1;
-        logprintf("setting binary mode\n");
         s.unsetf(std::ios_base::dec);
         s.unsetf(std::ios_base::oct);
         s.unsetf(std::ios_base::hex);
     }
     static bool is_binary_output(std::ios_base &s)
-    {   logprintf("testing binary mode %d\n", (int)flag(s));
-        return flag(s) != 0;
+    {   return flag(s) != 0;
     }
 private:
     static long & flag(std::ios_base &s)
     {   static int n = std::ios_base::xalloc();
-        logprintf("access binary flag at %d, val=%d\n", n, s.iword(n));
         return s.iword(n);
     }
 };
 
-std::ostream bin(std::ostream &os)
-{   radix::set_binary_output(os);
+// I want a new io manipulator "std::bin" to select binary mode output.
+// This will be used much as std::oct, std::dec and std::hex.
+
+namespace std
+{   std::ostream &bin(std::ostream &os)
+    {   radix::set_binary_output(os);
+        return os;
+    }
 }
 
 class Bignum
@@ -2518,6 +2518,7 @@ public:
     }
     ~Bignum()
     {   free_bignum(val);
+        val = (number_representation)0;
     }
     Bignum(int32_t n)
     {   val = int_to_bignum((int64_t)n);
@@ -2528,25 +2529,28 @@ public:
     Bignum(const char *s)
     {   val = string_to_bignum(s);
     }
+    Bignum(const Bignum &a)
+    {   val = copy_bignum_if_no_garbage_collector(a.val);
+    }
 
     void operator = (const Bignum &x)
     {   if (this == &x) return; // assign to self - a silly case!
-        free_bignum(val);
-        val = sometimes_copy_bignum(x.val);
+        if (val != (number_representation)0) free_bignum(val);
+        val = copy_bignum_if_no_garbage_collector(x.val);
     }
 
     void operator = (const int64_t x)
-    {   free_bignum(val);
+    {   if (val != (number_representation)0) free_bignum(val);
         val = int_to_bignum(x);
     }
 
     void operator = (const int32_t x)
-    {   free_bignum(val);
+    {   if (val != (number_representation)0) free_bignum(val);
         val = int_to_bignum((int64_t)x);
     }
 
     void operator = (const char *x)
-    {   free_bignum(val);
+    {   if (val != (number_representation)0) free_bignum(val);
         val = string_to_bignum(x);
     }
 
@@ -2592,7 +2596,6 @@ public:
     friend std::ostream & operator << (std::ostream &out, const Bignum &a)
     {   std::ios_base::fmtflags fg = out.flags();
         string_representation s;
-        logprintf("io flags = %x\n", (int)fg);
         if ((fg & std::ios_base::hex) != 0)
             s = bignum_to_string_hex(a.val);
         else if ((fg & std::ios_base::oct) != 0)
@@ -2864,28 +2867,19 @@ void display(const char *label, const Bignum &a)
 {   display(label, a.val);
 }
 
-int main(int argc, char *argv[])
-{
-    Bignum a, b, c;
-    a = 12345;
-    std::cout << "plain " << a
-              << " oct " << std::oct << a
-              << " hex " << std::hex << a
-              << " dec " << std::dec << a
-              << " bin " << bin      << a
-              << " oct " << std::oct << a
-              << " hex " << std::hex << a
-              << " dec " << std::dec << a
-              << std::endl;
-      
 
-    for (size_t i=0; i<20; i++)
-        std::cout << i << " " << uniform_positive_bignum(i) << std::endl;
-    for (size_t i=0; i<20; i++)
-        std::cout << i << " " << uniform_signed_bignum(i) << std::endl;
+
+int main(int argc, char *argv[])
+{   Bignum a, b, c;
     a = "100000000000000000000000000";
-    for (size_t i=0; i<20; i++)
-        std::cout << i << " " << uniform_upto_bignum(a) << std::endl;
+
+//    for (size_t i=0; i<20; i++)
+//        std::cout << i << " " << uniform_positive_bignum(i) << " of " << (1<<i) << std::endl;
+//    for (size_t i=0; i<20; i++)
+//        std::cout << i << " " << uniform_signed_bignum(i) << " of " << (1<<i) << std::endl;
+      for (size_t i=0; i<20; i++)
+          std::cout << i << " " << uniform_upto_bignum(a) << " of " << std::endl
+                    << i << " " << a << std::endl;
 
 
 //    b = "100000000000000000000000000000000";
