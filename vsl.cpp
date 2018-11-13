@@ -5477,18 +5477,13 @@ LispObject Lrds(LispObject lits, LispObject x)
     if (x == nil) x = packfixnum(3);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
-        if (n == old) return packfixnum(old);  // selecting current stream
-        if (0 <= n &&
-            n < MAX_LISPFILES &&
-            lispfiles[n] != NULL &&
+        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
             (file_direction & (1<<n)) == 0)
         {   filecurchar[old] = curchar;
             filesymtype[old] = symtype;
-            filecursym[old] = cursym;
             lispin = n;
             curchar = filecurchar[n];
             symtype = filesymtype[n];
-            cursym = filecursym[n];
             if (curchar == EOF) curchar = '\n';
             if (symtype == EOF) symtype = '?';
             return packfixnum(old);
@@ -5554,7 +5549,6 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
         if (y != input) file_direction |= (1 << n);
         filecurchar[n] = '\n';
         filesymtype[n] = '?';
-        filecursym[n] = nil;
         return packfixnum(n);
     }
     return error1("too many open files", x);
