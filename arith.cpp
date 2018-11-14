@@ -213,6 +213,7 @@ static inline LispObject boxfloat(double a)
 // start of an operation one normally has just an upper bound on how much
 // space will be needed - the exact number of words to be used only emerges
 // at the end. So the protocol I support is based on the calls:
+//
 //   uint64_t *preallocate(size_t n)
 //      This returns a pointer to n 64-bit words (and it may have allocated
 //      a space for a header in front of that).
@@ -268,6 +269,11 @@ static inline LispObject boxfloat(double a)
 //       trim the size down to include just that.
 //   void free_string(string_representation s)
 //       Release memory for the string.
+//
+// and finally for JUST the function "divide" I want
+//   cons_representation cons(number_representation a, number_representation b)
+//   number_representation car(cons_representation x)
+//   number_representation cdr(cons_representation x)
 
 extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
 
@@ -314,6 +320,7 @@ static inline size_t next_power_of_2(size_t n)
 
 typedef LispObject number_representation;
 typedef LispObject string_representation;
+typedef LispObject cons_representation;
 
 size_t number_size(number_representation a)
 {   return veclength(qheader(a))/sizeof(uint64_t);
@@ -334,6 +341,16 @@ uint64_t *number_data(number_representation a)
 const char *string_data(string_representation a)
 {   return (const char *)qstring(a);
 }
+
+number_representation &car(cons_representation a)
+{   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
+    return ((number_representation *)aw)[0];
+]
+
+number_representation &cdr(cons_representation a)
+{   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
+    return ((number_representation *)w)[1];
+]
 
 // My representation has a header word that is an intptr_t stored 8 bytes
 // ahead of the start of the data that represents bignum digits. On a 64-bit
@@ -362,6 +379,15 @@ uint64_t *preallocate(size_t n)
 // bignums linearly in memory until I run out of space. And I do not
 // provide any scheme for the user to release them.
     assert(memory_used <= MEMORY_SIZE);
+}
+
+cons_representation cons(number_representation a, number_representation b)
+{   uint64_t r = tagCONS + (uint64_t)&memory[memory_used];
+    memory_used += 2;
+    cons_representation c = (cons_representation)r;
+    car(c) = a;
+    cdr(c) = b;
+    return c
 }
 
 // The very most recent item allocated can be discarded by just winding
@@ -444,8 +470,7 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return (LispObject)&bignum_header(p) + tagATOM;
 }
 
-number_representation
-    copy_bignum_if_no_garbage_collector(number_representation p)
+number_representation copy_if_no_garbage_collector(number_representation p)
 {   return p;
 }
 
@@ -497,6 +522,10 @@ void free_string(string_representation p)
 
 typedef uint64_t *number_representation;
 typedef const char *string_representation;
+typedef struct _Cons
+{   number_representation car;
+    number_representation cdr;
+} Cons, *cons_representation;
 
 size_t number_size(number_representation a)
 {   return a[-1];
@@ -583,8 +612,7 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return cc;
 }
 
-number_representation
-    copy_bignum_if_no_garbage_collector(number_representation p)
+number_representation copy_if_no_garbage_collector(number_representation p)
 {   if (p == (number_representation)0) return p;
     size_t n = number_size(p);
     uint64_t *d = number_data(p);
@@ -601,6 +629,22 @@ void free_bignum(number_representation p)
 void free_string(string_representation p)
 {   if ((number_representation)p != (number_representation)0)
        (*free_function)((void *)p);
+}
+
+cons_representation cons(number_representation a, number_representation b)
+{   cons_representation r =
+        (cons_representation)(*malloc_function)(sizeof(Cons));
+    r->car = a;
+    r->cdr = b;
+    return r;
+}
+
+number_representation car(cons_representation a)
+{   return a->car;
+}
+
+number_representation cdr(cons_representation a)
+{   return a->cdr;
 }
 
 #endif // VSL
@@ -918,6 +962,11 @@ static thread_local std::seed_seq random_seed
 };
 static thread_local std::mt19937_64 mersenne_twister(random_seed);
 // mersenne_twister() now generates 64-bit unsigned integers.
+
+void reseed(uint64_t n)
+{   mersenne_twister.seed(n);
+}
+
 
 // Now a number of functions for setting up random bignums. These may be
 // useful for users, but they will alo be very useful while tetsing this
@@ -1989,8 +2038,10 @@ number_representation bigrevsubtract(number_representation a, number_representat
     return confirm_size(p, n, final_n);
 }
 
-// The next is temporary and is for debugging!
-static void temp(const char *label, const uint64_t *a, size_t lena)
+// The next is temporary and is for debugging! Again inline so that
+// there are no messy warnings if I do not use it!
+
+static inline void temp(const char *label, const uint64_t *a, size_t lena)
 {   display(label, a, lena);
     std::cout << string_data(bignum_to_string(a, lena, true)) << std::endl;
 }
@@ -2427,7 +2478,7 @@ void bigquotrem(uint64_t *a, size_t lena,
         lenq = 1;
         memcpy((void *)r, (void *)a, lena*sizeof(uint64_t));
         lenr = lena;
-        temp("quotient is zero, remainder: ", r, lenr);
+//        temp("quotient is zero, remainder: ", r, lenr);
         return;
     } 
 // By now a and b both have strictly positive leading digits.
@@ -2515,7 +2566,7 @@ number_representation bigremainder(number_representation a, number_representatio
     return confirm_size(r, na+1, n2);
 }
 
-number_representation bigdivide(number_representation a, number_representation b)
+cons_representation bigdivide(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n1 = na-nb+1;           // for the quotient
@@ -2531,8 +2582,7 @@ number_representation bigdivide(number_representation a, number_representation b
     abandon(w, nb);
     number_representation rr = confirm_size(r, na+1, n2);
     number_representation qq = confirm_size_x(q, na-nb+1, n1);
-// Need to return a CONS cell here... Duck out from that for now!
-    return (number_representation)0;
+    return cons(qq, rr);
 }
 
 
@@ -2605,13 +2655,13 @@ public:
     {   val = string_to_bignum(s);
     }
     Bignum(const Bignum &a)
-    {   val = copy_bignum_if_no_garbage_collector(a.val);
+    {   val = copy_if_no_garbage_collector(a.val);
     }
 
     void operator = (const Bignum &x)
     {   if (this == &x) return; // assign to self - a silly case!
         if (val != (number_representation)0) free_bignum(val);
-        val = copy_bignum_if_no_garbage_collector(x.val);
+        val = copy_if_no_garbage_collector(x.val);
     }
 
     void operator = (const int64_t x)
@@ -2952,10 +3002,10 @@ void display(const char *label, const Bignum &a)
 int main(int argc, char *argv[])
 {
     Bignum a, b, c;
-    a = "100000000000000000000000000";
+//    a = "100000000000000000000000000";
 
-    for (size_t i=0; i<20; i++)
-        std::cout << i << " " << uniform_positive_bignum(25) << " of " << (1<<25) << std::endl;
+//    for (size_t i=0; i<20; i++)
+//        std::cout << i << " " << uniform_positive_bignum(25) << " of " << (1<<25) << std::endl;
 //    for (size_t i=0; i<20; i++)
 //        std::cout << i << " " << uniform_signed_bignum(i) << " of " << (1<<i) << std::endl;
 //    for (size_t i=0; i<20; i++)
@@ -2965,11 +3015,35 @@ int main(int argc, char *argv[])
 //          std::cout << i << " " << random_upto_bits_bignum(100) << std::endl;
 
 
-    b = "1000000000000000000000000000000123";
-    c = b / a;
-    std::cout << c << std::endl;
-    c = b % a;
-    std::cout << c << std::endl;
+//    b = "1000000000000000000000000000000123";
+//    c = b / a;
+//    std::cout << c << std::endl;
+//    c = b % a;
+//    std::cout << c << std::endl;
+
+    for (int i=0; i<20; i++)
+    {   std::cout << i << std::endl;
+        reseed(6+i);
+        Bignum divisor = random_upto_bits_bignum(10) + 1;
+        Bignum remainder = uniform_upto_bignum(divisor);
+        Bignum quotient = random_upto_bits_bignum(10);
+        Bignum dividend = quotient*divisor + remainder;
+        Bignum q1 = dividend / divisor;
+        Bignum r1 = dividend % divisor;
+        if (q1 == quotient && r1 == remainder)
+        {   std::cout << "Passed pass " << i << std::endl;
+            continue;
+        }
+        std::cout << "FAILED" << std::endl;
+        std::cout << "divisor   " << divisor << std::endl;
+        std::cout << "remainder " << remainder << std::endl;
+        std::cout << "quotient  " << quotient << std::endl;
+        std::cout << "dividend  " << dividend << std::endl;
+        std::cout << "q1        " << q1 << std::endl;
+        std::cout << "r1        " << r1 << std::endl;
+        std::cout << std::endl;
+//      abort();
+    }
 
 //    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
 //    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
