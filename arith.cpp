@@ -59,8 +59,9 @@
 //   isqrt
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
 //   support where int128 is not available
-// a LOT of testing. Some profiling and performance tuning.
-
+// A LOT of testing. Some profiling and performance tuning.
+// Make use of malloc/free work in just powers of 2 and have the block for
+// a bignum not necessarily filled fully up.
 
 #define __STDC_FORMAT_MACROS 1
 #define __STDC_CONST_MACROS 1
@@ -212,9 +213,19 @@ static inline LispObject boxfloat(double a)
 // start of an operation one normally has just an upper bound on how much
 // space will be needed - the exact number of words to be used only emerges
 // at the end. So the protocol I support is based on the calls:
+//
 //   uint64_t *preallocate(size_t n)
 //      This returns a pointer to n 64-bit words (and it may have allocated
 //      a space for a header in front of that).
+//   void adandon(uint64_t *p, size_t n)
+//      Abandon an item from preallocate given its size. This should only
+//      used to discard the most recently preallocated unit. Well it will
+//      support v1=preapplocate(n1); v2=preallocate(n2); abandon(v2,n2);
+//      and then abandon(v1,n1);
+//   void abandon_x(uint64_t *p, size_t n)
+//      To be used to abandon memory when that which is to be abandoned is
+//      not the most recently allocated chunk. It sort of does what you might
+//      have expected confirm_size_x(p, n, 0) might have done.
 //   number_representation_t confirm_size(uint64_t *p, size_t n, size_t final_n)
 //      The pointer p was as returned by preallocate, but it is now known
 //      that just final_n words will be needed (this must be no larger than
@@ -258,8 +269,46 @@ static inline LispObject boxfloat(double a)
 //       trim the size down to include just that.
 //   void free_string(string_representation s)
 //       Release memory for the string.
+//
+// and finally for JUST the function "divide" I want
+//   cons_representation cons(number_representation a, number_representation b)
+//   number_representation car(cons_representation x)
+//   number_representation cdr(cons_representation x)
 
 extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
+
+#ifdef __GNUC__
+
+// Note that __GNUC__ also gets defined by clang on the Macintosh, so
+// this code is probably optimized there too. This must NEVER be called
+// with a zero argument.
+
+static inline int nlz(uint64_t x)
+{   return __builtin_clzll(x);  // Must use the 64-bit version of clz.
+}
+
+#else // __GNUC__
+
+static inline int nlz(uint64_t x)
+{   int n = 0;
+    if (x <= 0x00000000FFFFFFFFU) {n = n +32; x = x <<32;}
+    if (x <= 0x0000FFFFFFFFFFFFU) {n = n +16; x = x <<16;}
+    if (x <= 0x00FFFFFFFFFFFFFFU) {n = n + 8; x = x << 8;}
+    if (x <= 0x0FFFFFFFFFFFFFFFU) {n = n + 4; x = x << 4;}
+    if (x <= 0x3FFFFFFFFFFFFFFFU) {n = n + 2; x = x << 2;}
+    if (x <= 0x7FFFFFFFFFFFFFFFU) {n = n + 1;}
+    return n;
+}
+
+#endif // __GNUC__
+
+// Round a size_t integer up to the next higher power of 2.
+// I do this based on counting the number of leading zeros in the
+// binary representation of n-1.
+
+static inline size_t next_power_of_2(size_t n)
+{   return ((size_t)1) << (64-nlz((uint64_t)(n-1)));
+}
 
 #ifdef VSL
 
@@ -271,6 +320,7 @@ extern void display(const char *label, const uint64_t *a, size_t lena); // @@@
 
 typedef LispObject number_representation;
 typedef LispObject string_representation;
+typedef LispObject cons_representation;
 
 size_t number_size(number_representation a)
 {   return veclength(qheader(a))/sizeof(uint64_t);
@@ -291,6 +341,16 @@ uint64_t *number_data(number_representation a)
 const char *string_data(string_representation a)
 {   return (const char *)qstring(a);
 }
+
+number_representation &car(cons_representation a)
+{   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
+    return ((number_representation *)aw)[0];
+]
+
+number_representation &cdr(cons_representation a)
+{   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
+    return ((number_representation *)w)[1];
+]
 
 // My representation has a header word that is an intptr_t stored 8 bytes
 // ahead of the start of the data that represents bignum digits. On a 64-bit
@@ -314,11 +374,27 @@ static size_t memory_used = 0;
 
 uint64_t *preallocate(size_t n)
 {   uint64_t *r = &memory[memory_used+1];
-    memory_used += n + 1;
+    memory_used += (n + 1);
 // No attempt at garbage collection here - I will just allocate
 // bignums linearly in memory until I run out of space. And I do not
 // provide any scheme for the user to release them.
     assert(memory_used <= MEMORY_SIZE);
+}
+
+cons_representation cons(number_representation a, number_representation b)
+{   uint64_t r = tagCONS + (uint64_t)&memory[memory_used];
+    memory_used += 2;
+    cons_representation c = (cons_representation)r;
+    car(c) = a;
+    cdr(c) = b;
+    return c
+}
+
+// The very most recent item allocated can be discarded by just winding
+// a fringe pointer back.
+
+void abandon(uint64_t *p, size_t n)
+{   memory_used -= (n+1);
 }
 
 LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
@@ -355,6 +431,13 @@ LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
     return (LispObject)&bignum_header(p) + tagATOM;
 }
 
+// If I abandon an item other than the most recently allocated one I will
+// fill in where it used to be with a padder.
+
+void abandon_x(uint64_t *p, size_t n)
+{   p[-1] = tagHDR + typeGAP + packlength(n*sizeof(uint64_t));
+}
+
 LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 {
 // The array (p), whose size (n) is expressed in 64-bit chunks, was allocated
@@ -363,7 +446,7 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // The size of the header is sizeof(uintptr_t). That means that on a 32-bit
 // platform there is an unused 4-byte gap.
 // When the data is to be arranged as a string there is no longer any need
-// for the string data to remain 8-byte alogned, and so the gap can be
+// for the string data to remain 8-byte aligned, and so the gap can be
 // filled by shuffling data down. This then lets me reduce the final size
 // a little (typically by 4 bytes).
     if (sizeof(uint64_t) != sizeof(intptr_t))
@@ -387,8 +470,7 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return (LispObject)&bignum_header(p) + tagATOM;
 }
 
-number_representation
-    copy_bignum_if_no_garbage_collector(number_representation p)
+number_representation copy_if_no_garbage_collector(number_representation p)
 {   return p;
 }
 
@@ -419,7 +501,7 @@ void free_string(string_representation p)
 // still represent each bignum by a block of uint64_t values with a header
 // word, but now the header word would hold two values packed together.
 // One would be the length of data used for the bignum and the second would
-// indicate the total size of the memory block. I thinnk it would be reasonable
+// indicate the total size of the memory block. I think it would be reasonable
 // to use two uint32_t values in the space that could hold a uint64_t. If the
 // "length used" field counted in digits that could cope with up to 2^32
 // digits, each 8-bytes long, i.e. it could cope with individual bignums each
@@ -440,6 +522,10 @@ void free_string(string_representation p)
 
 typedef uint64_t *number_representation;
 typedef const char *string_representation;
+typedef struct _Cons
+{   number_representation car;
+    number_representation cdr;
+} Cons, *cons_representation;
 
 size_t number_size(number_representation a)
 {   return a[-1];
@@ -475,12 +561,20 @@ uint64_t *preallocate(size_t n)
     return &r[1];
 }
 
+void abandon(uint64_t *p, size_t n)
+{   (*free_function)((void *)&p[-1]);
+}
+
 number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
 {   p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
     p[0] = final_n;
     return &p[1];
+}
+
+void abandon_x(uint64_t *p, size_t n)
+{   (*free_function)((void *)&p[-1]);
 }
 
 number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
@@ -518,8 +612,7 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return cc;
 }
 
-number_representation
-    copy_bignum_if_no_garbage_collector(number_representation p)
+number_representation copy_if_no_garbage_collector(number_representation p)
 {   if (p == (number_representation)0) return p;
     size_t n = number_size(p);
     uint64_t *d = number_data(p);
@@ -536,6 +629,22 @@ void free_bignum(number_representation p)
 void free_string(string_representation p)
 {   if ((number_representation)p != (number_representation)0)
        (*free_function)((void *)p);
+}
+
+cons_representation cons(number_representation a, number_representation b)
+{   cons_representation r =
+        (cons_representation)(*malloc_function)(sizeof(Cons));
+    r->car = a;
+    r->cdr = b;
+    return r;
+}
+
+number_representation car(cons_representation a)
+{   return a->car;
+}
+
+number_representation cdr(cons_representation a)
+{   return a->cdr;
 }
 
 #endif // VSL
@@ -854,6 +963,11 @@ static thread_local std::seed_seq random_seed
 static thread_local std::mt19937_64 mersenne_twister(random_seed);
 // mersenne_twister() now generates 64-bit unsigned integers.
 
+void reseed(uint64_t n)
+{   mersenne_twister.seed(n);
+}
+
+
 // Now a number of functions for setting up random bignums. These may be
 // useful for users, but they will alo be very useful while tetsing this
 // code.
@@ -977,12 +1091,13 @@ void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
     lenr = (bits+63)/64;
     for (size_t i=0; i<lenr; i++)
         r[i] = mersenne_twister();
-    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (bits%64);
-    r[lenr-1] |= UINT64_C(1) << (63-bits%64);
+    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
+    r[lenr-1] |= UINT64_C(1) << (bits%64);
+    if (bits%64 == 63) r[lenr++] = 0;
 }
 
 number_representation random_upto_bits(size_t bits)
-{   size_t m = (bits + 63)/64;
+{   size_t m = 1+bits/64;
     if (m == 0) m = 1;
     uint64_t *r = preallocate(m);
     size_t lenr;
@@ -1003,6 +1118,23 @@ number_representation int_to_bignum(int64_t n)
 {   uint64_t *r = preallocate(1);
     int_to_bignum(n, r);
     return confirm_size(r, 1, 1);
+}
+
+static inline void unsigned_int_to_bignum(uint64_t n, uint64_t *r, size_t &lenr)
+{   r[0] = n;
+    if (negative(n))
+    {   r[1] = 0;
+        lenr = 2;
+    }
+    else lenr = 1;
+}
+
+number_representation unsigned_int_to_bignum(uint64_t n)
+{   size_t w = (negative(n) ? 2 : 1);
+    uint64_t *r = preallocate(w);
+    size_t lenr;
+    unsigned_int_to_bignum(n, r, lenr);
+    return confirm_size(r, w, lenr);
 }
 
 static const uint64_t ten19 = UINT64_C(10000000000000000000);
@@ -1113,31 +1245,6 @@ static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
 
 #endif // __SIZEOF__INT128__
 
-#ifdef __GNUC__
-
-// Note that __GNUC__ also gets defined by clang on the Macintosh, so
-// this code is probably optimized there too. This must NEVER be called
-// with a zero argument.
-
-static inline int nlz(uint64_t x)
-{   return __builtin_clzll(x);  // Must use the 64-bit version of clz.
-}
-
-#else // __GNUC__
-
-static inline int nlz(uint64_t x)
-{   int n = 0;
-    if (x <= 0x00000000FFFFFFFFU) {n = n +32; x = x <<32;}
-    if (x <= 0x0000FFFFFFFFFFFFU) {n = n +16; x = x <<16;}
-    if (x <= 0x00FFFFFFFFFFFFFFU) {n = n + 8; x = x << 8;}
-    if (x <= 0x0FFFFFFFFFFFFFFFU) {n = n + 4; x = x << 4;}
-    if (x <= 0x3FFFFFFFFFFFFFFFU) {n = n + 2; x = x << 2;}
-    if (x <= 0x7FFFFFFFFFFFFFFFU) {n = n + 1;}
-    return n;
-}
-
-#endif // __GNUC__
-
 // Note that if a bignum occupies over 1/8 of your total memory that
 // the number of bits it uses might overflow size_t. On a 32-bit system
 // this might happen if the number occupies over 512 Mbytes and I view
@@ -1153,6 +1260,17 @@ size_t bignum_bits(const uint64_t *a, size_t lena)
 
 // I want an estimate of the number of bytes that it will take to
 // represent a number when I convert it to a string.
+//
+// I will work through an example. Consider the input 12024932 = 0xb77c64.
+// [I use this value because at one time it revealed a mistake I had made!]
+// This value uses 24 bits, ie its value is at least 2^23 (8388608) and
+// it is less than 2^26 (16777216). log10(2^24) is 7.2247... so in decimal
+// the number will use 7.2 digits, well that must be rounded up to 8.
+// log10(2^24) = 24*log10(2) = 24*0.301030.. < 24*(617/2048) [because that
+// fraction = 0.30127.. > log10(2)]. So if one the number of decimal digits
+// that can be generated will be ceil(24*617/2048). I will compute that by
+// forming a quotient that is truncated towards zero and then adding 1, and
+// in this case this yields 8 as required.
 
 static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 {
@@ -1244,7 +1362,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
     {   *p1++ = buffer[--bp];
         len++;
     } while (bp != 0);
-    assert(len < m*sizeof(uint64_t));
+    assert(len <= m*sizeof(uint64_t));
     while (p < m)
     {   top = r[p++];
 // Here I want to print exactly 19 decimal digits.
@@ -1920,8 +2038,10 @@ number_representation bigrevsubtract(number_representation a, number_representat
     return confirm_size(p, n, final_n);
 }
 
-// The next is temporary and is for debugging!
-static void temp(const char *label, const uint64_t *a, size_t lena)
+// The next is temporary and is for debugging! Again inline so that
+// there are no messy warnings if I do not use it!
+
+static inline void temp(const char *label, const uint64_t *a, size_t lena)
 {   display(label, a, lena);
     std::cout << string_data(bignum_to_string(a, lena, true)) << std::endl;
 }
@@ -2263,13 +2383,13 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 // The test on the next line should detect all case where q0 was in error
 // by 2 and most when it was in error by 1.
 //
-    std::cout << "p0 = " << p0 << " / " << (UINT128)b[lenb-1] << std::endl;
-    std::cout << "q0 = " << q0 << "  r0 = " << r0 << std::endl;
+//    std::cout << "p0 = " << p0 << " / " << (UINT128)b[lenb-1] << std::endl;
+//    std::cout << "q0 = " << q0 << "  r0 = " << r0 << std::endl;
     if (q0 == UINT64_C(0x8000000000000000) ||
         (UINT128)q0*(UINT128)b[lenb-2] >
         ((UINT128)r0<<64 | a[lena-2]))
         q0--;
-    std::cout << "Leading quotient digit = " << q0 << std::endl;
+//    std::cout << "Leading quotient digit = " << q0 << std::endl;
 //
 // Now I want to go "a = a - b*q0*2^(31*(lena-lenb));" so that a
 // is set to an accurate remainder after using q0 as (part of) the
@@ -2277,8 +2397,8 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 // to reduce q0 again and compensate.
 //
     atop += multiply_and_subtract(a, lena, q0, b, lenb);
-    temp("mul & sub by q0: ", a, lena);
-    std::cout << "sets a to " << atop << std::endl;
+//    temp("mul & sub by q0: ", a, lena);
+//    std::cout << "sets a to " << atop << std::endl;
     if (negative(atop))
     {   q0--;
         std::cout << "need to add back correction" << std::endl;
@@ -2286,6 +2406,7 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 // When I add back b I ought to get a carry...
         assert(atop == 1);
     }
+// This next line is a potential DISASTER @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     lena--;  // a is now one digit shorter.
     return q0;
 }
@@ -2341,8 +2462,8 @@ void bigquotrem(uint64_t *a, size_t lena,
 // whether the eventual quotient and/or remainder will need to be negated
 // at the end. This leaves the two inputs as rows of unsigned 64-bit digits
 // with a[alen] and b[blen] both non-zero.
-    temp("quotrem a: ", a, lena);
-    temp("quotrem b: ", b, lenb);
+//    temp("quotrem a: ", a, lena);
+//    temp("quotrem b: ", b, lenb);
     bigabsval(a, lena, r, lenr);
     bigabsval(b, lenb, w, lenw);
     bool quot_sign = false, rem_sign = false;
@@ -2358,12 +2479,12 @@ void bigquotrem(uint64_t *a, size_t lena,
         lenq = 1;
         memcpy((void *)r, (void *)a, lena*sizeof(uint64_t));
         lenr = lena;
-        temp("quotient is zero, remainder: ", r, lenr);
+//        temp("quotient is zero, remainder: ", r, lenr);
         return;
     } 
 // By now a and b both have strictly positive leading digits.
-    temp("quotrem r: ", a, lenr);
-    temp("quotrem w: ", b, lenw);
+//    temp("quotrem r: ", a, lenr);
+//    temp("quotrem w: ", b, lenw);
     lenq = lena-lenb+1; // potential length of quotient.
 // I will multiply a and b by a scale factor that gets the top digit of "b"
 // reasonably large. The value stored in "a" can become one digit longer,
@@ -2377,23 +2498,23 @@ void bigquotrem(uint64_t *a, size_t lena,
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not. So beware that
 // r now has digits running from 0 to lenr rather than 0 to lenr-1.
-    std::cout << "scale by " << scale << std::endl;
+//    std::cout << "scale by " << scale << std::endl;
     bigmultiply_by_int_in_place(r, lenr, scale, r[lenr]);
     uint64_t wtop;
     bigmultiply_by_int_in_place(w, lenw, scale, wtop);
     assert(wtop == 0);
-    temp("scaled r: ", r, lenr);
-    temp("scaled w: ", w, lenw);
-    temp("q (junk here): ", q, lenq);
+//    temp("scaled r: ", r, lenr);
+//    temp("scaled w: ", w, lenw);
+//    temp("q (junk here): ", q, lenq);
     size_t m = lenq-1;
     for (;;)
     {   uint64_t qd = next_quotient_digit(
             r[lenr], r, lenr,
             w, lenw);
-        std::cout << "next quotient digit returned as " << qd << std::endl;
+//        std::cout << "next quotient digit returned as " << qd << std::endl;
         q[m] = qd;
-        std::cout << "just set digit " << m << "of quotient" << std::endl;
-        temp("q (partial here): ", q, lenq);
+//        std::cout << "just set digit " << m << "of quotient" << std::endl;
+//        temp("q (partial here): ", q, lenq);
         if (m == 0) break;
         m--;
     }
@@ -2401,13 +2522,13 @@ void bigquotrem(uint64_t *a, size_t lena,
 // so if its top digit has its top bit set I need to prepend a zero;
     if (negative(q[lenq-1])) q[lenq++] = 0;
     if (quot_sign) negate_in_place(q, lenq);
-    temp("quotient returns as: ", q, lenq);
-    std::cout << "Now I need to unscale" << std::endl;
+//    temp("quotient returns as: ", q, lenq);
+//    std::cout << "Now I need to unscale" << std::endl;
 // Unscale and correct the signs.
     unscale(r, lenr, scale);
     if (negative(r[lenq-1])) r[lenq++] = 0;
     if (rem_sign) negate_in_place(r, lenr);
-    temp("remainder returns as: ", r, lenr);
+//    temp("remainder returns as: ", r, lenr);
 }
 
 number_representation bigquotient(number_representation a, number_representation b)
@@ -2423,41 +2544,46 @@ number_representation bigquotient(number_representation a, number_representation
                w, n3,
                q, n1, r, n2);
 // here w and r are no longer needed.
+    abandon(w, nb);
+    abandon(r, na+1);
     return confirm_size(q, na+nb+1, n1);
-}
-
-void bigremainder(const uint64_t *a, size_t lena,
-                  const uint64_t *b, size_t lenb,
-                  uint64_t *r, size_t &lenr)
-{   std::cout << "Division not dcoded yet\n" << std::endl;
-    abort();
 }
 
 number_representation bigremainder(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
-    size_t n = na+nb;
-    uint64_t *p = preallocate(n);
-    size_t final_n;
-    bigremainder(number_data(a), na, number_data(b), nb, p, final_n);
-    return confirm_size(p, n, final_n);
+    size_t n2 = na+1;              // for workspace and the remainder
+    uint64_t *r = preallocate(n2);
+    size_t n1 = na-nb+1;           // for the quotient
+    uint64_t *q = preallocate(n1);
+    size_t n3 = nb;                // temp workspace
+    uint64_t *w = preallocate(n3);
+    bigquotrem(a, na, b, nb,
+               w, n3,
+               q, n1, r, n2);
+// here w and q are no longer needed.
+    abandon(w, nb);
+    abandon(q, na-nb+1);
+    return confirm_size(r, na+1, n2);
 }
 
-void bigdivide(const uint64_t *a, size_t lena,
-               const uint64_t *b, size_t lenb,
-               uint64_t *r, size_t &lenr)
-{   std::cout << "Division not dcoded yet" << std::endl;
-    abort();
-}
-
-number_representation bigdivide(number_representation a, number_representation b)
+cons_representation bigdivide(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
-    size_t n = na+nb;
-    uint64_t *p = preallocate(n);
-    size_t final_n;
-    bigdivide(number_data(a), na, number_data(b), nb, p, final_n);
-    return confirm_size(p, n, final_n);
+    size_t n1 = na-nb+1;           // for the quotient
+    uint64_t *q = preallocate(n1);
+    size_t n2 = na+1;              // for workspace and the remainder
+    uint64_t *r = preallocate(n2);
+    size_t n3 = nb;                // temp workspace
+    uint64_t *w = preallocate(n3);
+    bigquotrem(a, na, b, nb,
+               w, n3,
+               q, n1, r, n2);
+// here w is longer needed.
+    abandon(w, nb);
+    number_representation rr = confirm_size(r, na+1, n2);
+    number_representation qq = confirm_size_x(q, na-nb+1, n1);
+    return cons(qq, rr);
 }
 
 
@@ -2467,7 +2593,7 @@ number_representation bigdivide(number_representation a, number_representation b
 // some similar system) then I think that the rest of the code will
 // with to call bigadd etc directly and the "convenience" layer will emerge
 // when arithmetic gets reflected up unto the Lisp world, eg as (plus 2 3).
-// However for other users it may be handy to provide operator overloading
+// However for other users it will be handy to provide operator overloading
 // so that C++ code can use buf arithmetic integrated in with the rest of
 // their code and using infix operators.
 
@@ -2530,13 +2656,13 @@ public:
     {   val = string_to_bignum(s);
     }
     Bignum(const Bignum &a)
-    {   val = copy_bignum_if_no_garbage_collector(a.val);
+    {   val = copy_if_no_garbage_collector(a.val);
     }
 
     void operator = (const Bignum &x)
     {   if (this == &x) return; // assign to self - a silly case!
         if (val != (number_representation)0) free_bignum(val);
-        val = copy_bignum_if_no_garbage_collector(x.val);
+        val = copy_if_no_garbage_collector(x.val);
     }
 
     void operator = (const int64_t x)
@@ -2544,7 +2670,17 @@ public:
         val = int_to_bignum(x);
     }
 
+    void operator = (const uint64_t x)
+    {   if (val != (number_representation)0) free_bignum(val);
+        val = unsigned_int_to_bignum(x);
+    }
+
     void operator = (const int32_t x)
+    {   if (val != (number_representation)0) free_bignum(val);
+        val = int_to_bignum((int64_t)x);
+    }
+
+    void operator = (const uint32_t x)
     {   if (val != (number_representation)0) free_bignum(val);
         val = int_to_bignum((int64_t)x);
     }
@@ -2870,22 +3006,44 @@ void display(const char *label, const Bignum &a)
 
 
 int main(int argc, char *argv[])
-{   Bignum a, b, c;
-    a = "100000000000000000000000000";
+{
+    Bignum a, b, c;
 
-//    for (size_t i=0; i<20; i++)
-//        std::cout << i << " " << uniform_positive_bignum(i) << " of " << (1<<i) << std::endl;
-//    for (size_t i=0; i<20; i++)
-//        std::cout << i << " " << uniform_signed_bignum(i) << " of " << (1<<i) << std::endl;
-      for (size_t i=0; i<20; i++)
-          std::cout << i << " " << uniform_upto_bignum(a) << " of " << std::endl
-                    << i << " " << a << std::endl;
+    a = 50;
+    b = 15;
+    display("a", a);
+    display("b", b);
+    c = a / b;
+    display("c", c);
+    c = a % b;
+    display("c", c);
+    return 0;
 
 
-//    b = "100000000000000000000000000000000";
-//    c = b / a;
-//    display("c", c);
-//    std::cout << c << std::endl;
+    int maxbits = 10;
+    for (int i=0; i<20; i++)
+    {   std::cout << i << std::endl;
+        reseed(6+i);
+        Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
+        Bignum remainder = uniform_upto_bignum(divisor);
+        Bignum quotient = random_upto_bits_bignum(maxbits);
+        Bignum dividend = quotient*divisor + remainder;
+        Bignum q1 = dividend / divisor;
+        Bignum r1 = dividend % divisor;
+        if (q1 == quotient && r1 == remainder)
+        {   std::cout << "Passed pass " << i << std::endl;
+            continue;
+        }
+        std::cout << "FAILED" << std::endl;
+        std::cout << "divisor   " << divisor << std::endl;
+        std::cout << "remainder " << remainder << std::endl;
+        std::cout << "quotient  " << quotient << std::endl;
+        std::cout << "dividend  " << dividend << std::endl;
+        std::cout << "q1        " << q1 << std::endl;
+        std::cout << "r1        " << r1 << std::endl;
+        std::cout << std::endl;
+//      abort();
+    }
 
 //    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
 //    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
