@@ -2406,6 +2406,7 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 // When I add back b I ought to get a carry...
         assert(atop == 1);
     }
+// This next line is a potential DISASTER @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     lena--;  // a is now one digit shorter.
     return q0;
 }
@@ -2672,6 +2673,11 @@ public:
     void operator = (const uint64_t x)
     {   if (val != (number_representation)0) free_bignum(val);
         val = unsigned_int_to_bignum(x);
+    }
+
+    void operator = (const int32_t x)
+    {   if (val != (number_representation)0) free_bignum(val);
+        val = int_to_bignum((int64_t)x);
     }
 
     void operator = (const uint32_t x)
@@ -3002,31 +3008,25 @@ void display(const char *label, const Bignum &a)
 int main(int argc, char *argv[])
 {
     Bignum a, b, c;
-//    a = "100000000000000000000000000";
 
-//    for (size_t i=0; i<20; i++)
-//        std::cout << i << " " << uniform_positive_bignum(25) << " of " << (1<<25) << std::endl;
-//    for (size_t i=0; i<20; i++)
-//        std::cout << i << " " << uniform_signed_bignum(i) << " of " << (1<<i) << std::endl;
-//    for (size_t i=0; i<20; i++)
-//        std::cout << i << " " << uniform_upto_bignum(a) << " of " << std::endl
-//                  << i << " " << a << std::endl;
-//      for (size_t i=0; i<20; i++)
-//          std::cout << i << " " << random_upto_bits_bignum(100) << std::endl;
+    a = 50;
+    b = 15;
+    display("a", a);
+    display("b", b);
+    c = a / b;
+    display("c", c);
+    c = a % b;
+    display("c", c);
+    return 0;
 
 
-//    b = "1000000000000000000000000000000123";
-//    c = b / a;
-//    std::cout << c << std::endl;
-//    c = b % a;
-//    std::cout << c << std::endl;
-
+    int maxbits = 10;
     for (int i=0; i<20; i++)
     {   std::cout << i << std::endl;
         reseed(6+i);
-        Bignum divisor = random_upto_bits_bignum(10) + 1;
+        Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
         Bignum remainder = uniform_upto_bignum(divisor);
-        Bignum quotient = random_upto_bits_bignum(10);
+        Bignum quotient = random_upto_bits_bignum(maxbits);
         Bignum dividend = quotient*divisor + remainder;
         Bignum q1 = dividend / divisor;
         Bignum r1 = dividend % divisor;
