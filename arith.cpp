@@ -2212,25 +2212,23 @@ void bigpower(uint64_t *a, size_t lena, uint64_t n,
     bigmultiply(v, lenv, w, lenw, r, lenr);
 }
 
-//
-// The next section of code will become the division stuff for bignums.
-// At present it is very very much work in progress, with a sketch that
-// shows the structure I intend to use but with some functions only present
-// as stubs and MANY things just plain incorrect.
-//
+// During long division I will scale my numbers by mulriplying by a
+// factor (s). I do that in place. In general multiplying by an integer
+// could cause values to become one digit longer. Rather than writing the
+// extra overflow digit into the array of digits I return it as the
+// result of the scale() function.
 
-static void bigmultiply_by_int_in_place(uint64_t *r, size_t lenr,
-                                        uint64_t scale, uint64_t &extra)
+static uint64_t scale(uint64_t *r, size_t lenr, uint64_t s)
 {   uint64_t carry = 0;
     for (size_t i=0; i<lenr; i++)
     {   uint64_t hi, lo;
-        multiply64(r[i], scale, hi, lo);
+        multiply64(r[i], s, hi, lo);
         uint64_t w = r[i] = lo + carry;
 // NB that adding 1 to hi here can never overflow.
         if (w < carry) carry = hi + 1;
         else carry = hi;
     }
-    extra = carry;
+    return carry;
 }
 
 // divide (hi,lo) by divisor and generate a quotient and a remainder. The
@@ -2371,10 +2369,9 @@ static uint64_t add_back_correction(uint64_t *a, size_t lena,
     return carry;
 }
 
-static inline uint64_t next_quotient_digit(uint64_t atop,
-                                           uint64_t *a, size_t &lena,
+static inline uint64_t next_quotient_digit(uint64_t *a, size_t &lena,
                                            uint64_t *b, size_t lenb)
-{   UINT128 p0 = (UINT128)atop<<64 | a[lena-1];
+{   UINT128 p0 = (((UINT128)a[lena-1])<<64) | a[lena-2];
     uint64_t q0 =  (uint64_t)(p0 / (UINT128)b[lenb-1]);
     uint64_t r0 =  (uint64_t)(p0 % (UINT128)b[lenb-1]);
 // At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
@@ -2387,26 +2384,22 @@ static inline uint64_t next_quotient_digit(uint64_t atop,
 //    std::cout << "q0 = " << q0 << "  r0 = " << r0 << std::endl;
     if (q0 == UINT64_C(0x8000000000000000) ||
         (UINT128)q0*(UINT128)b[lenb-2] >
-        ((UINT128)r0<<64 | a[lena-2]))
+        (((UINT128)r0)<<64 | a[lena-3]))
         q0--;
 //    std::cout << "Leading quotient digit = " << q0 << std::endl;
 //
-// Now I want to go "a = a - b*q0*2^(31*(lena-lenb));" so that a
+// Now I want to go "a = a - b*q0*2^(64*(lena-lenb));" so that a
 // is set to an accurate remainder after using q0 as (part of) the
 // quotient. This may carry an overshoot into atop and if so I will need
 // to reduce q0 again and compensate.
 //
-    atop += multiply_and_subtract(a, lena, q0, b, lenb);
+    multiply_and_subtract(a, lena, q0, b, lenb);
 //    temp("mul & sub by q0: ", a, lena);
-//    std::cout << "sets a to " << atop << std::endl;
-    if (negative(atop))
+    if (negative(a[lena-1]))
     {   q0--;
         std::cout << "need to add back correction" << std::endl;
-        atop = add_back_correction(a, lena, b, lenb);
-// When I add back b I ought to get a carry...
-        assert(atop == 1);
+        add_back_correction(a, lena, b, lenb);
     }
-// This next line is a potential DISASTER @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
     lena--;  // a is now one digit shorter.
     return q0;
 }
@@ -2426,23 +2419,92 @@ static void negate_in_place(uint64_t *r, size_t &lenr)
         negative(r[lenr-2])) lenr--;
 }
 
-// r is an unsigned number. Divide it by scale, and the quotient
+// r is an unsigned number. Divide it by the integer s: the quotient
 // ought to be exact.
 
-static void unscale(uint64_t *r, size_t &lenr, uint64_t scale)
+static void unscale(uint64_t *r, size_t &lenr, uint64_t s)
 {   uint64_t hi = 0;
-    for (size_t i = lenr-1; i!=0; i--)
+    size_t i = lenr-1;
+    for (;;)
     {   UINT128 p = ((UINT128)hi << 64) | r[i];
-        uint64_t q = (uint64_t)(p / scale);
-        hi = (uint64_t)(p % scale);
+        uint64_t q = (uint64_t)(p / s);
+        hi = (uint64_t)(p % s);
         r[i] = q;
+        if (i == 0) break;
+        i--;
     }
-    UINT128 p = ((UINT128)hi << 64) | r[0];
-    uint64_t q = (uint64_t)(p / scale);
-    hi = (uint64_t)(p % scale);
-    r[0] = q;
-    if (r[lenr-1] == 0) lenr--;
     assert(hi==0);
+    truncate_positive(r, lenr);
+}
+
+// Set q to [a]/b and return [a]%b where [1] and b are both signed
+// values. Because the remainder must be smaller than b it will be a valid
+// int64_t value.
+// This version MUST be used when dividing by a one-digit bignum!
+// I optimise for division by 1 bacause I guess that case may arise
+// in cases like (a*b)/gcd(a,b) where the gcd can be 1 from time to time.
+// There is just one miserable case where the result can be a number longer
+// than the input, and that is (eg) (-0x8000000000000000)/(-1) which needs
+// a padding leading zero added for the positive result to be valid.
+// That case is most easily handled by making division by -1 a special
+// case, even if it is perhaps not very common.
+
+int64_t shortquotrem(uint64_t *a, size_t lena,
+                     int64_t b,
+                     uint64_t *q, size_t &lenq)
+{   lenq = lena;
+    assert(b != 0);
+    if (b == 1)
+    {   memcpy(q, a, lena*sizeof(uint64_t));
+        return 0;
+    }
+    bool sign_a = negative(a[lena-1]);
+    if (sign_a)
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena; i++)
+        {   uint64_t w = q[i] = ~a[i] + carry;
+            carry = (w < carry ? 1 : 0);
+        }
+// Here is where I deal with division by 1 specially - just in the case
+// that the divident had started off negative, in which case I just negated
+// it to get its absolute value.
+        if (b == -1)
+        {   if (negative(q[lenq-1]))
+            {   q[lenq++] = 0;
+                return 0;
+            }
+        }
+    }
+    else memcpy(q, a, lena*sizeof(uint64_t));
+    bool sign_b;
+    uint64_t bb;
+    if (b < 0)
+    {   sign_b = true;
+        bb = -(uint64_t)b;
+    }
+    else
+    {   sign_b = false;
+        bb = (uint64_t)b;
+    }
+    uint64_t rr = 0;
+    size_t n = lena-1;
+    for (;;)
+    {   UINT128 p = ((UINT128)rr)<<64 | q[n];
+        q[n] = (uint64_t)(p / bb);
+        rr = (uint64_t)(p % bb);
+        if (n == 0) break;
+        n--;
+    }
+// q and rr are now quotient & remainder from unsigned division.
+    if (sign_a != sign_b)
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena; i++)
+        {   uint64_t w = q[i] = ~q[i] + carry;
+            carry = (w < carry ? 1 : 0);
+        }
+    }
+    if (sign_b) return (int64_t)(-rr);
+    else return (int64_t)rr;
 }
 
 // I need to make copies of both numerator and denominator here because
@@ -2456,7 +2518,8 @@ void bigquotrem(uint64_t *a, size_t lena,
                 uint64_t *w, size_t lenw,   // temp - size lenb
                 uint64_t *q, size_t &lenq,  // quotient - size lena-lenb+1
                 uint64_t *r, size_t &lenr)  // remainder - size lena+1
-{
+{   assert(lena >= 2);
+    assert(lenb >= 2);
 // I copy the absolute values of a and b to places where it will be
 // OK to overwrite them, taking their absolute values as I go. I record
 // whether the eventual quotient and/or remainder will need to be negated
@@ -2482,7 +2545,6 @@ void bigquotrem(uint64_t *a, size_t lena,
 //        temp("quotient is zero, remainder: ", r, lenr);
         return;
     } 
-// By now a and b both have strictly positive leading digits.
 //    temp("quotrem r: ", a, lenr);
 //    temp("quotrem w: ", b, lenw);
     lenq = lena-lenb+1; // potential length of quotient.
@@ -2494,23 +2556,19 @@ void bigquotrem(uint64_t *a, size_t lena,
 // proposed 0x7fffffffU/bignum_digits(b)[lenb] and if you look at just the
 // leading digit of b alone that seems OK, but I am concerned that when you
 // take lower digits of b into account that multiplying b by it can overflow.
-    uint64_t scale = UINT64_C(0x8000000000000000) / (w[lenw-1] + 1);
+    uint64_t ss = UINT64_C(0x8000000000000000) / (w[lenw-1] + 1);
 // When I scale the dividend expands into an extra digit but the scale
-// factor has been chosen so that the divisor does not. So beware that
-// r now has digits running from 0 to lenr rather than 0 to lenr-1.
-//    std::cout << "scale by " << scale << std::endl;
-    bigmultiply_by_int_in_place(r, lenr, scale, r[lenr]);
-    uint64_t wtop;
-    bigmultiply_by_int_in_place(w, lenw, scale, wtop);
-    assert(wtop == 0);
+// factor has been chosen so that the divisor does not.
+//    std::cout << "scale by " << ss << std::endl;
+    r[lenr] = scale(r, lenr, ss);
+    lenr++;
+    assert(scale(w, lenw, ss) == 0);
 //    temp("scaled r: ", r, lenr);
 //    temp("scaled w: ", w, lenw);
 //    temp("q (junk here): ", q, lenq);
     size_t m = lenq-1;
     for (;;)
-    {   uint64_t qd = next_quotient_digit(
-            r[lenr], r, lenr,
-            w, lenw);
+    {   uint64_t qd = next_quotient_digit(r, lenr, w, lenw);
 //        std::cout << "next quotient digit returned as " << qd << std::endl;
         q[m] = qd;
 //        std::cout << "just set digit " << m << "of quotient" << std::endl;
@@ -2525,7 +2583,7 @@ void bigquotrem(uint64_t *a, size_t lena,
 //    temp("quotient returns as: ", q, lenq);
 //    std::cout << "Now I need to unscale" << std::endl;
 // Unscale and correct the signs.
-    unscale(r, lenr, scale);
+    unscale(r, lenr, ss);
     if (negative(r[lenq-1])) r[lenq++] = 0;
     if (rem_sign) negate_in_place(r, lenr);
 //    temp("remainder returns as: ", r, lenr);
@@ -2534,6 +2592,12 @@ void bigquotrem(uint64_t *a, size_t lena,
 number_representation bigquotient(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
+    if (nb == 1)
+    {   uint64_t *q = preallocate(na+1);
+        uint64_t nq;
+        (void)shortquotrem(a, na, (int64_t)b[0], q, nq);
+        return confirm_size(q, na+1, nq);
+    }
     size_t n1 = na-nb+1;           // for the quotient
     uint64_t *q = preallocate(n1);
     size_t n2 = na+1;              // for workspace and the remainder
@@ -2552,6 +2616,15 @@ number_representation bigquotient(number_representation a, number_representation
 number_representation bigremainder(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
+    if (nb == 1)
+    {   uint64_t *q = preallocate(na+1);
+        uint64_t nq;
+        int64_t r = shortquotrem(a, na, (int64_t)b[0], q, nq);
+        abandon(q, na+1);
+        q = preallocate(1);
+        q[0] = r;
+        return confirm_size(q, 1, 1);
+    }
     size_t n2 = na+1;              // for workspace and the remainder
     uint64_t *r = preallocate(n2);
     size_t n1 = na-nb+1;           // for the quotient
@@ -2570,6 +2643,15 @@ number_representation bigremainder(number_representation a, number_representatio
 cons_representation bigdivide(number_representation a, number_representation b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
+    if (nb == 1)
+    {   uint64_t *q = preallocate(na+1);
+        uint64_t nq;
+        int64_t r = shortquotrem(a, na, (int64_t)b[0], q, nq);
+        number_representation qq = confirm_size(q, na+1, nq);
+        uint64_t *rr = preallocate(1);
+        rr[0] = r;
+        return cons(qq, confirm_size(rr, 1, 1));
+    }
     size_t n1 = na-nb+1;           // for the quotient
     uint64_t *q = preallocate(n1);
     size_t n2 = na+1;              // for workspace and the remainder
@@ -2585,9 +2667,6 @@ cons_representation bigdivide(number_representation a, number_representation b)
     number_representation qq = confirm_size_x(q, na-nb+1, n1);
     return cons(qq, rr);
 }
-
-
-
 
 // If this code is going to be used within a Lisp system (or indeed
 // some similar system) then I think that the rest of the code will
@@ -3009,20 +3088,9 @@ int main(int argc, char *argv[])
 {
     Bignum a, b, c;
 
-    a = 50;
-    b = 15;
-    display("a", a);
-    display("b", b);
-    c = a / b;
-    display("c", c);
-    c = a % b;
-    display("c", c);
-    return 0;
-
-
-    int maxbits = 10;
+    int maxbits = 80;
     for (int i=0; i<20; i++)
-    {   std::cout << i << std::endl;
+    {   std::cout << i << "  ";
         reseed(6+i);
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
         Bignum remainder = uniform_upto_bignum(divisor);
