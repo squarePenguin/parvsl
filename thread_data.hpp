@@ -70,7 +70,7 @@ void reset_segments() {
 
 // For now, just make sure all threads are joined at some point
 std::unordered_map<int, Thread_RAII> active_threads;
-int tid = 0;
+static std::atomic_int tid(0);
 
 std::mutex thread_mutex;
 int start_thread(std::function<void(void)> f) {
@@ -91,21 +91,22 @@ int start_thread(std::function<void(void)> f) {
     return tid;
 }
 
-static std::atomic_size_t num_symbols(0);
+static std::atomic_int num_symbols(0);
 
-thread_local static std::vector<LispObject> local_symbols; 
+thread_local static std::vector<LispObject> local_symbols;
+// thread_local static 
 
-inline 
-void set_symbol(size_t loc, LispObject val) {
-    if (num_symbols > local_symbols.size()) {
-        local_symbols.resize(num_symbols, undefined);
-    }
-    assert(loc < local_symbols.size());
-    local_symbols[loc] = val;
-}
+// inline 
+// void set_symbol(int loc, LispObject val) {
+//     if (num_symbols > local_symbols.size()) {
+//         local_symbols.resize(num_symbols, undefined);
+//     }
+//     assert(loc < local_symbols.size());
+//     local_symbols[loc] = val;
+// }
 
 // inline
-// LispObject get_symbol(size_t loc) {
+// LispObject get_symbol(int loc) {
 //     if (num_symbols > local_symbols.size()) {
 //         local_symbols.resize(num_symbols, undefined);
 //     }
@@ -113,29 +114,73 @@ void set_symbol(size_t loc, LispObject val) {
 //     return local_symbols[loc];
 // }
 
+static std::mutex alloc_symbol_mutex;
+
+/**
+ * This just returns a shared id to index the symbol
+ * */
 inline
-LispObject* get_symbol(size_t loc) {
-    if (num_symbols > local_symbols.size()) {
+int allocate_symbol() {
+    std::unique_lock<std::mutex> lock(alloc_symbol_mutex);
+    int loc = num_symbols;
+    num_symbols += 1;
+    return loc;
+}
+
+LispObject& get_symbol(int loc) {
+    if (num_symbols > (int)local_symbols.size()) {
         local_symbols.resize(num_symbols, undefined);
     }
-    assert(loc < local_symbols.size());
-    return &local_symbols[loc];
+    // std::cerr << loc << ' ' << num_symbols << ' ' << local_symbols.size() << std::endl;
+    // assert(loc < (int)local_symbols.size());
+    if (loc >= (int)local_symbols.size()) {
+        std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
+        throw std::logic_error("bad thread_local index");
+    }
+    return local_symbols[loc];
+}
+
+LispObject& symval(LispObject s) {
+    assert(isSYMBOL(s));
+    if ((qflags(s) & flagGLOBAL) != 0) {
+        return qvalue(s);
+    } else {
+        return get_symbol(qfixnum(qvalue(s)));
+    }
+}
+
+inline
+void set_value(LispObject x, LispObject val) {
+    if ((qflags(x) & flagGLOBAL) != 0) {
+        qvalue(x) = val;
+    } else {
+        int loc = qfixnum(qvalue(x));
+        get_symbol(loc) = val;
+    }
+}
+
+inline
+LispObject& get_value(LispObject x) {
+    if ((qflags(x) & flagGLOBAL) != 0) {
+        return qvalue(x);
+    } else {
+        int loc = qfixnum(qvalue(x));
+        return get_symbol(loc);
+    }
 }
 
 class Shallow_bind {
 private:
+    LispObject loc;
     LispObject save;
-    LispObject *loc;
 public:
-    Shallow_bind(LispObject x, LispObject val) {
-        // TODO VB: treat thread_local storage
-        // loc = (qflags(x) & flagGLOBAL != 0) ? &qvalue(x) : get_symbol(qvalue(x));
-        save = *loc;
-        *loc = val;
+    Shallow_bind(LispObject x, LispObject tval) : loc(x) {
+        save = tval;
+        std::swap(symval(loc), save);
     }
 
     ~Shallow_bind() {
-        *loc = save;
+        symval(loc) = save;
     }
 };
 
