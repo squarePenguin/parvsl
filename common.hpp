@@ -173,6 +173,7 @@ LispObject *C_stackbase;
 // 40K distinct symbols...
 
 #define OBHASH_SIZE 10007
+#define MAX_LISPFILES 30
 
 // Some Lisp values that I will use frequently...
 
@@ -204,6 +205,8 @@ LispObject *C_stackbase;
 #define dfprint    bases[25]
 #define bignum     bases[26]
 #define BASES_SIZE       27
+
+#define filecursym (&bases[27])
 
 LispObject bases[BASES_SIZE];
 LispObject obhash[OBHASH_SIZE];
