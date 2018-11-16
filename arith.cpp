@@ -1,4 +1,4 @@
-// Big-number arithmetic.                                  A C Norman, 2018
+// next_quoBig-number arithmetic.                                  A C Norman, 2018
 
 // There are quite a lot of bignumber packages out there on the web,
 // but none of them seemed to be such that I could readily use them
@@ -2495,6 +2495,7 @@ int64_t shortquotrem(uint64_t *a, size_t lena,
         if (n == 0) break;
         n--;
     }
+    truncate_positive(q, lenq);
 // q and rr are now quotient & remainder from unsigned division.
     if (sign_a != sign_b)
     {   uint64_t carry = 1;
@@ -2502,6 +2503,7 @@ int64_t shortquotrem(uint64_t *a, size_t lena,
         {   uint64_t w = q[i] = ~q[i] + carry;
             carry = (w < carry ? 1 : 0);
         }
+        truncate_negative(q, lenq);
     }
     if (sign_b) return (int64_t)(-rr);
     else return (int64_t)rr;
@@ -2579,12 +2581,14 @@ void bigquotrem(uint64_t *a, size_t lena,
 // The quotient is OK correct now but has been computed as an unsigned value
 // so if its top digit has its top bit set I need to prepend a zero;
     if (negative(q[lenq-1])) q[lenq++] = 0;
+    else truncate_positive(q, lenq);
     if (quot_sign) negate_in_place(q, lenq);
 //    temp("quotient returns as: ", q, lenq);
 //    std::cout << "Now I need to unscale" << std::endl;
 // Unscale and correct the signs.
     unscale(r, lenr, ss);
-    if (negative(r[lenq-1])) r[lenq++] = 0;
+    if (negative(r[lenr-1])) r[lenr++] = 0;
+    else truncate_positive(r, lenr);
     if (rem_sign) negate_in_place(r, lenr);
 //    temp("remainder returns as: ", r, lenr);
 }
@@ -3086,9 +3090,34 @@ void display(const char *label, const Bignum &a)
 
 int main(int argc, char *argv[])
 {
-    Bignum a, b, c;
+    Bignum a, b, c1, c2;
 
-    int maxbits = 80;
+    int maxbits = 150;
+    int bad = 0;
+
+    for (int i=0; i<40000; i++)
+    {   a = random_upto_bits_bignum(maxbits);
+        b = random_upto_bits_bignum(maxbits);
+        c1 = (a + b)*(a - b);
+        c2 = a*a - b*b;
+        if (c1 == c2) continue;
+        std::cout << "Try " << i << std::endl;
+        std::cout << "a  = " << a << std::endl;
+        std::cout << "b  = " << b << std::endl;
+        std::cout << "a+b         = " << a+b << std::endl;
+        std::cout << "a-b         = " << a-b << std::endl;
+        std::cout << "a*a         = " << a*a << std::endl;
+        std::cout << "b*b         = " << b*b << std::endl;
+        std::cout << "(a+b)*(a-b) = " << c1 << std::endl;
+        std::cout << "(a+b)*(b-a) = " << (a+b)*(b-a) << std::endl;
+        std::cout << "a*a-b*b     = " << c2 << std::endl;
+        if (bad++ > 1) return 0;
+    }
+    std::cout << "Plus and Times tests completed" << std::endl;
+    return 0;
+
+    maxbits = 80;
+
     for (int i=0; i<20; i++)
     {   std::cout << i << "  ";
         reseed(6+i);
