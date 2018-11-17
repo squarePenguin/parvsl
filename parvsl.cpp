@@ -587,7 +587,7 @@ static inline LispObject allocatesymbol(LispObject pname)
     setheapstarts(par::thread_data.segment_fringe);
     r = par::thread_data.segment_fringe + tagSYMBOL;
     qflags(r) = tagHDR + typeSYM;
-    qvalue(r) = undefined;
+    qvalue(r) = packfixnum(par::allocate_symbol());
     qplist(r) = nil;
     qpname(r) = pname;
     qspare(r) = nil;
@@ -1630,7 +1630,7 @@ int rdch()
             c = input_line[input_ptr++];
         }
         else c = getc(lispfiles[lispin]);
-        if (c != EOF && qvalue(echo) != nil) wrch(c);
+        if (c != EOF && par::symval(echo) != nil) wrch(c);
         return c;
     }
 }
@@ -1910,8 +1910,8 @@ LispObject token()
                curchar == '_' ||
                curchar == '!')
         {   if (curchar == '!') curchar = rdch();
-            else if (curchar != EOF && qvalue(lower) != nil) curchar = tolower(curchar);
-            else if (curchar != EOF && qvalue(raise) != nil) curchar = toupper(curchar);
+            else if (curchar != EOF && par::symval(lower) != nil) curchar = tolower(curchar);
+            else if (curchar != EOF && par::symval(raise) != nil) curchar = toupper(curchar);
             if (curchar != EOF)
             {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
                 curchar = rdch();
@@ -2111,6 +2111,8 @@ LispObject readT()
     }
 }
 
+// TODO VB: Do we want to put it under a mutex? Otherwise it might create a
+// symbol multiple tymes.
 
 LispObject lookup(const char *s, int len, int flag)
 {   LispObject w, pn;
@@ -2232,27 +2234,28 @@ LispObject interpreted0(LispObject b)
 
 LispObject interpreted1(LispObject b, LispObject a1)
 {
-    LispObject bvl, r, save1;
-    bvl = qcar(b);
+    // LispObject bvl, r, save1;
+    LispObject bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
     if (bvl == nil) return error1("Too many arguments provided", bvl);
-    r = qcar(bvl);
+    LispObject r = qcar(bvl);
     bvl = qcdr(bvl);
     if (bvl != nil)  // Could legally be (v1 &rest v2)
     {
         return error1("Not enough arguments provided", bvl);
     }
     bvl = r;
-    save1 = qvalue(bvl);
-    // par::Shallow_bind bind_bvl(bvl, a1);
-    qvalue(bvl) = a1;
+    // save1 = qvalue(bvl);
+    assert(isSYMBOL(bvl));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    // qvalue(bvl) = a1;
     r = nil;
     while (isCONS(b))
     {   r = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(bvl) = save1;
+    // qvalue(bvl) = save1;
     return r;
 }
 
@@ -2270,16 +2273,20 @@ LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
     }
     bvl = qcar(bvl);
     v2 = qcar(v2);
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
+    assert(isSYMBOL(bvl));
+    assert(isSYMBOL(v2));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    // swap(a1, qvalue(bvl));
+    // swap(a2, qvalue(v2));
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
+    // qvalue(v2) = a2;
+    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2300,18 +2307,21 @@ LispObject interpreted3(LispObject b, LispObject a1,
     bvl = qcar(bvl);
     v2 = qcar(v2);
     v3 = qcar(v3);
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
-    swap(a3, qvalue(v3));
+    // swap(a1, qvalue(bvl));
+    // swap(a2, qvalue(v2));
+    // swap(a3, qvalue(v3));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    par::Shallow_bind bind_v3(v3, a3);
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(v3) = a3;
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
+    // qvalue(v3) = a3;
+    // qvalue(v2) = a2;
+    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2334,20 +2344,24 @@ LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
     v2 = qcar(v2);
     v3 = qcar(v3);
     v4 = qcar(v4);
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
-    swap(a3, qvalue(v3));
-    swap(a4, qvalue(v4));
+    // swap(a1, qvalue(bvl));
+    // swap(a2, qvalue(v2));
+    // swap(a3, qvalue(v3));
+    // swap(a4, qvalue(v4));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    par::Shallow_bind bind_v3(v3, a3);
+    par::Shallow_bind bind_v4(v4, a4);
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(v4) = a4;
-    qvalue(v3) = a3;
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
+    // qvalue(v4) = a4;
+    // qvalue(v3) = a3;
+    // qvalue(v2) = a2;
+    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2385,14 +2399,18 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
            (n>0 ? "Not enough arguments provided" :
                   "Too many arguments provided"), bvl);
     }
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
-    swap(a3, qvalue(v3));
-    swap(a4, qvalue(v4));
+    // swap(a1, qvalue(bvl));
+    // swap(a2, qvalue(v2));
+    // swap(a3, qvalue(v3));
+    // swap(a4, qvalue(v4));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    par::Shallow_bind bind_v3(v3, a3);
+    par::Shallow_bind bind_v4(v4, a4);
     v = v5up;
     a = nil;
     while (v != nil)
-    {   swap(qvalue(qcar(v)), qcar(a5up)); // bind another argument
+    {   swap(par::symval(qcar(v)), qcar(a5up)); // bind another argument
         v = qcdr(v);
         w = qcdr(a5up);
         qcdr(a5up) = a;
@@ -2407,15 +2425,15 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
     }
     v = v5up = nreverse(v5up);
     while (v != nil)
-    {   qvalue(qcar(v)) = qcar(a);
+    {   par::symval(qcar(v)) = qcar(a);
         v = qcdr(v);
         a = qcdr(a);
     }
     nreverse(v5up);
-    qvalue(v4) = a4;
-    qvalue(v3) = a3;
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
+    // qvalue(v4) = a4;
+    // qvalue(v3) = a3;
+    // qvalue(v2) = a2;
+    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2798,15 +2816,16 @@ LispObject Lprogn(LispObject lits, LispObject x);
 
 LispObject interpretspecform(LispObject lits, LispObject x)
 {   // lits should be ((var) body...)
-    LispObject v, v_value;
+    LispObject v;
     if (!isCONS(lits)) return nil;
     v = qcar(lits);
     lits = qcdr(lits);
     if (!isCONS(v) || !isSYMBOL(v = qcar(v))) return nil;
-    v_value = qvalue(v);
-    qvalue(v) = x;
+    par::Shallow_bind(v, x);
+    // v_value = qvalue(v);
+    // qvalue(v) = x;
     lits = Lprogn(nil, lits);
-    qvalue(v) = v_value;
+    // qvalue(v) = v_value;
     return lits;
 }
 
@@ -2980,7 +2999,7 @@ LispObject Lsetq(LispObject lits, LispObject x)
             return error1("bad variable in setq", x);
         w = eval(qcar(qcdr(x)));
         if (unwindflag != unwindNONE) return nil;
-        qvalue(qcar(x)) = w;
+        par::symval(qcar(x)) = w;
         x = qcdr(qcdr(x));
     }
     return w;
@@ -3006,10 +3025,10 @@ LispObject Lprog(LispObject lits, LispObject x)
     {   LispObject v = qcar(w);
         if (!isSYMBOL(v))
             return error1("Not a symbol in variable list for prog", v);
-        saved = cons(qvalue(v), saved);
+        saved = cons(par::symval(v), saved);
         if (unwindflag != unwindNONE) return nil;
     }
-    for (w=vars; isCONS(w); w=qcdr(w)) qvalue(qcar(w)) = nil;
+    for (w=vars; isCONS(w); w=qcdr(w)) par::symval(qcar(w)) = nil;
     save_x = x;  // So that "go" can scan the whole block to find a label.
     work1 = nil;
     while (isCONS(x))
@@ -3036,7 +3055,7 @@ LispObject Lprog(LispObject lits, LispObject x)
         qcdr(x) = vars;
         vars = x;
         x = qcar(vars);
-        qvalue(x) = qcar(saved);
+        par::symval(x) = qcar(saved);
         saved = qcdr(saved);
     }
     return work1;
@@ -3180,6 +3199,60 @@ LispObject Lvector_5up(LispObject lits, LispObject a1, LispObject a2,
         len++;
     }
     return r;
+}
+
+inline
+void global_symbol(LispObject s) {
+    if ((qflags(s) & flagGLOBAL) == 0) {
+        // If it was not global already, move value back from thread_local storage
+        qvalue(s) = par::get_symbol(qfixnum(qvalue(s)));
+        qflags(s) &= ~flagFLUID; // disable fluid
+        qflags(s) |= flagGLOBAL;
+    }
+}
+
+inline
+void fluid_symbol(LispObject s) {
+    // If it was global, move the value to thread_local storage adn store the location.
+    if (qflags(s) & flagGLOBAL) {
+        int loc = par::allocate_symbol();
+        par::get_symbol(loc) = qvalue(s);
+        qvalue(s) = packfixnum(loc);
+        
+        qflags(s) &= ~flagGLOBAL; // disable global
+    }
+
+    qflags(s) |= flagFLUID;
+}
+
+LispObject Lglobal(LispObject lits, LispObject x) {
+    while (isCONS(x)) {
+        LispObject a = qcar(x);
+        
+        if (!isSYMBOL(a)) {
+            return error1("global of non-symbol", a);
+        }
+
+        global_symbol(a);
+        
+        x = qcdr(x);
+    }
+    return nil;
+}
+
+LispObject Lfluid(LispObject lits, LispObject x) {
+    while (isCONS(x)) {
+        LispObject a = qcar(x);
+        
+        if (!isSYMBOL(a)) {
+            return error1("fluid of non-symbol", a);
+        }
+
+        fluid_symbol(a);
+        
+        x = qcdr(x);
+    }
+    return nil;
 }
 
 LispObject Lcar(LispObject lits, LispObject x)
@@ -3438,12 +3511,12 @@ LispObject Lmember(LispObject lits, LispObject a, LispObject l)
 LispObject Lset(LispObject lits, LispObject x, LispObject y)
 {
     if (!isSYMBOL(x)) return error1("bad arg for set", x);
-    return (qvalue(x) = y);
+    return (par::symval(x) = y);
 }
 
 LispObject Lboundp(LispObject lits, LispObject x)
 {
-    return (isSYMBOL(x) && qvalue(x)!=undefined) ? lisptrue : nil;
+    return (isSYMBOL(x) && par::symval(x)!=undefined) ? lisptrue : nil;
 }
 
 LispObject Lgensym_0(LispObject lits)
@@ -5266,8 +5339,8 @@ LispObject Lexplodecn(LispObject lits, LispObject x)
 LispObject Lreadch(LispObject lits)
 {   char ch[4];
     if (curchar == EOF) return eofsym;
-    ch[0] = qvalue(lower) != nil ? tolower(curchar) :
-            qvalue(raise) != nil ? toupper(curchar) : curchar;
+    ch[0] = par::symval(lower) != nil ? tolower(curchar) :
+            par::symval(raise) != nil ? toupper(curchar) : curchar;
     ch[1] = 0;
     curchar = rdch();
     return lookup(ch, 1, 1);
@@ -5366,7 +5439,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 // string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   sprintf(filename, "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) sprintf(filename, "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
@@ -5398,7 +5471,7 @@ LispObject Lfilep(LispObject lits, LispObject x)
         return error1("bad arg for filep", x);
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   sprintf(filename, "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) sprintf(filename, "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
@@ -5462,20 +5535,20 @@ static bool showallreads = false;
 void readevalprint(int loadp)
 {   while (symtype != EOF)
     {   LispObject r;
-        LispObject save_echo = qvalue(echo);
+        LispObject save_echo = par::symval(echo);
         unwindflag = unwindNONE;
-        if (loadp) qvalue(echo) = nil;
-        if (showallreads) qvalue(echo) = lisptrue;
+        if (loadp) par::symval(echo) = nil;
+        if (showallreads) par::symval(echo) = lisptrue;
         backtraceflag = backtraceHEADER | backtraceTRACE;
         r = readS();
-        qvalue(echo) = save_echo;
+        par::symval(echo) = save_echo;
         if (showallreads)
         {   printf("item read was: ");
             print(r);
         }
         fflush(stdout);
         if (unwindflag != unwindNONE) /* Do nothing */ ;
-        else if (loadp || qvalue(dfprint) == nil ||
+        else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
         {   r = eval(r);
@@ -5490,7 +5563,7 @@ void readevalprint(int loadp)
         }
         else
         {   r = cons(r, nil);
-            if (unwindflag == unwindNONE) Lapply(nil, qvalue(dfprint), r);
+            if (unwindflag == unwindNONE) Lapply(nil, par::symval(dfprint), r);
         }
         if ((unwindflag & (unwindPRESERVE | unwindRESTART)) != 0) return;
     }
@@ -5674,6 +5747,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("filep",             Lfilep),            \
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
+    SETUP_TABLE_SELECT("fluid",             Lfluid),            \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
@@ -5693,6 +5767,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
+    SETUP_TABLE_SELECT("global",            Lglobal),           \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
@@ -5954,6 +6029,8 @@ void setup()
 // code are rather rambling and repetitive but this is at least a simple
 // way to do things. I am going to assume that nothing can fail within this
 // setup code, so I can omit all checks for error conditions.
+
+// TODO VB: for now global values can be accessed as before,but might want to unify
     int i;
     undefined = lookup("~indefinite-value~", 18, 3);
     qflags(undefined) |= flagGLOBAL;
@@ -5964,12 +6041,17 @@ void setup()
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
     qvalue(lisptrue) = lisptrue;
-    qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
-    qflags(echo) |= flagFLUID;
-    {   LispObject nn;
-        qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
+    echo = lookup("*echo", 5, 3);
+    fluid_symbol(echo);
+    // qflags(echo) |= flagFLUID;
+    par::symval(echo) = interactive ? nil : lisptrue;
+
+    {   
+        LispObject nn = lookup("*nocompile", 10, 3);
         qflags(nn) |= flagFLUID;
+        par::symval(nn) = lisptrue;
     }
+
     qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
                   list2star(lookup("embedded", 8, 1),
@@ -5992,11 +6074,15 @@ void setup()
     input = lookup("input", 5, 3);
     output = lookup("output", 6, 3);
     pipe = lookup("pipe", 4, 3);
-    qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
+    dfprint = lookup("dfprint*", 6, 3);
+    par::symval(dfprint) = nil;
     qflags(dfprint) |= flagFLUID;
+
     bignum = lookup("~bignum", 7, 3);
-    qvalue(raise = lookup("*raise", 6, 3)) = nil;
-    qvalue(lower = lookup("*lower", 6, 3)) = lisptrue;
+    raise = lookup("*raise", 6, 3);
+    lower = lookup("*lower", 6, 3);
+    par::symval(raise) = nil;
+    par::symval(lower) = lisptrue;
     qflags(raise) |= flagFLUID;
     qflags(lower) |= flagFLUID;
     cursym = nil;
@@ -6483,8 +6569,16 @@ int warm_start_1(gzFile f, int *errcode)
 // having memory in (possibly) several chunks. However it is not so the
 // exact layout is relied upon here. The first chunk of code here relocates
 // that part of the symbol that lies within the current segment of heap.
-                    if (fr1+sizeof(LispObject) < lim1)
+                    if (fr1+sizeof(LispObject) < lim1) {
                         qvalue(w) = relocate(qvalue(w));
+                        // TODO VB: separate function
+                        if ((qflags(w) & flagGLOBAL) == 0) {
+                            // reallocate on thread_local storage
+                            int loc = par::allocate_symbol();
+                            par::get_symbol(loc) = qvalue(w);
+                            qvalue(w) = packfixnum(loc);
+                        }
+                    }
                     if (fr1+2*sizeof(LispObject) < lim1)
                         qplist(w) = relocate(qplist(w));
                     if (fr1+3*sizeof(LispObject) < lim1)
@@ -6517,8 +6611,15 @@ int warm_start_1(gzFile f, int *errcode)
                         newblock = fr1;
                         fr1 += (leftover - SYMSIZE*sizeof(LispObject));
                         w = fr1 + tagSYMBOL;
-                        if (fr1+sizeof(LispObject) >= newblock)
+                        if (fr1+sizeof(LispObject) >= newblock) {
                             qvalue(w) = relocate(qvalue(w));
+                            if ((qflags(w) & flagGLOBAL) == 0) {
+                                // reallocate on thread_local storage
+                                int loc = par::allocate_symbol();
+                                par::get_symbol(loc) = qvalue(w);
+                                qvalue(w) = packfixnum(loc);
+                            }
+                        }
                         if (fr1+2*sizeof(LispObject) >= newblock)
                             qplist(w) = relocate(qplist(w));
                         if (fr1+3*sizeof(LispObject) >= newblock)
@@ -6542,7 +6643,6 @@ int warm_start_1(gzFile f, int *errcode)
                         fr1 += SYMSIZE*sizeof(LispObject);
                         abort();
                     }
-                    continue;
                 case typeSTRING:
 // Pure byte-structured binary data, so nothing much to do here. But see
 // the typeVEC code and think about VERY long strings that could overlap
@@ -6595,7 +6695,7 @@ int warm_start_1(gzFile f, int *errcode)
     }
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
-     qvalue(echo) = interactive ? nil : lisptrue;
+     par::symval(echo) = interactive ? nil : lisptrue;
      return 0;
 }
 
@@ -6651,7 +6751,8 @@ char startup_banner[64] =
 // had gone wrong since gzerror can be used to discover what the problem
 // had been.
 
-static inline int write_image_1(gzFile f, int *errcode)
+static inline int 
+write_image_1(gzFile f, int *errcode)
 {
     size_t i;
 // First a file-format identifier "vsl+"
@@ -6807,9 +6908,30 @@ static inline int write_image_1(gzFile f, int *errcode)
 
 void write_image(gzFile f)
 {
+    // This should destruct all threads and thus wait for them to join.
+    // TODO VB: don't care about non-termination yet
+    par::active_threads.clear();
+
     int errcode;
     inner_reclaim(C_stackbase); // To compact memory.
     inner_reclaim(C_stackbase); // in the conservative case GC twice.
+
+    std::cerr << "saving symbols" << std::endl;
+
+    // VBL we want to find all symbols and move everything back from thread_local data to global
+    for (int i = 0; i < OBHASH_SIZE; i += 1) {
+        for (LispObject l = obhash[i]; isCONS(l); l = qcdr(l)) {
+            LispObject x = qcar(l);
+            if (x != undefined && isSYMBOL(x) && (qflags(x) & flagGLOBAL) == 0) {
+                // If it wasn't a global symbol, the value is thread_local;
+                int loc = qfixnum(qvalue(x));
+                qvalue(x) = par::get_symbol(loc);
+            }
+        }
+    }
+
+    std::cerr << "saved" << std::endl;
+
     hexdump();
     switch (write_image_1(f, &errcode))
     {
@@ -7501,7 +7623,7 @@ int main(int argc, char *argv[])
 // In general through setup (and I count this as still being setup)
 // I will code on the basis that there will not be any garbage collection
 // so I do not need to think about the effects of data movement during GC.
-                qvalue(lookup(argv[i]+2, (d1-argv[i])-2, 3)) =
+                par::symval(lookup(argv[i]+2, (d1-argv[i])-2, 3)) =
                     makestring(d1+1, strlen(d1+1));
             }
         }

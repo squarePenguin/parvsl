@@ -43,6 +43,21 @@ Idea: Make fluid and global builtin functions so I can have more control.
 
 However, if the user can modify these flags, then how do I get control over them?
 
+*** DONE thread_local storage
+     CLOSED: [2018-11-13 Tue 18:04]
+*** DONE builtin global and fluid functions
+     CLOSED: [2018-11-13 Tue 18:04]
+*** TODO unglobal and unfluid
+*** TODO RAII shallow binding
+*** TODO modify interpreted and prof functions 
+*** TODO make sure index values don't trip GC
+*** TODO Make the new locations unambigous roots
+*** TODO Load symbols when starting from image
+*** TODO Save the state of the thread_local variables to the image
+**** Might help that we should always join all threads before closing so only the start thread matters
+**** However need to scan all symbols and put values back
+
+
 ** Dealing with multiple stacks
 
 To run the conservative GC, we have a pointer to the beginning of the stack
