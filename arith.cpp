@@ -70,6 +70,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cctype>
 #include <cinttypes>
 #include <cassert>
 #include <cstdlib>
@@ -1003,8 +1004,9 @@ void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
     lenr = (bits+63)/64;
     for (size_t i=0; i<lenr; i++)
         r[i] = mersenne_twister();
-    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
-    while (lenr!=1 && r[lenr-1] == 0) lenr--;
+    if (bits%64 == 0) r[lenr-1] = 0;
+    else r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
+    while (lenr!=1 && r[lenr-1] == 0 && positive(r[lenr-2])) lenr--;
 }
 
 number_representation uniform_positive(size_t n)
@@ -1088,12 +1090,15 @@ void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
         lenr = 1;
         return;
     }
+// The number will have from 1 to 64 bits in its top digit.
     lenr = (bits+63)/64;
     for (size_t i=0; i<lenr; i++)
         r[i] = mersenne_twister();
-    r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
-    r[lenr-1] |= UINT64_C(1) << (bits%64);
-    if (bits%64 == 63) r[lenr++] = 0;
+    if (n%64 != 0)
+        r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
+    r[lenr-1] |= UINT64_C(1) << ((bits-1)%64);
+    if (bits%64 == 0) r[lenr++] = 0;
+    assert(!negative(r[lenr-1]));
 }
 
 number_representation random_upto_bits(size_t bits)
@@ -1176,7 +1181,8 @@ number_representation string_to_bignum(const char *s)
     {   uint64_t d = 0;
 // assemble 19 digit blocks from the input into a value (d).
         while (chars != next)
-        {   d = 10*d + (*s++ - '0');
+        {   assert(std::isdigit(*s));
+            d = 10*d + (*s++ - '0');
             chars--;
         }
         next -= 19;
@@ -1814,7 +1820,7 @@ void bigleftshift(const uint64_t *a, size_t lena,
 extern number_representation bigrightshift(number_representation a, int n);
 
 number_representation bigleftshift(number_representation a, int n)
-{   if (n == 0) return a;
+{   if (n == 0) return copy_if_no_garbage_collector(a);
     else if (n < 0) return bigrightshift(a, -n);
     size_t na = number_size(a);
     size_t nr = na + (n/64) + 1;
@@ -1854,7 +1860,7 @@ void bigrightshift(const uint64_t *a, size_t lena,
 }
 
 number_representation bigrightshift(number_representation a, int n)
-{   if (n == 0) return a;
+{   if (n == 0) return copy_if_no_garbage_collector(a);
     else if (n < 0) return bigleftshift(a, -n);
     size_t na = number_size(a);
     size_t nr = na - (n/64);
@@ -2139,13 +2145,14 @@ void bigsquare(uint64_t *a, size_t lena,
     {   sign = true;
         negate_for_squaring(a, lena);
     }
+    lenr = 2*lena;
     for (size_t i=0; i<lena; i++)
     {   uint64_t hi = 0;
 // Note that all the terms I add in here will need to be doubled in the
 // final accounting.
         for (size_t j=i+1; j<lena; j++)
         {   uint64_t lo;
-            multiplyadd64(a[i], a[j], r[i+j], hi, lo);
+            multiplyadd64(a[i], a[j], hi, hi, lo);
             hi += add_with_carry(lo, r[i+j], r[i+j]);
         }
         r[i+lena] = hi;
@@ -2168,7 +2175,6 @@ void bigsquare(uint64_t *a, size_t lena,
     }
 // Now if the original a was negative I must restore it.
     if (sign) negate_for_squaring(a, lena);
-    lenr = 2*lena;
 // The actual value may be 1 word shorter than this.
 //  test top digit or r and if necessary reduce lenr.
     truncate_positive(r, lenr);
@@ -2222,16 +2228,37 @@ void bigpow(uint64_t *a, size_t lena, uint64_t n,
     bigmultiply(v, lenv, w, lenw, r, lenr);
 }
 
-number_representation bigpow(number_representation a, uint64_t n)
+// In cases where n is too large this can fail. At present I deal with that
+// with assert() statements rather than any comfortable scheme for reporting
+// the trouble.
+
+number_representation bigpow(number_representation aa, uint64_t n)
 {   if (n == 0)
     {   uint64_t *r = preallocate(0);
         r[0] = 1;
         return confirm_size(r, 1, 1);
     }
-    else if (n == 1) return a;
-    else if (n == 2) return bigsquare(a);
-    std::cout << "bigpow " << n << "not done yet@@@" << std::endl;
-    abort(); 
+    else if (n == 1) return copy_if_no_garbage_collector(aa);
+    else if (n == 2) return bigsquare(aa);
+    uint64_t *a = number_data(aa);
+    size_t lena = number_size(aa); 
+    size_t bitsa = bignum_bits(a, lena);
+    uint64_t hi, bitsr;
+    multiply64(n, bitsa, hi, bitsr);
+    assert(hi == 0); // astonishingly too large!
+    uint64_t lenr1 = 1 + bitsr/64;
+    size_t lenr = (size_t)lenr1;
+// if size_t was more narrow than 64-bits I could lose information in
+// truncating from uint64_t to size_t.
+    assert(lenr == lenr1);
+    uint64_t olenr = lenr;
+    uint64_t *r = preallocate(lenr);
+    uint64_t *v = preallocate(lenr);
+    uint64_t *w = preallocate(lenr);
+    bigpow(a, lena, n, v, w, r, lenr);
+    abandon(w, olenr);
+    abandon(v, olenr);
+    return confirm_size(r, olenr, lenr);
 }
 
 // During long division I will scale my numbers by mulriplying by a
@@ -2444,6 +2471,7 @@ static void unscale_for_division(uint64_t *r, size_t &lenr, uint64_t s)
         if (i == 0) break;
         i--;
     }
+    if (hi!=0) abort();
     assert(hi==0);
     truncate_positive(r, lenr);
 }
@@ -3105,23 +3133,19 @@ int main(int argc, char *argv[])
 {
     Bignum a, b, c, c1, c2, c3, c4;
 
-    a = "1000000000000000000000000000000000000000000000000000000";
-    temp("a", a.val, number_size(a.val));
-    b = square(a);
-    temp("b", b.val, number_size(b.val));
-    return 0;
-
-
     int bad = 0;
+    int maxbits;
+    int ntries;
 
+#ifdef TEST_PLUS_AND_TIMES
 // To try to check that + and - and * behave on the Bignum type I
 // generate random numbers a and b and then compute first (a+b)*(a-b)
 // and then a*a*b*b. If these match I feel happy - while if I find a case
 // where the two values differ I have uncovered a bug.
 // I will try numbers of up to 640 bits and 4 million test cases.
 
-    int maxbits = 1000;
-    int ntries = 10000000;
+    maxbits = 1000;
+    ntries = 10000000;
 
     for (int i=0; i<ntries; i++)
     {   a = random_upto_bits_bignum(maxbits);
@@ -3145,17 +3169,31 @@ int main(int argc, char *argv[])
         if (bad++ > 1) return 0;
     }
     std::cout << "Plus and Times tests completed" << std::endl;
-    return 0;
+#endif
 
+#define TEST_DIVISION 1
+
+#ifdef TEST_DIVISION
     maxbits = 80;
+    ntries = 20;
 
-    for (int i=0; i<20; i++)
+    uint64_t seed = mersenne_twister() & 0xffff;
+    std::cout << "seed = " << seed << std::endl;
+#ifdef SEED
+    seed = SEED;
+#endif
+    reseed(seed);
+
+    for (int i=0; i<ntries; i++)
     {   std::cout << i << "  ";
-        reseed(6+i);
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
         Bignum remainder = uniform_upto_bignum(divisor);
         Bignum quotient = random_upto_bits_bignum(maxbits);
         Bignum dividend = quotient*divisor + remainder;
+temp("num ", number_data(dividend.val), number_size(dividend.val));
+temp("den ", number_data(divisor.val), number_size(divisor.val));
+temp("quot", number_data(quotient.val), number_size(quotient.val));
+temp("rem ", number_data(remainder.val), number_size(remainder.val));
         Bignum q1 = dividend / divisor;
         Bignum r1 = dividend % divisor;
         if (q1 == quotient && r1 == remainder)
@@ -3169,17 +3207,13 @@ int main(int argc, char *argv[])
         std::cout << "dividend  " << dividend << std::endl;
         std::cout << "q1        " << q1 << std::endl;
         std::cout << "r1        " << r1 << std::endl;
-        std::cout << std::endl;
-//      abort();
+        std::cout << "Failed " << std::endl;
+        return 0;
     }
 
-//    std::cout << "a*a - b*b  =   " << (a*a - b*b) << std::endl;
-//    std::cout << "(a+b)*(a-b)  = " << (a + b)*(a - b) << std::endl;
-//    std::cout << "a*a - b*b  =   " << std::hex << (a*a - b*b) << std::endl;
-//    std::cout << "(a+b)*(a-b)  = " << std::hex << (a + b)*(a - b) << std::endl;
-//    std::cout << "a*a - b*b  =   " << std::oct << (a*a - b*b) << std::endl;
-//    std::cout << "(a+b)*(a-b)  = " << std::oct << (a + b)*(a - b) << std::endl;
+    std::cout << "Division tests completed" << std::endl;
 
+#endif
     return 0;    
 }
 
