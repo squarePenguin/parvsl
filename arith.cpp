@@ -1222,18 +1222,21 @@ number_representation string_to_bignum(const char *s)
 
 #ifdef __SIZEOF_INT128__
 
+static inline UINT128 pack128(uint64_t hi, uint64_t lo)
+{   return (((UINT128)hi)<<64) | lo;
+}
+
 static uint64_t short_divide_ten_19(uint64_t *r, size_t &n)
 {   uint64_t hi = 0;
-    for (size_t i = n-1; i!=0; i--)
-    {   UINT128 p = ((UINT128)hi << 64) | r[i];
+    size_t i=n-1;
+    for (;;)
+    {   UINT128 p = pack128(hi, r[i]);
         uint64_t q = (uint64_t)(p / ten19);
         hi = (uint64_t)(p % ten19);
         r[i] = q;
+        if (i == 0) break;
+        i--;
     }
-    UINT128 p = ((UINT128)hi << 64) | r[0];
-    uint64_t q = (uint64_t)(p / ten19);
-    hi = (uint64_t)(p % ten19);
-    r[0] = q;
     if (r[n-1] == 0) n--;
     return hi;
 }
@@ -1645,7 +1648,7 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 
 static void bigabsval(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 {   if (positive(a[lena-1]))
-    {   if (lenr > 1 && a[lenr-1] == 0) lena--;
+    {   if (lena > 1 && a[lena-1] == 0) lena--;
         memcpy(r, a, lena*sizeof(uint64_t));
     }
     else
@@ -2261,11 +2264,16 @@ number_representation bigpow(number_representation aa, uint64_t n)
     return confirm_size(r, olenr, lenr);
 }
 
-// During long division I will scale my numbers by mulriplying by a
+// During long division I will scale my numbers by multiplying by a
 // factor (s). I do that in place. In general multiplying by an integer
 // could cause values to become one digit longer. Rather than writing the
 // extra overflow digit into the array of digits I return it as the
-// result of the scale_for_division() function.
+// result of the scale_for_division() function. The reason for that is that
+// in my use of this function when I scale the divident I will want an extra
+// digit, but when scaling the divisor I have chosen the scale factor
+// carefully so that an extra digit is not required. So the business of
+// lengthening or not lengthening the result happens at the call not within
+// this function.
 
 static uint64_t scale_for_division(uint64_t *r, size_t lenr, uint64_t s)
 {   uint64_t carry = 0;
@@ -2282,7 +2290,8 @@ static uint64_t scale_for_division(uint64_t *r, size_t lenr, uint64_t s)
 
 static inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
                             uint64_t &q, uint64_t &r)
-{   UINT128 num = ((UINT128)hi << 64) | lo;
+{   UINT128 num = pack128(hi, lo);
+    assert(divisor != 0);
     q = num / divisor;
     r = num % divisor;
 }
@@ -2383,38 +2392,41 @@ static inline void write_digit(uint64_t *a, size_t n, DIGIT v)
 #endif // __SIZEOF_INT128__
 
 
-// a = a - b*q*base^(lena-lenb) and return the carry out from the top.
+// r = r - b*q*base^(lena-lenb-1).
 
-static uint64_t multiply_and_subtract(uint64_t *a, size_t lena,
-                                      uint64_t q0,
-                                      uint64_t *b, size_t lenb)
+static void multiply_and_subtract(uint64_t *r, size_t lenr,
+                                  uint64_t q0,
+                                  uint64_t *b, size_t lenb)
 {   uint64_t carry = 0;
     for (size_t i=0; i<lenb; i++)
-    {   UINT128 d = a[i+lena-lenb] -
+    {   UINT128 d = r[i+lenr-lenb-1] -
                     b[i]*(UINT128)q0 +
                     carry;
-        a[i+lena-lenb] = (uint64_t)d;
+        r[i+lenr-lenb-1] = (uint64_t)d;
         carry = (uint64_t)(d >> 64);
     }
-    return carry;
+// This top digit will in the end be treated as signed, and typically carry
+// will have its top bit set so that this is in effect a subtraction.
+    r[lenr-1] += carry;
 }
 
 // add_back_correction() is used when a quotient digit was mis-predicted by
-// 1 and I detect that when I calculate a = a - b*q and end up with a negative
+// 1 and I detect that when I calculate r = r - b*q and end up with r negative
 // result. I fix things up by decrementing q and going
-//         a = a + (b<<(lena-lenb))
+//         r = r + (b<<(lenr-lenb-1))
  
-static uint64_t add_back_correction(uint64_t *a, size_t lena,
-                                    uint64_t *b, size_t lenb)
+static void add_back_correction(uint64_t *r, size_t lenr,
+                                uint64_t *b, size_t lenb)
 {   uint64_t carry = 0;
     for (size_t i=0; i<lenb; i++)
-        carry = add_with_carry(a[i+lena-lenb], b[i], carry, a[i+lena-lenb]);
-    return carry;
+        carry = add_with_carry(r[i+lenr-lenb-1], b[i], carry, r[i+lenr-lenb-1]);
+    r[lenr-1] += carry;
 }
 
-static inline uint64_t next_quotient_digit(uint64_t *a, size_t &lena,
+static inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
                                            uint64_t *b, size_t lenb)
-{   UINT128 p0 = (((UINT128)a[lena-1])<<64) | a[lena-2];
+{   UINT128 p0 = pack128(r[lenr-1], r[lenr-2]);
+    assert(b[lenb-1] != 0);
     uint64_t q0 =  (uint64_t)(p0 / (UINT128)b[lenb-1]);
     uint64_t r0 =  (uint64_t)(p0 % (UINT128)b[lenb-1]);
 // At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
@@ -2425,20 +2437,20 @@ static inline uint64_t next_quotient_digit(uint64_t *a, size_t &lena,
 //
     if (q0 == UINT64_C(0x8000000000000000) ||
         (UINT128)q0*(UINT128)b[lenb-2] >
-        (((UINT128)r0)<<64 | a[lena-3]))
+        pack128(r0, r[lenr-3]))
         q0--;
 //
-// Now I want to go "a = a - b*q0*2^(64*(lena-lenb));" so that a
+// Now I want to go "r = r - b*q0*2^(64*(lenr-lenb));" so that r
 // is set to an accurate remainder after using q0 as (part of) the
 // quotient. This may carry an overshoot into atop and if so I will need
 // to reduce q0 again and compensate.
 //
-    multiply_and_subtract(a, lena, q0, b, lenb);
-    if (negative(a[lena-1]))
+    multiply_and_subtract(r, lenr, q0, b, lenb);
+    if (negative(r[lenr-1]))
     {   q0--;
-        add_back_correction(a, lena, b, lenb);
+        add_back_correction(r, lenr, b, lenb);
     }
-    lena--;  // a is now one digit shorter.
+    lenr--;  // a is now one digit shorter.
     return q0;
 }
 
@@ -2464,14 +2476,13 @@ static void unscale_for_division(uint64_t *r, size_t &lenr, uint64_t s)
 {   uint64_t hi = 0;
     size_t i = lenr-1;
     for (;;)
-    {   UINT128 p = ((UINT128)hi << 64) | r[i];
+    {   UINT128 p = pack128(hi, r[i]);
         uint64_t q = (uint64_t)(p / s);
         hi = (uint64_t)(p % s);
         r[i] = q;
         if (i == 0) break;
         i--;
     }
-    if (hi!=0) abort();
     assert(hi==0);
     truncate_positive(r, lenr);
 }
@@ -2528,7 +2539,7 @@ int64_t shortquotrem(uint64_t *a, size_t lena,
     uint64_t rr = 0;
     size_t n = lena-1;
     for (;;)
-    {   UINT128 p = ((UINT128)rr)<<64 | q[n];
+    {   UINT128 p = pack128(rr, q[n]);
         q[n] = (uint64_t)(p / bb);
         rr = (uint64_t)(p % bb);
         if (n == 0) break;
@@ -2556,7 +2567,7 @@ int64_t shortquotrem(uint64_t *a, size_t lena,
 
 void bigquotrem(uint64_t *a, size_t lena,
                 uint64_t *b, size_t lenb,
-                uint64_t *w, size_t lenw,   // temp - size lenb
+                uint64_t *absb, size_t lenabsb,   // temp - size lenb
                 uint64_t *q, size_t &lenq,  // quotient - size lena-lenb+1
                 uint64_t *r, size_t &lenr)  // remainder - size lena+1
 {   assert(lena >= 2);
@@ -2567,16 +2578,16 @@ void bigquotrem(uint64_t *a, size_t lena,
 // at the end. This leaves the two inputs as rows of unsigned 64-bit digits
 // with a[alen] and b[blen] both non-zero.
     bigabsval(a, lena, r, lenr);
-    bigabsval(b, lenb, w, lenw);
+    bigabsval(b, lenb, absb, lenabsb);
     bool quot_sign = false, rem_sign = false;
     if (negative(a[lena-1]))
         quot_sign = rem_sign = true;
     if (negative(b[lenb-1])) quot_sign = !quot_sign;
-// Now I want to compute the quotient of r by w, and both are positive.
+// Now I want to compute the quotient of r by absb, and both are positive.
 // Taking absolute values might have changed the lengths, so this is a good
 // place to check for a division where the quotient is unquestionably zero.
-    if (lenr < lenw ||
-        (lenr == lenw && r[lenr-1] < w[lenw-1]))
+    if (lenr < lenabsb ||
+        (lenr == lenabsb && r[lenr-1] < absb[lenabsb-1]))
     {   q[0] = 0;
         lenq = 1;
         memcpy((void *)r, (void *)a, lena*sizeof(uint64_t));
@@ -2592,15 +2603,16 @@ void bigquotrem(uint64_t *a, size_t lena,
 // proposed 0x7fffffffU/bignum_digits(b)[lenb] and if you look at just the
 // leading digit of b alone that seems OK, but I am concerned that when you
 // take lower digits of b into account that multiplying b by it can overflow.
-    uint64_t ss = UINT64_C(0x8000000000000000) / (w[lenw-1] + 1);
+
+    uint64_t ss = UINT64_C(0x8000000000000000) / (absb[lenabsb-1] + 1);
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
     r[lenr] = scale_for_division(r, lenr, ss);
     lenr++;
-    assert(scale_for_division(w, lenw, ss) == 0);
+    assert(scale_for_division(absb, lenabsb, ss) == 0);
     size_t m = lenq-1;
     for (;;)
-    {   uint64_t qd = next_quotient_digit(r, lenr, w, lenw);
+    {   uint64_t qd = next_quotient_digit(r, lenr, absb, lenabsb);
         q[m] = qd;
         if (m == 0) break;
         m--;
@@ -2631,12 +2643,12 @@ number_representation bigquotient(number_representation a, number_representation
     size_t n2 = na+1;              // for workspace and the remainder
     uint64_t *r = preallocate(n2);
     size_t n3 = nb;                // temp workspace
-    uint64_t *w = preallocate(n3);
+    uint64_t *absb = preallocate(n3);
     bigquotrem(a, na, b, nb,
-               w, n3,
+               absb, n3,
                q, n1, r, n2);
-// here w and r are no longer needed.
-    abandon(w, nb);
+// here absb and r are no longer needed.
+    abandon(absb, nb);
     abandon(r, na+1);
     return confirm_size(q, na+nb+1, n1);
 }
@@ -2658,12 +2670,12 @@ number_representation bigremainder(number_representation a, number_representatio
     size_t n1 = na-nb+1;           // for the quotient
     uint64_t *q = preallocate(n1);
     size_t n3 = nb;                // temp workspace
-    uint64_t *w = preallocate(n3);
+    uint64_t *absb = preallocate(n3);
     bigquotrem(a, na, b, nb,
-               w, n3,
+               absb, n3,
                q, n1, r, n2);
-// here w and q are no longer needed.
-    abandon(w, nb);
+// here absb and q are no longer needed.
+    abandon(absb, nb);
     abandon(q, na-nb+1);
     return confirm_size(r, na+1, n2);
 }
@@ -2685,12 +2697,12 @@ cons_representation bigdivide(number_representation a, number_representation b)
     size_t n2 = na+1;              // for workspace and the remainder
     uint64_t *r = preallocate(n2);
     size_t n3 = nb;                // temp workspace
-    uint64_t *w = preallocate(n3);
+    uint64_t *absb = preallocate(n3);
     bigquotrem(a, na, b, nb,
-               w, n3,
+               absb, n3,
                q, n1, r, n2);
-// here w is longer needed.
-    abandon(w, nb);
+// here absb is longer needed.
+    abandon(absb, nb);
     number_representation rr = confirm_size(r, na+1, n2);
     number_representation qq = confirm_size_x(q, na-nb+1, n1);
     return cons(qq, rr);
@@ -3131,9 +3143,18 @@ void display(const char *label, const Bignum &a)
 
 int main(int argc, char *argv[])
 {
+// If I invoke this without command line arguments it will run with
+// a decent randomized sequnence. If I give it a command line argument
+// that is an integer it will use that to see its random number generator
+// and so it will behave deterministically.
+    uint64_t seed;
+    if (argc > 1) seed = atoi(argv[1]);
+    else seed = mersenne_twister() & 0xffff;
+    std::cout << "seed = " << seed << std::endl;
+    reseed(seed);
+
     Bignum a, b, c, c1, c2, c3, c4;
 
-    int bad = 0;
     int maxbits;
     int ntries;
 
@@ -3146,6 +3167,7 @@ int main(int argc, char *argv[])
 
     maxbits = 1000;
     ntries = 10000000;
+    int bad = 0;
 
     for (int i=0; i<ntries; i++)
     {   a = random_upto_bits_bignum(maxbits);
@@ -3175,14 +3197,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST_DIVISION
     maxbits = 80;
-    ntries = 20;
-
-    uint64_t seed = mersenne_twister() & 0xffff;
-    std::cout << "seed = " << seed << std::endl;
-#ifdef SEED
-    seed = SEED;
-#endif
-    reseed(seed);
+    ntries = 1;
 
     for (int i=0; i<ntries; i++)
     {   std::cout << i << "  ";
