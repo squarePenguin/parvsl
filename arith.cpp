@@ -2268,24 +2268,28 @@ number_representation bigpow(number_representation aa, uint64_t n)
     return confirm_size(r, olenr, lenr);
 }
 
-// During long division I will scale my numbers by multiplying by a
-// factor (s). I do that in place. In general multiplying by an integer
-// could cause values to become one digit longer. Rather than writing the
-// extra overflow digit into the array of digits I return it as the
-// result of the scale_for_division() function. The reason for that is that
-// in my use of this function when I scale the divident I will want an extra
-// digit, but when scaling the divisor I have chosen the scale factor
-// carefully so that an extra digit is not required. So the business of
-// lengthening or not lengthening the result happens at the call not within
-// this function.
+// During long division I will scale my numbers by shifting left by an
+// amount s. I do that in place. The shift amount will be such that
+// the divisor ends up with the top bit of its top digit set. The
+// divident will need to extend into an extra digit, and I deal with that
+// by returning the overflow word as a result of the scaling function. Note
+// that the shift amount will be in the range 0-63.
 
-// Well today I scale by a power of 2 so I will be able to re-work this into
-// a mere shift operation, which will speed it up.
 
-static uint64_t scale_for_division(uint64_t *r, size_t lenr, uint64_t s)
-{   uint64_t carry = 0;
+static uint64_t scale_for_division(uint64_t *r, size_t lenr, int s)
+{
+// There are two reasons for me to treat a shift by zero specially. The
+// first is that it is cheap because no data needs moving at all. But the
+// more subtle reason is that if I tried using the general code as below
+// that would execure a right shift by 64, which is out of the proper range
+// for C++ right shifts.
+    if (s == 0) return 0;
+    uint64_t carry = 0;
     for (size_t i=0; i<lenr; i++)
-        multiplyadd64(r[i], s, carry, carry, r[i]);
+    {   uint64_t w = r[i];
+        r[i] = (w << s) | carry;
+        carry = w >> (64-s);
+    }
     return carry;
 }
 
@@ -2476,21 +2480,23 @@ static void negate_in_place(uint64_t *r, size_t &lenr)
         negative(r[lenr-2])) lenr--;
 }
 
-// r is an unsigned number. Divide it by the integer s: the quotient
-// ought to be exact.
+// r is an unsigned number. Shift right (in place) by s bits, where s
+// is in the range 0 - 63. The bits shifted out to the right should all
+// be zero.
 
-static void unscale_for_division(uint64_t *r, size_t &lenr, uint64_t s)
-{   uint64_t hi = 0;
-    size_t i = lenr-1;
-    for (;;)
-    {   UINT128 p = pack128(hi, r[i]);
-        uint64_t q = (uint64_t)(p / s);
-        hi = (uint64_t)(p % s);
-        r[i] = q;
-        if (i == 0) break;
-        i--;
+static void unscale_for_division(uint64_t *r, size_t &lenr, int s)
+{   if (s != 0)
+    {   uint64_t carry = 0;
+        size_t i = lenr-1;
+        for (;;)
+        {   uint64_t w = r[i];
+            r[i] = (w >> s) | carry;
+            carry = w << (64-s);
+            if (i == 0) break;
+            i--;
+        }
+        assert(carry==0);
     }
-    assert(hi==0);
     truncate_positive(r, lenr);
 }
 
@@ -2642,13 +2648,9 @@ temp("absb", absb, lenabsb);
 // leading digit of b alone that seems OK, but I am concerned that when you
 // take lower digits of b into account that multiplying b by it can overflow.
 
-        assert(lenar >= lenabsb);
+        assert(lenr >= lenabsb);
         assert(absb[lenabsb-1] != 0);
-        int lz = nlz(absb[lenabsb-1]);
-        uint64_t ss = ((uint64_t)1) << lz;
-//@@    uint64_t ss = UINT64_C(0x10000000000000000) / (absb[lenabsb-1] + 1);
-        std::cout << "scale = " << std::hex << ss << std::dec << std::endl;
-
+        int ss = nlz(absb[lenabsb-1]);
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
         r[lenr] = scale_for_division(r, lenr, ss);
@@ -2662,7 +2664,8 @@ std::cout << "lenq = " << lenq << std::endl;
         for (;;)
         {   uint64_t qd = next_quotient_digit(r, lenr, absb, lenabsb);
             q[m] = qd;
-std::cout << "next digit of quotient [" << m << "] = " << qd << std::endl;
+std::cout << "next digit of quotient [" << m << "] = " << qd
+          << " " << std::hex << qd << std::dec << std::endl;
 temp("r now", r, lenr);
             if (m == 0) break;
             m--;
@@ -3242,7 +3245,8 @@ int main(int argc, char *argv[])
         std::cout << "a*a-b*b     = " << c2 << std::endl;
         std::cout << "square(a)   = " << square(a) << std::endl;
         std::cout << "square(b)   = " << square(b) << std::endl;
-        if (bad++ > 1) return 0;
+        std::cout << "Failed" << std::endl;
+        if (bad++ > 1) return 1;
     }
     std::cout << "Plus and Times tests completed" << std::endl;
 #endif
@@ -3278,7 +3282,7 @@ temp("rem ", number_data(remainder.val), number_size(remainder.val));
         std::cout << "q1        " << q1 << std::endl;
         std::cout << "r1        " << r1 << std::endl;
         std::cout << "Failed " << std::endl;
-        return 0;
+        return 1;
     }
 
     std::cout << "Division tests completed" << std::endl;
