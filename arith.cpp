@@ -2279,6 +2279,9 @@ number_representation bigpow(number_representation aa, uint64_t n)
 // lengthening or not lengthening the result happens at the call not within
 // this function.
 
+// Well today I scale by a power of 2 so I will be able to re-work this into
+// a mere shift operation, which will speed it up.
+
 static uint64_t scale_for_division(uint64_t *r, size_t lenr, uint64_t s)
 {   uint64_t carry = 0;
     for (size_t i=0; i<lenr; i++)
@@ -2583,8 +2586,7 @@ void bigquotrem(uint64_t *a, size_t lena,
                 uint64_t *absb, size_t lenabsb,   // temp - size lenb
                 uint64_t *q, size_t &lenq,  // quotient - size lena-lenb+1
                 uint64_t *r, size_t &lenr)  // remainder - size lena+1
-{   assert(lena >= 2);
-    assert(lenb >= 2);
+{   assert(lenb >= 2);
     bool quot_sign = false, rem_sign = false;
     if (negative(a[lena-1]))
         quot_sign = rem_sign = true;
@@ -2639,7 +2641,14 @@ temp("absb", absb, lenabsb);
 // proposed 0x7fffffffU/bignum_digits(b)[lenb] and if you look at just the
 // leading digit of b alone that seems OK, but I am concerned that when you
 // take lower digits of b into account that multiplying b by it can overflow.
-        uint64_t ss = UINT64_C(0x8000000000000000) / (absb[lenabsb-1] + 1);
+
+        assert(lenar >= lenabsb);
+        assert(absb[lenabsb-1] != 0);
+        int lz = nlz(absb[lenabsb-1]);
+        uint64_t ss = ((uint64_t)1) << lz;
+//@@    uint64_t ss = UINT64_C(0x10000000000000000) / (absb[lenabsb-1] + 1);
+        std::cout << "scale = " << std::hex << ss << std::dec << std::endl;
+
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
         r[lenr] = scale_for_division(r, lenr, ss);
@@ -2647,7 +2656,7 @@ temp("absb", absb, lenabsb);
         assert(scale_for_division(absb, lenabsb, ss) == 0);
 temp("scaled r", r, lenr);
 temp("absb", absb, lenabsb);
-        lenq = lenr-lenabsb+1; // potential length of quotient.
+        lenq = lenr-lenabsb; // potential length of quotient.
 std::cout << "lenq = " << lenq << std::endl;
         size_t m = lenq-1;
         for (;;)
@@ -3247,6 +3256,7 @@ int main(int argc, char *argv[])
     for (int i=0; i<ntries; i++)
     {   std::cout << i << "  ";
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
+        divisor += Bignum(1) << 65; // @@@
         Bignum remainder = uniform_upto_bignum(divisor);
         Bignum quotient = random_upto_bits_bignum(maxbits);
         Bignum dividend = quotient*divisor + remainder;
