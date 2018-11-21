@@ -89,3 +89,4 @@ comment about these lisps
 treat value cell as ambiguous?
 look for global in gc?
 use fixnum?
+

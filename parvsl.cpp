@@ -1494,7 +1494,7 @@ static inline LispObject copycontent(LispObject s)
     {   case typeSYM:
             w = s + tagSYMBOL;
             // qflags(w) does not need adjusting
-            qvalue(w) = copy(qvalue(w));
+            par::symval(w) = copy(par::symval(w));
             qplist(w) = copy(qplist(w));
             qpname(w) = copy(qpname(w));
             qlits(w)  = copy(qlits(w));
@@ -6038,12 +6038,12 @@ void setup()
     nil = lookup("nil", 3, 3);
     qflags(nil) |= flagGLOBAL;
     qvalue(nil) = nil;
+
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
     qvalue(lisptrue) = lisptrue;
     echo = lookup("*echo", 5, 3);
-    fluid_symbol(echo);
-    // qflags(echo) |= flagFLUID;
+    qflags(echo) |= flagFLUID;
     par::symval(echo) = interactive ? nil : lisptrue;
 
     {   
@@ -6074,9 +6074,9 @@ void setup()
     input = lookup("input", 5, 3);
     output = lookup("output", 6, 3);
     pipe = lookup("pipe", 4, 3);
-    dfprint = lookup("dfprint*", 6, 3);
-    par::symval(dfprint) = nil;
+    dfprint = lookup("dfprint*", 8, 3);
     qflags(dfprint) |= flagFLUID;
+    par::symval(dfprint) = nil;
 
     bignum = lookup("~bignum", 7, 3);
     raise = lookup("*raise", 6, 3);
@@ -6532,6 +6532,7 @@ int warm_start_1(gzFile f, int *errcode)
     b1 = 0;
     fr1 = ((block_header *)blocks_by_age[b1])->h1base;
     lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+
     while (fr1 != fringe1)
     {   LispObject h, w;
         if (fr1 == lim1 )
@@ -6546,7 +6547,8 @@ int warm_start_1(gzFile f, int *errcode)
             continue;
         }
         if (!isHDR(h = qcar(fr1))) // A simple cons cell
-        {   qcar(fr1) = relocate(h);
+        {
+            qcar(fr1) = relocate(h);
             fr1 += sizeof(LispObject);
             if (fr1 == lim1 )
             {   b1++;
@@ -6571,6 +6573,8 @@ int warm_start_1(gzFile f, int *errcode)
 // that part of the symbol that lies within the current segment of heap.
                     if (fr1+sizeof(LispObject) < lim1) {
                         qvalue(w) = relocate(qvalue(w));
+                        // during warm_start, all values are still stored globally
+                        // we first relocate them then copy to thread_local
                         // TODO VB: separate function
                         if ((qflags(w) & flagGLOBAL) == 0) {
                             // reallocate on thread_local storage
@@ -6643,6 +6647,7 @@ int warm_start_1(gzFile f, int *errcode)
                         fr1 += SYMSIZE*sizeof(LispObject);
                         abort();
                     }
+                    continue;
                 case typeSTRING:
 // Pure byte-structured binary data, so nothing much to do here. But see
 // the typeVEC code and think about VERY long strings that could overlap
@@ -6696,6 +6701,7 @@ int warm_start_1(gzFile f, int *errcode)
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
      par::symval(echo) = interactive ? nil : lisptrue;
+
      return 0;
 }
 
@@ -6751,8 +6757,7 @@ char startup_banner[64] =
 // had gone wrong since gzerror can be used to discover what the problem
 // had been.
 
-static inline int 
-write_image_1(gzFile f, int *errcode)
+static inline int write_image_1(gzFile f, int *errcode)
 {
     size_t i;
 // First a file-format identifier "vsl+"
@@ -6916,8 +6921,6 @@ void write_image(gzFile f)
     inner_reclaim(C_stackbase); // To compact memory.
     inner_reclaim(C_stackbase); // in the conservative case GC twice.
 
-    std::cerr << "saving symbols" << std::endl;
-
     // VBL we want to find all symbols and move everything back from thread_local data to global
     for (int i = 0; i < OBHASH_SIZE; i += 1) {
         for (LispObject l = obhash[i]; isCONS(l); l = qcdr(l)) {
@@ -6929,8 +6932,6 @@ void write_image(gzFile f)
             }
         }
     }
-
-    std::cerr << "saved" << std::endl;
 
     hexdump();
     switch (write_image_1(f, &errcode))
