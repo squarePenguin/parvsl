@@ -81,7 +81,30 @@
 #include <thread>
 #include <ctime>
 
+// An "my_assert" scheme that lets me write in my own code to print the
+// diagnostics.
+
+// my_abort() mainly exists so I can set a breakpoint on it! Setting one
+// on the system abort() function sometimes does not give me as much help
+// as I might have hoped.
+
+void my_abort()
+{   std::cout << "About to abort" << std::endl;
+    abort();
+}
+
+template <typename F>
+inline void my_assert(bool ok, F&& action)
+{
+// Use this as in
+//     my_assert(predicate, [&]{...});
+// where the "..." is an arbitrary sequence of actions to be taken
+// if the assertion fails.
+    if (!ok) { action(); my_abort(); }
+}
+
 static FILE *logfile = NULL;
+static int counter = 0;
 
 // Making this "inline" results in no warning messages if it is not
 // used. So even though this may somewhat waste space when it is used,
@@ -265,7 +288,7 @@ static inline LispObject boxfloat(double a)
 //   string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 //       In this call n is the original size as used with preallocate, so it
 //       measures in units of sizeof(uint64_t), while final_size is measured
-//       in bytes and is the number of characters present. For native style
+//       in BYTES and is the number of characters present. For native style
 //       strings this will add a '\0' as a terminator and use realloc to
 //       trim the size down to include just that.
 //   void free_string(string_representation s)
@@ -403,7 +426,8 @@ void abandon(uint64_t *p)
 }
 
 LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
-{
+{   my_assert(final_n>0 && final_n<=n,
+       [&]{ std::cout << final_n << " " << n << std::endl; });
 #ifdef SUPPORT_FIXNUMS
 // WHile doing some initial testing I will represent ALL integers as
 // bignums, but for real use within the Lisp I will have a cheaper way
@@ -421,7 +445,8 @@ LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
 }
 
 LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{
+{   my_assert(final_n>0 && final_n<=n,
+       [&]{ std::cout << final_n << " " << n << std::endl; });
 #ifdef SUPPORT_FIXNUMS
     if (final_n == 1)
     {   p[-1] = tagHDR + typeGAP + packlength(n*sizeof(uint64_t));
@@ -444,7 +469,8 @@ void abandon_x(uint64_t *p, size_t n)
 }
 
 LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
-{
+{   my_assert(final_n>0 && final_n<=n*sizeof(uint64_t),
+       [&]{ std::cout << "confirm_size_string " << final_n << " " << n << std::endl; });
 // The array (p), whose size (n) is expressed in 64-bit chunks, was allocated
 // and laid out as for a bignum. That means it has a header in memory just
 // ahead of it. Both p and the address of the header were kept 8-byte aligned.
@@ -453,7 +479,7 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // When the data is to be arranged as a string there is no longer any need
 // for the string data to remain 8-byte aligned, and so the gap can be
 // filled by shuffling data down. This then lets me reduce the final size
-// a little (typically by 4 bytes).
+// a little (typically by 4 bytes bytes on a 32-bit machine).
     if (sizeof(uint64_t) != sizeof(intptr_t))
     {   char *p1 = (char *)&p[-1];
         std::memmove(p1+sizeof(uintptr_t), p, final_n);
@@ -556,36 +582,81 @@ typedef void *malloc_t(size_t);
 typedef void *realloc_t(void *, size_t);
 typedef void free_t(void *);
 
-malloc_t  *malloc_function = malloc;
-realloc_t *realloc_function = realloc;
-free_t    *free_function   = free;
+void validate(void *p)
+{   uint64_t *r = &((uint64_t *)p)[-1];
+    size_t n = r[0] & 0xffff;
+    if (r[0] != 0x5555555555550000 + n) my_abort();
+    if (r[(n+7)/8+1] != 0xaaaaaaaaaaaaaaaa) my_abort();
+}
+
+void *my_malloc(size_t n)
+{   uint64_t *r = (uint64_t *)malloc(n + 16);
+    r[0] = 0x5555555555550000 + n;
+    r[(n+7)/8+1] = 0xaaaaaaaaaaaaaaaa;
+    validate((void *)&r[1]);
+    return (void *)&r[1];
+}
+
+void *my_realloc(void *p, size_t n)
+{   validate(p);
+    uint64_t *r = &((uint64_t *)p)[-1];
+    r[0] = 0x5555555555550000 + n;
+    r[(n+7)/8+1] = 0xaaaaaaaaaaaaaaaa;
+    return (void *)&r[1];
+}
+
+void my_free(void *p)
+{   validate(p);
+    uint64_t *r = &((uint64_t *)p)[-1];
+    size_t n = r[0] & 0xffff;
+    r[0] = 0xdeadbeefdeadbeef;
+    r[(n+7)/8+1] = 0xbabefacebabaface;
+    free(r);
+}
+
+malloc_t  *malloc_function = my_malloc;
+realloc_t *realloc_function = my_realloc;
+free_t    *free_function   = my_free;
 
 uint64_t *preallocate(size_t n)
-{   uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
+{   my_assert(n > 0 && n < 10000,
+       [&]{ std::cout << "my_allocate " << n << std::endl; });
+    uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
     assert(r != NULL);
+//    printf("[%d] malloc(%d) = %p\n", ++counter, (int)(n*8), r);
     return &r[1];
 }
 
 void abandon(uint64_t *p)
-{   (*free_function)((void *)&p[-1]);
+{//   printf("[%d] free %p\n", ++counter, p);
+    (*free_function)((void *)&p[-1]);
 }
 
 number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
-{   p = (uint64_t *)
+{   my_assert(final_n>0 && final_n<=n,
+       [&]{ std::cout << "confirm_size final=" << final_n << " orig=" << n << std::endl; });
+//    printf("confirm_size %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
+    p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
+//    printf("[%d] realloc -> %p\n", ++counter, p);
     p[0] = final_n;
     return &p[1];
 }
 
 void abandon_x(uint64_t *p, size_t n)
-{   (*free_function)((void *)&p[-1]);
+{
+    (*free_function)((void *)&p[-1]);
 }
 
 number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{   p = (uint64_t *)
+{   my_assert(final_n>0 && final_n<=n,
+       [&]{ std::cout << "confirm_size_x" << final_n << " " << n << std::endl; });
+//    printf("confirm_size_x %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
+    p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     assert(p != NULL);
+//    printf("[%d] realloc -> %p\n", ++counter, p);
     p[0] = final_n;
     return &p[1];
 }
@@ -598,7 +669,10 @@ number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 // final_n measures the string in characters.
 
 string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
-{   char *c = (char *)&p[-1];
+{   my_assert(final_n>0 && final_n+1<(n+1)*sizeof(uint64_t),
+       [&]{ std::cout << "confirm_size_string " << final_n << " " << n << std::endl; });
+//    printf("confirm_size_string %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
+    char *c = (char *)&p[-1];
 // When a string is returned it will not need a preceeding header word, so
 // I memmove() the data down to the start of the memory block. This has
 // a cost and perhaps keeping the length information elsewhere would have
@@ -614,6 +688,7 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // word.
     const char *cc = (const char *)(*realloc_function)(c, final_n+1);
     assert(cc != NULL);
+//    printf("[%d] realloc -> %p\n", ++counter, p);
     return cc;
 }
 
@@ -627,12 +702,14 @@ number_representation copy_if_no_garbage_collector(number_representation p)
 }
 
 void free_bignum(number_representation p)
-{   if (p != (number_representation)0)
+{//   printf("[%d] free %p\n", ++counter, (void *)p);
+    if (p != (number_representation)0)
         (*free_function)((void *)&p[-1]);
 }
 
 void free_string(string_representation p)
-{   if ((number_representation)p != (number_representation)0)
+{//   printf("[%d] free %p\n", ++counter, (void *)p);
+    if ((number_representation)p != (number_representation)0)
        (*free_function)((void *)p);
 }
 
@@ -1292,6 +1369,7 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // overflow well before the full 64-bits or result, but that would only
 // arise for bignum inputs that are way beyond the memory ranges supported
 // at present by any extant hardware.
+//
     return (size_t)(1+(617*(uint64_t)r)/2048);
 } 
 
@@ -1649,6 +1727,8 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 // pattern). Here where the output is treated as unsigned the length remains
 // unchanged. It can also be the case that the input started off as positive
 // but its value had required a leading zero. I remove that zero.
+
+// @@@ Do I still fix length of output properly?
 
 static void bigabsval(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 {   if (positive(a[lena-1]))
@@ -2379,6 +2459,19 @@ again2:
 typedef uint64_t DIGIT;
 typedef UINT128  DIGIT2;
 
+// What I am thinking about here is that the main version of my code here
+// uses 128-bit arithmetic while performing the per-digit step in the normal
+// long division algorithm. On platforms where int128_t is not available
+// similating that is somewhat ugly. It may be better in such cases to
+// do some parts of long division as if my number was represenred base 2^32
+// rather than 2^64. And in fact the data representation means that apart
+// from strict aliasing and perhaps some byte order worries that could be
+// implemented at not much more than the cost of a case from (uint64_t *)
+// to (uint32_t *). But because of those worries I think I would need an
+// abstraction level around digit access, so here at least notionally are
+// the functions to read and write digits as if the number was represented
+// as a vector of 32-bit chunks. So far I do not use these!
+
 static inline DIGIT read_digit(uint64_t *a, size_t n)
 {   return a[n];
 }
@@ -2403,22 +2496,60 @@ static inline void write_digit(uint64_t *a, size_t n, DIGIT v)
 #endif // __SIZEOF_INT128__
 
 
+//
+// Division with the main number representation being 2s complement
+// turns out to have many messy special cases! Here are some of the
+// underlying issues:
+// . Inputs may have had initial 0 or -1 digits pre-pended to allow
+//   for positive values with their top bit set and negative ones with
+//   it clear. So if I had 8-bit words the number 128 would have an
+//   unsigned representation of [0x80], but it has to be stored as a
+//   two digit number [0x00,0x80]. Similarly some negative numbers
+//   need an initial 0xff attached just so that it can be seen that they
+//   are negative.
+// . If a result (quotient or remainder) is as above then space can be
+//   needed for the prefix digit.
+// . Long division needs to have a dividend with at least 3 digits
+//   (after scaling) and a divisor with at least 2. That means that various
+//   small cases have to be treated specially.
+// . An operation as basic as taking the absolute value of an integer
+//   generally involves allocating memory, and I would like to avoid that
+//   as much as I can.
+// . quotient and remainder operations are very similar indeed, but I ought
+//   to be able to safe memory allocation in one or the other. Specifically
+//   if I am computing a remainder I can discard quotient digits as I go
+//   rather than having anywhere to put them.
+// . On many useful platforms I will have an integer type that is 128 bits
+//   wide and I can use that for a 128-by-64 division operation that is
+//   really helpful when working with 64-bit digits. It is possible that
+//   if I do not have 128-bit arithmetic available it would be best to
+//   treat my numbers as being in base 2^32 so that 64-by-32 division is
+//   the order of the day as a basic primitive.
+// . For Lisp purposes I will have "fixnums" as well as "bignums" so special
+//   paths for arithmetic that involves values -2^59 to 2^59-1 will be
+//   required.
+//
+// Well perhaps I am fussing about all the above. But my first drafts of this
+// code has not thought through all the cases carefully enough!
+
+
+
+
+
 // r = r - b*q*base^(lena-lenb-1).
 
 static void multiply_and_subtract(uint64_t *r, size_t lenr,
                                   uint64_t q0,
                                   uint64_t *b, size_t lenb)
-{   uint64_t carry = 0;
+{   assert(lenr > lenb);
+    uint64_t hi = 0, lo, carry = 1;
     for (size_t i=0; i<lenb; i++)
-    {   UINT128 d = r[i+lenr-lenb-1] -
-                    b[i]*(UINT128)q0 +
-                    carry;
-        r[i+lenr-lenb-1] = (uint64_t)d;
-        carry = (uint64_t)(d >> 64);
+    {   multiplyadd64(b[i], q0, hi, hi, lo);
+// lo is now the next digit of b*q, and hi needs to be carried up to the
+// next one.
+        carry = add_with_carry(r[i+lenr-lenb-1], ~lo, carry, r[i+lenr-lenb-1]);
     }
-// This top digit will in the end be treated as signed, and typically carry
-// will have its top bit set so that this is in effect a subtraction.
-    r[lenr-1] += carry;
+    r[lenr-1] = r[lenr-1] + ~hi + carry;
 }
 
 // add_back_correction() is used when a quotient digit was mis-predicted by
@@ -2428,7 +2559,8 @@ static void multiply_and_subtract(uint64_t *r, size_t lenr,
  
 static void add_back_correction(uint64_t *r, size_t lenr,
                                 uint64_t *b, size_t lenb)
-{   uint64_t carry = 0;
+{   assert(lenr > lenb);
+    uint64_t carry = 0;
     for (size_t i=0; i<lenb; i++)
         carry = add_with_carry(r[i+lenr-lenb-1], b[i], carry, r[i+lenr-lenb-1]);
     r[lenr-1] += carry;
@@ -2436,8 +2568,10 @@ static void add_back_correction(uint64_t *r, size_t lenr,
 
 static inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
                                            uint64_t *b, size_t lenb)
-{   UINT128 p0 = pack128(r[lenr-1], r[lenr-2]);
+{   assert(lenr > lenb);
+    assert(lenb >= 2);
     assert(b[lenb-1] != 0);
+    UINT128 p0 = pack128(r[lenr-1], r[lenr-2]);
     uint64_t q0 =  (uint64_t)(p0 / (UINT128)b[lenb-1]);
     uint64_t r0 =  (uint64_t)(p0 % (UINT128)b[lenb-1]);
 // At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
@@ -2589,16 +2723,19 @@ int64_t signedshortquotrem(uint64_t *a, size_t lena,
 
 void bigquotrem(uint64_t *a, size_t lena,
                 uint64_t *b, size_t lenb,
-                uint64_t *absb, size_t lenabsb,   // temp - size lenb
-                uint64_t *q, size_t &lenq,  // quotient - size lena-lenb+1
-                uint64_t *r, size_t &lenr)  // remainder - size lena+1
+                uint64_t *absb, size_t lenabsb,   // temp : size lenb
+                uint64_t *q, size_t &lenq,  // quotient : size lena-lenb+1
+                uint64_t *r, size_t &lenr)  // remainder : size lena+1
 {   assert(lenb >= 2);
+//std::cout << "Start of quotrem" << std::endl;
+    validate(&r[-1]);
+    validate(&q[-1]);
     bool quot_sign = false, rem_sign = false;
     if (negative(a[lena-1]))
         quot_sign = rem_sign = true;
     if (negative(b[lenb-1])) quot_sign = !quot_sign;
-temp("quotrem a", a, lena);
-temp("b", b, lenb);
+//display("quotrem a", a, lena);
+//display("quotrem b", b, lenb);
 // I copy the absolute values of a and b to places where it will be
 // OK to overwrite them, taking their absolute values as I go. I record
 // whether the eventual quotient and/or remainder will need to be negated
@@ -2607,17 +2744,27 @@ temp("b", b, lenb);
 // what had originally been a leading 0 or (-1) and hence appear shorter.
     bigabsval(a, lena, r, lenr);
     bigabsval(b, lenb, absb, lenabsb);
-temp("quotrem r", r, lenr);
-temp("absb", absb, lenabsb);
+    validate(&r[-1]);
+    validate(&q[-1]);
+//display("a", a, lena);
+//display("quotrem r", r, lenr);
+//temp("absb", absb, lenabsb);
 // Now I want to compute the quotient of r by absb, and both are positive.
 // Taking absolute values might have changed the lengths, so this is a good
 // place to check for a division where the quotient is unquestionably zero.
+    validate(&q[-1]);
     if (lenr < lenabsb ||
         (lenr == lenabsb && r[lenr-1] < absb[lenabsb-1]))
-    {   q[0] = 0;
+    {
+        validate(&q[-1]);
+        q[0] = 0;
         lenq = 1;
+        validate(&q[-1]);
+        std::cout << "lena = " << lena << std::endl;
         memcpy((void *)r, (void *)a, lena*sizeof(uint64_t));
         lenr = lena;
+        validate(&r[-1]);
+        validate(&q[-1]);
         return;
     } 
 // Furthermore it could be that by this stage the divisor has reduced
@@ -2651,37 +2798,58 @@ temp("absb", absb, lenabsb);
         assert(lenr >= lenabsb);
         assert(absb[lenabsb-1] != 0);
         int ss = nlz(absb[lenabsb-1]);
+        validate(&r[-1]);
+        validate(&q[-1]);
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
+//display("not scaled", r, lenr);
         r[lenr] = scale_for_division(r, lenr, ss);
         lenr++;
+//display("scaled", r, lenr);
+        validate(&r[-1]);
+        validate(&q[-1]);
         assert(scale_for_division(absb, lenabsb, ss) == 0);
-temp("scaled r", r, lenr);
-temp("absb", absb, lenabsb);
+        validate(&r[-1]);
+        validate(&q[-1]);
+//temp("scaled r", r, lenr);
+//temp("absb", absb, lenabsb);
         lenq = lenr-lenabsb; // potential length of quotient.
-std::cout << "lenq = " << lenq << std::endl;
+//std::cout << "lenq = " << lenq << std::endl;
         size_t m = lenq-1;
         for (;;)
         {   uint64_t qd = next_quotient_digit(r, lenr, absb, lenabsb);
+            validate(&r[-1]);
+            validate(&q[-1]);
             q[m] = qd;
-std::cout << "next digit of quotient [" << m << "] = " << qd
-          << " " << std::hex << qd << std::dec << std::endl;
-temp("r now", r, lenr);
+//std::cout << "next digit of quotient [" << m << "] = " << qd
+//          << " " << std::hex << qd << std::dec << std::endl;
+//temp("r now", r, lenr);
             if (m == 0) break;
             m--;
         }
-temp("remainder to scale", r, lenr);
+        validate(&r[-1]);
+        validate(&q[-1]);
+//temp("remainder to scale", r, lenr);
         unscale_for_division(r, lenr, ss);
-temp("remainder unscaled", r, lenr);
+//temp("remainder unscaled", r, lenr);
+        validate(&r[-1]);
+        validate(&q[-1]);
     }
+    validate(&r[-1]);
+    validate(&q[-1]);
 // The quotient is OK correct now but has been computed as an unsigned value
 // so if its top digit has its top bit set I need to prepend a zero;
     if (negative(q[lenq-1])) q[lenq++] = 0;
     else truncate_positive(q, lenq);
     if (quot_sign) negate_in_place(q, lenq);
+    validate(&r[-1]);
+    validate(&q[-1]);
     if (negative(r[lenr-1])) r[lenr++] = 0;
     else truncate_positive(r, lenr);
+    validate(&r[-1]);
+    validate(&q[-1]);
     if (rem_sign) negate_in_place(r, lenr);
+    validate(&q[-1]);
 }
 
 number_representation bigquotient(number_representation aa, number_representation bb)
@@ -2695,7 +2863,37 @@ number_representation bigquotient(number_representation aa, number_representatio
         (void)signedshortquotrem(a, na, (int64_t)b[0], q, nq);
         return confirm_size(q, na+1, nq);
     }
-    size_t n1 = na-nb+1;           // for the quotient
+    if (na < nb)
+    {
+// There is a funny case here if |a| = |b| but b is positive and has had
+// to have an extra padding word on the front. As in
+//         (80, 00) / (00, 80, 00)    ie -2^n / 2^n
+// In that very special case the quotient is -1 and the remainder is zero.
+        int res = -1;
+        if (na == nb-1)
+        {   if (b[nb] != 0 ||
+                b[nb-1] != UINT64_C(0x8000000000000000) ||
+                a[na-1] != UINT64_C(0x8000000000000000) res = 0;
+            else for (size_t k=0; k<na-2; k++)
+            {   if (a[k] != 0 || b[k] != 0)
+                {   res = 0;
+                    break;
+                }
+            }
+        }
+        uint64_t *q = preallocate(1);
+        q[0] = res;
+        return confirm_size(q, 1, 1);
+    }
+// For the discussion here imagine that I am using 8-bit words. Then
+// consider (40, 00, 00) / (00, 80). The quotient has numeric value
+// (80, 00) but it will need to be represented as (00, 80, 00). So
+// allowing for this when an initial padding word gets added one can
+// sometimes find that a quotient fills up more space than I had originally
+// expected! This is why the next line has "+2" rather than "+1".
+    size_t n1 = na-nb+2;           // for the quotient
+    my_assert(na >= 2,
+        [&] { std::cout << "na=" << na << " nb=" << nb << std::endl; });
     uint64_t *q = preallocate(n1);
     size_t n2 = na+1;              // for workspace and the remainder
     uint64_t *r = preallocate(n2);
@@ -2704,10 +2902,10 @@ number_representation bigquotient(number_representation aa, number_representatio
     bigquotrem(a, na, b, nb,
                absb, n3,
                q, n1, r, n2);
-// here absb and r are no longer needed.
+// here absb and r are no longer needed since only the quotient is needed.
     abandon(absb);
     abandon(r);
-    return confirm_size(q, na-nb+1, n1);
+    return confirm_size(q, na-nb+2, n1);
 }
 
 number_representation bigremainder(number_representation a, number_representation b)
@@ -2724,14 +2922,13 @@ number_representation bigremainder(number_representation a, number_representatio
     }
     size_t n2 = na+1;              // for workspace and the remainder
     uint64_t *r = preallocate(n2);
-    size_t n1 = na-nb+1;           // for the quotient
+    size_t n1 = na-nb+2;           // for the quotient
     uint64_t *q = preallocate(n1);
     size_t n3 = nb;                // temp workspace
     uint64_t *absb = preallocate(n3);
     bigquotrem(a, na, b, nb,
                absb, n3,
                q, n1, r, n2);
-// here absb and q are no longer needed.
     abandon(absb);
     abandon(q);
     return confirm_size(r, na+1, n2);
@@ -2749,7 +2946,7 @@ cons_representation bigdivide(number_representation a, number_representation b)
         rr[0] = r;
         return cons(qq, confirm_size(rr, 1, 1));
     }
-    size_t n1 = na-nb+1;           // for the quotient
+    size_t n1 = na-nb+2;           // for the quotient
     uint64_t *q = preallocate(n1);
     size_t n2 = na+1;              // for workspace and the remainder
     uint64_t *r = preallocate(n2);
@@ -2758,10 +2955,9 @@ cons_representation bigdivide(number_representation a, number_representation b)
     bigquotrem(a, na, b, nb,
                absb, n3,
                q, n1, r, n2);
-// here absb is longer needed.
     abandon(absb);
     number_representation rr = confirm_size(r, na+1, n2);
-    number_representation qq = confirm_size_x(q, na-nb+1, n1);
+    number_representation qq = confirm_size_x(q, na-nb+2, n1);
     return cons(qq, rr);
 }
 
@@ -2775,7 +2971,7 @@ cons_representation bigdivide(number_representation a, number_representation b)
 
 #ifndef VSL
 
-struct  radix
+struct radix
 {
 public:
 // I would like setting hex or oct or dec to disable this, but at present
@@ -3254,24 +3450,24 @@ int main(int argc, char *argv[])
 #define TEST_DIVISION 1
 
 #ifdef TEST_DIVISION
-    maxbits = 80;
-    ntries = 1;
+    maxbits = 330;
+    ntries = 10000;
 
     for (int i=0; i<ntries; i++)
-    {   std::cout << i << "  ";
+    {   //std::cout << i << "  ";
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
         divisor += Bignum(1) << 65; // @@@
         Bignum remainder = uniform_upto_bignum(divisor);
         Bignum quotient = random_upto_bits_bignum(maxbits);
         Bignum dividend = quotient*divisor + remainder;
-temp("\nnum ", number_data(dividend.val), number_size(dividend.val));
-temp("den ", number_data(divisor.val), number_size(divisor.val));
-temp("quot", number_data(quotient.val), number_size(quotient.val));
-temp("rem ", number_data(remainder.val), number_size(remainder.val));
+//temp("\nnum ", number_data(dividend.val), number_size(dividend.val));
+//temp("den ", number_data(divisor.val), number_size(divisor.val));
+//temp("quot", number_data(quotient.val), number_size(quotient.val));
+//temp("rem ", number_data(remainder.val), number_size(remainder.val));
         Bignum q1 = dividend / divisor;
         Bignum r1 = dividend % divisor;
         if (q1 == quotient && r1 == remainder)
-        {   std::cout << "Passed pass " << i << std::endl;
+        {   // std::cout << "Passed pass " << i << std::endl;
             continue;
         }
         std::cout << "FAILED" << std::endl;
