@@ -2508,20 +2508,27 @@ static inline void write_digit(uint64_t *a, size_t n, DIGIT v)
 // code has not thought through all the cases carefully enough!
 
 
+static void positive_short_division(const uint64_t *a, size_t lena,
+                                    uint64_t b,
+                                    bool want_q, uint64_t *&q, size_t &lenq,
+                                    bool want_r, uint64_t *&r, size_t &lenr)
+{   
+}
+
+static void negative_short_division(const uint64_t *a, size_t lena,
+                                    uint64_t b,
+                                    bool want_q, uint64_t *&q, size_t &lenq,
+                                    bool want_r, uint64_t *&r, size_t &lenr);
+
 static void signed_short_division(const uint64_t *a, size_t lena,
                                   int64_t b,
                                   bool want_q, uint64_t *&q, size_t &lenq,
-                                  bool want_r, uint64_t *&r, size_t &lenr);
-
-static void positive_short_division(const uint64_t *a, size_t lena,
-                                    int64_t b,
-                                    bool want_q, uint64_t *&q, size_t &lenq,
-                                    bool want_r, uint64_t *&r, size_t &lenr);
-
-static void negative_short_division(const uint64_t *a, size_t lena,
-                                    int64_t b,
-                                    bool want_q, uint64_t *&q, size_t &lenq,
-                                    bool want_r, uint64_t *&r, size_t &lenr);
+                                  bool want_r, uint64_t *&r, size_t &lenr)
+{   if (b > 0)
+        positive_short_division(a, lena, b, want_q, q, lenq, want_r, r, lenr);
+    else
+        negative_short_division(a, lena, b, want_q, q, lenq, want_r, r, lenr);
+}
 
 static void long_division(const uint64_t *a, size_t lena,
                           const uint64_t *b, size_t lenb,
@@ -2551,7 +2558,8 @@ void division(const uint64_t *a, size_t lena,
 // The first case is when the single digit if b is a signed value in the
 // range -2^63 to 2^63-1.
     if (lenb == 1)
-    {   signed_short_division(a, lena, (int64_t)b[0],
+    {   assert(b[0] != 0); // would be division by zero
+        signed_short_division(a, lena, (int64_t)b[0],
                               want_q, q, lenq, want_r, r, lenr);
         return;
     }
@@ -2570,6 +2578,32 @@ void division(const uint64_t *a, size_t lena,
 // one special case when -b(0) is zero, and that corresponds to division
 // by -2^64, so I will need to detect that and turn the division into a
 // combination of shift and negate operations.
+        if (b[0] == 0)
+        {   if (want_q)
+            {   lenq = lena;
+                q = preallocate(lena);
+                uint64_t carry = 1;
+                for (size_t i=0; i<lena-1; i++)
+                {   uint64_t w = ~a[i+1] + carry;
+                    q[i] = w;
+                    carry = w < carry ? 1 : 0;
+                }
+                if (q[lenq-1]==0 && lenq>1 && positive(q[lenq-2])) lenq--;
+                if (q[lenq-1]==allbits && lenq>1 && negative(q[lenq-2])) lenq--;
+            }
+            if (want_r)
+            {   uint64_t rr = a[0], padr;
+                lenr = 1;
+                if ((negative(a[lena-1]) && positive(rr))
+                {   padr = -1; lenr++; }
+                else if ((positive(a[lena-1]) && negative(rr))
+                {   padr = 0; lenr++; }
+                r = preallocate(lenr);
+                r[0] = rr;
+                if (lenr == 1) r[1] = padr;
+            }
+            return;
+        }
         negative_short_division(a, lena, -b[0],
                                 want_q, q, lenq, want_r, r, lenr);
         return;
@@ -2645,9 +2679,21 @@ void division(const uint64_t *a, size_t lena,
     lenr = lena + 1;
     r = preallocate(lenr);
     long_division(r, lenr, bb, lenbb, want_q, q, lenq);
-    if (!want_r) abandon(r);
+// While performing the long division I will have had thee vectors that
+// were newly allocated. r starts off containing a copy of a but ends up
+// holding the remainder. It is rather probable that this remainder will
+// often be a distinctly shorter vector than a was. The vector q is only
+// created and used if want_q was set, and it ends up holding the quotient.
+// finally bb holds the absolute value of the divisor but scaled up by a
+// power of 2 so that its leading digit has its top bit set. Well the actual
+// remainder is smaller than the divisor and so it will be a closer fit into
+// bb than r. So copy it into there so that the allocate/abandon and
+// size confirmation code is given less extreme things to cope with.
+    if (want_r) memcpy(bb, r, lenr*sizeof(uint64_t));
+    abandon(r);
     if (!want_q) abandon(q);
-    abandon(bb);
+    if (!want_r) abandon(bb);
+    r = bb;
 }
 
 // During long division I will scale my numbers by shifting left by an
