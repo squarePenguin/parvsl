@@ -912,68 +912,6 @@ static inline bool negative(uint64_t a)
 {   return ((int64_t)a) < 0;
 }
 
-// At times it may be helpful to treat the array of digits as
-// being a row of 32-bit values rather than 64-bit ones. gcc at least
-// has predefined symbols that can tell me when I am little-endian and
-// that helps. But to be secure against the strict aliasing rules I need
-// to access memory using (nominally) character-at-a-time operations.
-//
-// The behaviour here depends on byte-ordering: on some systems I will
-// have predefined macros that let me know what happens on the platform
-// I am on. Specifically gcc and clang seem to define symbols as tested
-// for here... which let me use code that is pretty clean and fast.
-
-#if defined __BYTE_ORDER__ && \
-    defined __ORDER_LITTLE_ENDIAN__ && \
-    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-
-static inline uint32_t read_u32(const uint64_t *v, size_t n)
-{   uint32_t r;
-    std::memcpy(&r, (const char *)v + 4*n, sizeof(uint32_t));
-    return r;
-}
-
-static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   std::memcpy((char *)v + 4*n, &r, sizeof(uint32_t));
-}
-
-#elif defined __BYTE_ORDER__ && \
-    defined __ORDER_BIG_ENDIAN__ && \
-    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-
-static inline uint32_t read_u32(const uint64_t *v, size_t n)
-{   uint32_t r;
-    std::memcpy(&r, (const char *)v + 4*(n^1), sizeof(uint32_t));
-    return r;
-}
-
-static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   std::memcpy((char *)v + 4*(n^1), &r, sizeof(uint32_t));
-}
-
-#else // endianness not known at compile time
-
-// If I am uncertain about endianness I can extract or insert data
-// using shift operations. It is not actually TOO bad. I am mainly providing
-// these in case the nicest implementation of long division when I do not
-// have int128_t available will involve working with 32-bit rather than
-// 64-bit digits.
-
-static inline uint32_t read_u32(const uint64_t *v, size_t n)
-{   uint64_t r = v[n/2];
-    if ((n & 1) != 0) r >>= 32;
-    return (uint32_t)r;
-}
-
-static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   uint64_t w = v[n/2];
-    if ((n & 1) != 0) w = ((uint32_t)w) | ((uint64_t)r << 32);
-    else w = (w & ((uint64_t)(-1)<<32)) | r;
-    v[n/2] = w;
-}
-
-#endif // endianness
-
 // When printing numbers in octal it will be handy to be able treat the
 // data as an array of 3-bit digits, so here is an access function that
 // does that. There is a messy issue about the top of a number, where it
@@ -2348,31 +2286,6 @@ number_representation bigpow(number_representation aa, uint64_t n)
     return confirm_size(r, olenr, lenr);
 }
 
-// During long division I will scale my numbers by shifting left by an
-// amount s. I do that in place. The shift amount will be such that
-// the divisor ends up with the top bit of its top digit set. The
-// divident will need to extend into an extra digit, and I deal with that
-// by returning the overflow word as a result of the scaling function. Note
-// that the shift amount will be in the range 0-63.
-
-
-static uint64_t scale_for_division(uint64_t *r, size_t lenr, int s)
-{
-// There are two reasons for me to treat a shift by zero specially. The
-// first is that it is cheap because no data needs moving at all. But the
-// more subtle reason is that if I tried using the general code as below
-// that would execure a right shift by 64, which is out of the proper range
-// for C++ right shifts.
-    if (s == 0) return 0;
-    uint64_t carry = 0;
-    for (size_t i=0; i<lenr; i++)
-    {   uint64_t w = r[i];
-        r[i] = (w << s) | carry;
-        carry = w >> (64-s);
-    }
-    return carry;
-}
-
 // divide (hi,lo) by divisor and generate a quotient and a remainder. The
 // version of the code that is able to use __int128 can serve as clean
 // documentation of the intent.
@@ -2485,6 +2398,68 @@ static inline void write_digit(uint64_t *a, size_t n, DIGIT v)
 typedef uint32_t DIGIT;
 typedef uint64_t DIGIT2;
 
+// Here I wish to to treat the array of digits as being a row of 32-bit
+// values rather than 64-bit ones. gcc at least has predefined symbols
+// that can tell me when I am little-endian and that helps. But to be
+// secure against the strict aliasing rules I need to access memory using
+// (nominally) character-at-a-time operations.
+//
+
+// Both clang and gcc defined the symbols I check here to know abiut
+// byte orderings within words.
+
+#if defined __BYTE_ORDER__ && \
+    defined __ORDER_LITTLE_ENDIAN__ && \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+
+static inline uint32_t read_u32(const uint64_t *v, size_t n)
+{   uint32_t r;
+// Use of memcpy complies with strict aliasing restrictions and so the
+// compiler can not make wilfull changes based on the delicate behavior
+// here. Furthermove I expect good compilers to recognize calls to memcpy
+// and generate efficient inline code...
+    std::memcpy(&r, (const char *)v + 4*n, sizeof(uint32_t));
+    return r;
+}
+
+static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
+{   std::memcpy((char *)v + 4*n, &r, sizeof(uint32_t));
+}
+
+#elif defined __BYTE_ORDER__ && \
+    defined __ORDER_BIG_ENDIAN__ && \
+    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+
+static inline uint32_t read_u32(const uint64_t *v, size_t n)
+{   uint32_t r;
+    std::memcpy(&r, (const char *)v + 4*(n^1), sizeof(uint32_t));
+    return r;
+}
+
+static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
+{   std::memcpy((char *)v + 4*(n^1), &r, sizeof(uint32_t));
+}
+
+#else // endianness not known at compile time
+
+// If I am uncertain about endianness I can extract or insert data
+// using shift operations. It is not actually TOO bad.
+`
+static inline uint32_t read_u32(const uint64_t *v, size_t n)
+{   uint64_t r = v[n/2];
+    if ((n & 1) != 0) r >>= 32;
+    return (uint32_t)r;
+}
+
+static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
+{   uint64_t w = v[n/2];
+    if ((n & 1) != 0) w = ((uint32_t)w) | ((uint64_t)r << 32);
+    else w = (w & ((uint64_t)(-1)<<32)) | r;
+    v[n/2] = w;
+}
+
+#endif // endianness
+
 static inline DIGIT read_digit(uint64_t *a, size_t n)
 {   return read_u32(a, n);
 }
@@ -2533,6 +2508,172 @@ static inline void write_digit(uint64_t *a, size_t n, DIGIT v)
 // code has not thought through all the cases carefully enough!
 
 
+static void signed_short_division(const uint64_t *a, size_t lena,
+                                  int64_t b,
+                                  bool want_q, uint64_t *&q, size_t &lenq,
+                                  bool want_r, uint64_t *&r, size_t &lenr);
+
+static void positive_short_division(const uint64_t *a, size_t lena,
+                                    int64_t b,
+                                    bool want_q, uint64_t *&q, size_t &lenq,
+                                    bool want_r, uint64_t *&r, size_t &lenr);
+
+static void negative_short_division(const uint64_t *a, size_t lena,
+                                    int64_t b,
+                                    bool want_q, uint64_t *&q, size_t &lenq,
+                                    bool want_r, uint64_t *&r, size_t &lenr);
+
+static void long_division(const uint64_t *a, size_t lena,
+                          const uint64_t *b, size_t lenb,
+                          bool want_q, uint64_t *&q, size_t &lenq);
+
+// The following is a major entrypoint to the division code. (a) and (b) are
+// vectors of digits such that the top digit of a number is treated as signed
+// and the lower ones as unsigned. To cope with this there will sometimes
+// be a sort of initial padder digit. The two boolean values indicate whether
+// either or both of quotient and remainder are required. if want_q is set
+// then create a new vector for q and return it via q/lenq. Similarly for
+// want_r.
+
+// Divide a by b to obtain a quotient q and a remainder r. 
+void division(const uint64_t *a, size_t lena,
+              const uint64_t *b, size_t lenb,
+              bool want_q, uint64_t *&q, size_t &lenq,
+              bool want_r, uint64_t *&r, size_t &lenr)
+{   assert(want_q || want_r);
+// First I will filter out a number of cases where the divisor is "small".
+// I only want to proceed into the general case code if it is a "genuine"
+// big number with at least two digits. This bit of the code is messier
+// than one might have imagined because of the 2s complement representation
+// I use and the fact that extreme values that almost fit in a single
+// digit can ends up as 2-digit values with a degenerate top digit.
+//
+// The first case is when the single digit if b is a signed value in the
+// range -2^63 to 2^63-1.
+    if (lenb == 1)
+    {   signed_short_division(a, lena, (int64_t)b[0],
+                              want_q, q, lenq, want_r, r, lenr);
+        return;
+    }
+// Next I have b in the range 2^63 to 2^64-1. Such values can be represented
+// in uint64_t. 
+    else if (lenb == 2 && b[1]==0)
+    {   positive_short_division(a, lena, b[0],
+                                want_q, q, lenq, want_r, r, lenr);
+        return;
+    }
+// Now for b in -2^64 to -2^63-1. The 2s complement representetation will be
+// of the form (-1,nnn) with nnn an unsigned 64-bit value.
+    else if (lenb == 2 && b[1]==(uint64_t)(-1))
+    {
+// -b(0) is an unsigned representation of the absolute value of b. There is
+// one special case when -b(0) is zero, and that corresponds to division
+// by -2^64, so I will need to detect that and turn the division into a
+// combination of shift and negate operations.
+        negative_short_division(a, lena, -b[0],
+                                want_q, q, lenq, want_r, r, lenr);
+        return;
+    }
+// Now the absolute value of b will be at least 2 digits of 64-bits with the
+// high digit non-zero. I need to make a copy of it because I will scale
+// it during long division.
+    size_t lenbb = lenb;
+    uint64_t *bb = preallocate(lenb);
+    bool b_negative = negative(b[lenb-1]);
+    if (b_negative)
+    {
+// In the case that b is negative I will want its absolute value. Especially
+// in a multi-thread world I must not disturb or overwrite the input vector,
+// so a create a temporary copy of b to negate. In my full 2s complement
+// representation negating -2^(64*n-1) would lead to what was supposed to be
+// a positive value but it would have its top bit set so it would require
+// and extra leading 0. Because the value I generate here is to be treated
+// as unsigned this leading top bit does not matter and so the absolute value
+// of b fits in the same amount of space that b did with no risk of overflow.  
+        uint64_t carry = 1;
+        for (size_t i=0; i<lenb; i++)
+        {   uint64_t w = ~b[i] + carry;
+            bb[i] = w;
+            carry = w < carry ? 1 : 0;
+        }
+        if (bb[lenbb] == 0) lenbb--;
+    }
+    else if (b[lenb-1] == 0) lenbb--;
+    assert(lenbb >= 2);
+// Now I should look at the dividend. If it is shorter than the divisor
+// then I know that the quotient will be zero and the dividend will be the
+// remainder. If I had made this test before normalizing the divisor I could
+// have needed to worry about the case of (-2^(64n-1))/(2^(64n-1)) where the
+// divisor would have had an initial padding zero so would have shown up
+// as longer than the dividend but the quotient would have needed to come out
+// as 1. But here with the divisor made tidy this test is safe!
+    if (lena < lenbb)
+    {   if (want_q)
+        {   q = preallocate(1);
+            q[0] = 0;
+            lenq = 1;
+        }
+        if (want_r)
+        {   r = preallocate(lena);
+            memcpy(r, a, lena*sizeof(uint64_t));
+            lenr = lena;
+        }
+        if (b_negative) abandon(bb);
+        return;
+    }
+// Now lena >= lenb >= 2 and I will need to do a genuine long division. This
+// will need me to allocate some workspace.
+//
+// Because I will scale the divisor I need that to be a copy of the
+// original data even if that has been positive and so I had not copied
+// it yet. I delay creation of that copy until now because that lets my
+// avoid a spurious allocation in the various small cases.
+    if (!b_negative)
+    {   bb = preallocate(lenbb);
+        memcpy(bb, b, lenbb*sizeof(uint64_t));
+    }
+// If I actually return the quotient I may need to add a leading 0 or -1 to
+// make its 2s complement representation valid. Hence the "+2" rather than
+// the more obvious "+1" here.
+    if (want_q)
+    {   lenq = lena - lenb + 2;
+        q = preallocate(lenq);
+    }
+// I will need space where I store something that starts off as a scaled
+// copy of the dividend and gradually have values subtracted from it until
+// it ends up as the remainder.
+    lenr = lena + 1;
+    r = preallocate(lenr);
+    long_division(r, lenr, bb, lenbb, want_q, q, lenq);
+    if (!want_r) abandon(r);
+    if (!want_q) abandon(q);
+    abandon(bb);
+}
+
+// During long division I will scale my numbers by shifting left by an
+// amount s. I do that in place. The shift amount will be such that
+// the divisor ends up with the top bit of its top digit set. The
+// divident will need to extend into an extra digit, and I deal with that
+// by returning the overflow word as a result of the scaling function. Note
+// that the shift amount will be in the range 0-63.
+
+
+static uint64_t scale_for_division(uint64_t *r, size_t lenr, int s)
+{
+// There are two reasons for me to treat a shift by zero specially. The
+// first is that it is cheap because no data needs moving at all. But the
+// more subtle reason is that if I tried using the general code as below
+// that would execure a right shift by 64, which is out of the proper range
+// for C++ right shifts.
+    if (s == 0) return 0;
+    uint64_t carry = 0;
+    for (size_t i=0; i<lenr; i++)
+    {   uint64_t w = r[i];
+        r[i] = (w << s) | carry;
+        carry = w >> (64-s);
+    }
+    return carry;
+}
 
 
 
@@ -2863,34 +3004,6 @@ number_representation bigquotient(number_representation aa, number_representatio
         (void)signedshortquotrem(a, na, (int64_t)b[0], q, nq);
         return confirm_size(q, na+1, nq);
     }
-    if (na < nb)
-    {
-// There is a funny case here if |a| = |b| but b is positive and has had
-// to have an extra padding word on the front. As in
-//         (80, 00) / (00, 80, 00)    ie -2^n / 2^n
-// In that very special case the quotient is -1 and the remainder is zero.
-        int res = -1;
-        if (na == nb-1)
-        {   if (b[nb] != 0 ||
-                b[nb-1] != UINT64_C(0x8000000000000000) ||
-                a[na-1] != UINT64_C(0x8000000000000000) res = 0;
-            else for (size_t k=0; k<na-2; k++)
-            {   if (a[k] != 0 || b[k] != 0)
-                {   res = 0;
-                    break;
-                }
-            }
-        }
-        uint64_t *q = preallocate(1);
-        q[0] = res;
-        return confirm_size(q, 1, 1);
-    }
-// For the discussion here imagine that I am using 8-bit words. Then
-// consider (40, 00, 00) / (00, 80). The quotient has numeric value
-// (80, 00) but it will need to be represented as (00, 80, 00). So
-// allowing for this when an initial padding word gets added one can
-// sometimes find that a quotient fills up more space than I had originally
-// expected! This is why the next line has "+2" rather than "+1".
     size_t n1 = na-nb+2;           // for the quotient
     my_assert(na >= 2,
         [&] { std::cout << "na=" << na << " nb=" << nb << std::endl; });
