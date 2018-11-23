@@ -5529,14 +5529,14 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 // for a Lisp variable "@word" and look at its value. If that value is a
 // string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
-    {   snprintf(filename, strlen(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+    {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
         lits = qvalue(lookup(filename, strlen(filename), 0));
-        if (isSTRING(lits)) snprintf(filename, strlen(filename), "%.*s%.*s",
+        if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
-        else snprintf(filename, strlen(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+        else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
     }
-    else snprintf(filename, strlen(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -5561,14 +5561,14 @@ LispObject Lfilep(LispObject lits, LispObject x)
     if (!isSTRING(x))
         return error1("bad arg for filep", x);
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
-    {   snprintf(filename, strlen(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+    {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
         lits = qvalue(lookup(filename, strlen(filename), 0));
-        if (isSTRING(lits)) snprintf(filename, strlen(filename), "%.*s%.*s",
+        if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
-        else snprintf(filename, strlen(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+        else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
     }
-    else snprintf(filename, strlen(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -5586,7 +5586,7 @@ LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
         !((y == input && (how=1)!=0) ||
           (y == output && (how=2)!=0)))
         return error1("bad arg for open-module", cons(x, y));
-    snprintf(filename, strlen(filename), "%s.modules/%.*s.fasl", imagename,
+    snprintf(filename, sizeof(filename), "%s.modules/%.*s.fasl", imagename,
                       (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
