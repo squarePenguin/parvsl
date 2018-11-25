@@ -88,6 +88,11 @@
 // on the system abort() function sometimes does not give me as much help
 // as I might have hoped.
 
+void my_abort(const char *msg)
+{   std::cout << "About to abort: " << msg << std::endl;
+    abort();
+}
+
 void my_abort()
 {   std::cout << "About to abort" << std::endl;
     abort();
@@ -307,8 +312,10 @@ static inline LispObject boxfloat(double a)
 
 // display() will show the internal representation of a bignum as a
 // sequence of hex values. This is obviously useful while debugging!
+// I make this inline solely because that gets rid of warnings about an
+// unused static function!
 
-static void display(const char *label, const uint64_t *a, size_t lena)
+static inline void display(const char *label, const uint64_t *a, size_t lena)
 {   std::cout << label << " [" << (int)lena << "]";
     for (size_t i=0; i<lena; i++)
         std::cout << " "
@@ -2282,14 +2289,6 @@ number_representation bigrevsubtract(number_representation a, number_representat
 //=========================================================================
 //=========================================================================
 
-// The next is temporary and is for debugging! Again inline so that
-// there are no messy warnings if I do not use it!
-
-static inline void temp(const char *label, const uint64_t *a, size_t lena)
-{   display(label, a, lena);
-    std::cout << string_data(bignum_to_string(a, lena, true)) << std::endl;
-}
-
 void bigmultiply(const uint64_t *a, size_t lena,
                  const uint64_t *b, size_t lenb,
                  uint64_t *r, size_t &lenr)
@@ -2527,14 +2526,45 @@ number_representation bigpow(number_representation aa, uint64_t n)
 // code has not thought through all the cases carefully enough!
 
 
+// Divide the unsigned bignum a by the unsigned number b, returning a
+// quotient or a remainder or both.
+
 static void positive_short_division(const uint64_t *a, size_t lena,
                                     uint64_t b,
                                     bool want_q, uint64_t *&q,
                                     size_t &olenq, size_t &lenq,
                                     bool want_r, uint64_t *&r,
                                     size_t &olenr, size_t &lenr)
-{
-    my_abort();   
+{   uint64_t hi = 0;
+    size_t i=lena-1;
+    if (want_q)
+    {   olenq = lena;
+        q = preallocate(olenq);
+    }
+    for (;;)
+    {   uint64_t d;
+        divide64(hi, a[i], b, d, hi);
+        if (want_q) q[i] = d;
+        if (i == 0) break;
+        i--;
+    }
+    if (want_q)
+    {   lenq = lena;
+        truncate_positive(q, lenq);
+    }
+    if (want_r)
+    {   if (negative(hi))
+        {   olenr = lenr = 2;
+            r = preallocate(olenr);
+            r[0] = hi;
+            r[1] = 0;
+        }
+        else
+        {   olenr = lenr = 1;
+            r = preallocate(olenr);
+            r[0] = hi;
+        }
+    }
 }
 
 static void negative_short_division(const uint64_t *a, size_t lena,
@@ -2544,7 +2574,7 @@ static void negative_short_division(const uint64_t *a, size_t lena,
                                     bool want_r, uint64_t *&r,
                                     size_t &olenr, size_t &lenr)
 {
-    my_abort();   
+    my_abort("negative short division");   
 }
 
 static void signed_short_division(const uint64_t *a, size_t lena,
@@ -2558,7 +2588,7 @@ static void signed_short_division(const uint64_t *a, size_t lena,
                                 want_q, q, olenq, lenq,
                                 want_r, r, olenr, lenr);
     else
-        negative_short_division(a, lena, b,
+        negative_short_division(a, lena, -b,
                                 want_q, q, olenq, lenq,
                                 want_r, r, olenr, lenr);
 }
@@ -2950,7 +2980,6 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
 //std::cout << "Start of quotrem" << std::endl;
 //display("quotrem b", b, lenb);
 //display("a", a, lena);
-//temp("b", b, lenb);
 // I will multiply a and b by a scale factor that gets the top digit of "b"
 // reasonably large. The value stored in "a" can become one digit longer,
 // but there is space to store that.
@@ -2966,8 +2995,6 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
     lena++;
 //display("scaled", a, lena);
     assert(scale_for_division(b, lenb, ss) == 0);
-//temp("scaled a", a, lena);
-//temp("b", b, lenb);
     lenq = lena-lenb; // potential length of quotient.
 //std::cout << "lenq = " << lenq << std::endl;
     size_t m = lenq-1;
@@ -2978,13 +3005,10 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
         if (want_q) q[m] = qd;
 //std::cout << "next digit of quotient [" << m << "] = " << qd
 //          << " " << std::hex << qd << std::dec << std::endl;
-//temp("a now", a, lena);
         if (m == 0) break;
         m--;
     }
-//temp("remainder to scale", a, lena);
     unscale_for_division(a, lena, ss);
-//temp("remainder unscaled", a, lena);
 // The quotient is OK correct now but has been computed as an unsigned value
 // so if its top digit has its top bit set I need to prepend a zero;
     if (want_q)
@@ -3542,17 +3566,13 @@ int main(int argc, char *argv[])
         Bignum remainder = uniform_upto_bignum(divisor);
         Bignum quotient = random_upto_bits_bignum(maxbits);
         Bignum dividend = quotient*divisor + remainder;
-temp("\nnum ", number_data(dividend.val), number_size(dividend.val));
-temp("den ", number_data(divisor.val), number_size(divisor.val));
-temp("quot", number_data(quotient.val), number_size(quotient.val));
-temp("rem ", number_data(remainder.val), number_size(remainder.val));
         Bignum q1 = dividend / divisor;
-temp("computed quot ", number_data(q1.val), number_size(q1.val));
 std::cout << "About to compute remainder" << std::endl;
         Bignum r1 = dividend % divisor;
 std::cout << "Remainder done" << std::endl;
+printf("r1.val = %p\n", r1.val);
+fflush(stdout);
 std::cout << "rem data = " << (void *)r1.val << std::endl;
-temp("computed rem  ", number_data(r1.val), number_size(r1.val));
         if (q1 == quotient && r1 == remainder)
         {    std::cout << "Passed pass " << i << std::endl << std::endl;
             continue;
