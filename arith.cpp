@@ -53,15 +53,20 @@
 
 
 // TODO:
-// get quotient/remainder finished and tested properly.
+
+// short_negative_division done better
+// malloc just in powers of 2
+// VSL and C++ versions closer together
+// bigsquare done better
+ 
+
 //   gcdn, lcmn
 //   float, floor, ceil, fix
 //   isqrt
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
 //   support where int128 is not available
+
 // A LOT of testing. Some profiling and performance tuning.
-// Make use of malloc/free work in just powers of 2 and have the block for
-// a bignum not necessarily filled fully up.
 
 #define __STDC_FORMAT_MACROS 1
 #define __STDC_CONST_MACROS 1
@@ -2358,21 +2363,14 @@ number_representation bigmultiply(number_representation a, number_representation
 // eg (a0,a1,a2,a3)^2 can be expressed as
 // a0^2+a1^2+a2^2+a3^2 + 2*(a0*a1+a0*a2+a0*a3+a1*a2+a1*a3+a2*a3)
 // where the part that has been doubled uses symmetry to reduce the work.
+//
+// For negative inputs I can form the product first treating the inputs
+// as if they had been unsigned, and then subtract 2*2^w*a from the result.
 
 void bigsquare(const uint64_t *a, size_t lena,
                uint64_t *r, size_t &lenr)
 {   for (size_t i=0; i<2*lena; i++) r[i] = 0;
     uint64_t carry;
-// If a is negative then I wish to compute a*a as (-a)*(-a) do that my
-// multiplication is of positive numbers.
-    bool sign = false;
-    uint64_t *aa;
-    if (negative(a[lena-1]))
-    {   sign = true;
-        aa = preallocate(lena);
-        internal_negate(a, lena, aa);
-        a = (const uint64_t *)aa;
-    }
     lenr = 2*lena;
     for (size_t i=0; i<lena; i++)
     {   uint64_t hi = 0;
@@ -2401,8 +2399,18 @@ void bigsquare(const uint64_t *a, size_t lena,
         carry = add_with_carry(lo, carry, r[2*i]);
         carry = add_with_carry(hi, r[2*i+1], carry, r[2*i+1]);
     }
-// Now if the original a was negative I must delete the temporary array.
-    if (sign) abandon(aa);
+// Now if the input had been negative I have a correction to apply...
+// I subtract 2a from the top half of the result.
+    if (negative(a[lena-1]))
+    {   uint64_t carry = 1;
+        int fromprev = 0;
+        for (size_t i=0; i<lena; i++)
+        {   uint64_t d = a[i];
+            uint64_t w = (d<<1) | fromprev;
+            fromprev = (int)(d>>63);
+            carry = add_with_carry(r[lena+i], ~w, carry, r[lena+i]);
+        }
+    }
 // The actual value may be 1 word shorter than this.
 //  test top digit or r and if necessary reduce lenr.
     truncate_positive(r, lenr);
@@ -2532,11 +2540,12 @@ number_representation bigpow(number_representation aa, uint64_t n)
 // code has not thought through all the cases carefully enough!
 
 
-// Divide the bignum a by the unsigned number b, returning a quotient or
-// a remainder or both. Note that at this stage a may still be negative!
+// Divide the bignum a by the b, returning a quotient or a remainder or
+// both. Note that at this stage a may still be negative! The value b is
+// passed in sign and magnitide form as b/b_negative
 
-static void positive_short_division(const uint64_t *a, size_t lena,
-                                    uint64_t b,
+static void short_division(const uint64_t *a, size_t lena,
+                                    uint64_t b, bool b_negative,
                                     bool want_q, uint64_t *&q,
                                     size_t &olenq, size_t &lenq,
                                     bool want_r, uint64_t *&r,
@@ -2577,83 +2586,7 @@ static void positive_short_division(const uint64_t *a, size_t lena,
 // The remainder will be strictly smaller then b, and the largest possible
 // value for b is 0xffffffffffffffff. This can still require two words in
 // its representation.
-        if (a_negative)
-        {   if (negative(hi))
-            {   olenr = lenr = 2;
-                r = preallocate(olenr);
-                r[0] = -hi;
-                r[1] = -1;
-            }
-            else
-            {   olenr = lenr = 1;
-                r = preallocate(olenr);
-                r[0] = -hi;
-            }
-        }
-        else
-        {   if (negative(hi))
-            {   olenr = lenr = 2;
-                r = preallocate(olenr);
-                r[0] = hi;
-                r[1] = 0;
-            }
-            else
-            {   olenr = lenr = 1;
-                r = preallocate(olenr);
-                r[0] = hi;
-            }
-        }
-    }
-}
-
-// In this case the value of b that is passed is the absolute
-// value of a negative divisor. As compared against the positive
-// case above I just need to negate the quotient that is to be
-// returned.
-
-static void negative_short_division(const uint64_t *a, size_t lena,
-                                    uint64_t b,
-                                    bool want_q, uint64_t *&q,
-                                    size_t &olenq, size_t &lenq,
-                                    bool want_r, uint64_t *&r,
-                                    size_t &olenr, size_t &lenr)
-{   uint64_t hi = 0;
-    bool a_negative = false;
-    uint64_t *aa;
-    if (negative(a[lena-1]))
-    {   a_negative = true;
-// Take absolute value of a if necessary.
-        aa = preallocate(lena);
-        internal_negate(a, lena, aa);
-        a = (const uint64_t *)aa;
-    }
-    size_t i=lena-1;
-    if (want_q)
-    {   olenq = lena;
-        q = preallocate(olenq);
-    }
-    for (;;)
-    {   uint64_t d;
-        divide64(hi, a[i], b, d, hi);
-        if (want_q) q[i] = d;
-        if (i == 0) break;
-        i--;
-    }
-    if (a_negative) abandon(aa);
-    if (want_q)
-    {   lenq = lena;
-        if (!a_negative)
-        {   internal_negate(q, lenq, q);
-            truncate_negative(q, lenq);
-        }
-        else truncate_positive(q, lenq);
-    }
-    if (want_r)
-    {
-// The remainder will be strictly smaller then b, and the largest possible
-// value for b is 0xffffffffffffffff. This can still require two words in
-// its representation.
-        if (a_negative)
+        if (a_negative != b_negative)
         {   if (negative(hi))
             {   olenr = lenr = 2;
                 r = preallocate(olenr);
@@ -2688,14 +2621,12 @@ static void signed_short_division(const uint64_t *a, size_t lena,
                                   size_t &olenq, size_t &lenq,
                                   bool want_r, uint64_t *&r,
                                   size_t &olenr, size_t &lenr)
-{   if (b > 0)
-        positive_short_division(a, lena, b,
-                                want_q, q, olenq, lenq,
-                                want_r, r, olenr, lenr);
-    else
-        negative_short_division(a, lena, -b,
-                                want_q, q, olenq, lenq,
-                                want_r, r, olenr, lenr);
+{   if (b > 0) short_division(a, lena, b, false,
+                              want_q, q, olenq, lenq,
+                              want_r, r, olenr, lenr);
+    else short_division(a, lena, -b, true,
+                        want_q, q, olenq, lenq,
+                        want_r, r, olenr, lenr);
 }
 
 static void unsigned_long_division(uint64_t *a, size_t &lena,
@@ -2738,9 +2669,9 @@ void division(const uint64_t *a, size_t lena,
 // Next I have b in the range 2^63 to 2^64-1. Such values can be represented
 // in uint64_t. 
     else if (lenb == 2 && b[1]==0)
-    {   positive_short_division(a, lena, b[0],
-                                want_q, q, olenq, lenq,
-                                want_r, r, olenr, lenr);
+    {   short_division(a, lena, b[0], false,
+                       want_q, q, olenq, lenq,
+                       want_r, r, olenr, lenr);
         return;
     }
 // Now for b in -2^64 to -2^63-1. The 2s complement representetation will be
@@ -2761,7 +2692,7 @@ void division(const uint64_t *a, size_t lena,
                 if (q[lenq-1]==allbits && lenq>1 && negative(q[lenq-2])) lenq--;
             }
             if (want_r)
-            {   uint64_t rr = a[0], padr;
+            {   uint64_t rr = a[0], padr = 0;
                 lenr = 1;
                 if (negative(a[lena-1]) && positive(rr))
                 {   padr = -1;
@@ -2774,19 +2705,19 @@ void division(const uint64_t *a, size_t lena,
                 r = preallocate(lenr);
                 olenr = lenr;
                 r[0] = rr;
-                if (lenr == 1) r[1] = padr;
+                if (lenr != 1) r[1] = padr;
             }
             return;
         }
-        negative_short_division(a, lena, -b[0],
-                                want_q, q, olenq, lenq,
-                                want_r, r, olenr, lenr);
+        short_division(a, lena, -b[0], true,
+                       want_q, q, olenq, lenq,
+                       want_r, r, olenr, lenr);
         return;
     }
 // Now the absolute value of b will be at least 2 digits of 64-bits with the
 // high digit non-zero. I need to make a copy of it because I will scale
 // it during long division.
-    uint64_t *bb;
+    uint64_t *bb = NULL;
     size_t lenbb = lenb;
     olenr = lenb;
     bool b_negative = negative(b[lenb-1]);
@@ -2994,79 +2925,6 @@ static void unscale_for_division(uint64_t *r, size_t &lenr, int s)
         my_assert(carry==0);
     }
     truncate_positive(r, lenr);
-}
-
-// Divide q by bb (both are unsigned) leaving q (and its length) updated to
-// be the quotient and returning the remainder.
-
-uint64_t unsignedshortquotrem(uint64_t *q, size_t &lenq, uint64_t bb)
-{   uint64_t rr = 0;
-    size_t n = lenq-1;
-    for (;;)
-    {   UINT128 p = pack128(rr, q[n]);
-        q[n] = (uint64_t)(p / bb);
-        rr = (uint64_t)(p % bb);
-        if (n == 0) break;
-        n--;
-    }
-    truncate_positive(q, lenq);
-    return rr;
-}
-
-// Set q to [a]/b and return [a]%b where [1] and b are both signed
-// values. Because the remainder must be smaller than b it will be a valid
-// int64_t value.
-// This version MUST be used when dividing by a one-digit bignum!
-// I optimise for division by 1 bacause I guess that case may arise
-// in cases like (a*b)/gcd(a,b) where the gcd can be 1 from time to time.
-// There is just one miserable case where the result can be a number longer
-// than the input, and that is (eg) (-0x8000000000000000)/(-1) which needs
-// a padding leading zero added for the positive result to be valid.
-// That case is most easily handled by making division by -1 a special
-// case, even if it is perhaps not very common.
-
-int64_t signedshortquotrem(uint64_t *a, size_t lena,
-                           int64_t b,
-                           uint64_t *q, size_t &lenq)
-{   lenq = lena;
-    my_assert(b != 0);
-    if (b == 1)
-    {   internal_copy(a, lena, q);
-        return 0;
-    }
-    bool sign_a = negative(a[lena-1]);
-    if (sign_a)
-    {   internal_negate(a, lena, q);
-// Here is where I deal with division by -1 specially - just in the case
-// that the dividend had started off negative, in which case I just negated
-// it to get its absolute value, and this can force me to need to pad it with
-// a new leading zero.
-        if (b == -1)
-        {   if (negative(q[lenq-1]))
-            {   q[lenq++] = 0;
-                return 0;
-            }
-        }
-    }
-    else internal_copy(a, lena, q);
-    bool sign_b;
-    uint64_t bb;
-    if (b < 0)
-    {   sign_b = true;
-        bb = -(uint64_t)b;
-    }
-    else
-    {   sign_b = false;
-        bb = (uint64_t)b;
-    }
-    uint64_t rr = unsignedshortquotrem(q, lenq, bb);
-// q and rr are now quotient & remainder from unsigned division.
-    if (sign_a != sign_b)
-    {   internal_negate(q, lenq, q);
-        truncate_negative(q, lenq);
-    }
-    if (sign_b) return (int64_t)(-rr);
-    else return (int64_t)rr;
 }
 
 // This function does long division on unsigned values, computing the
@@ -3615,7 +3473,7 @@ int main(int argc, char *argv[])
     int maxbits;
     int ntries;
 
-// #define TEST_PLUS_AND_TIMES
+#define TEST_PLUS_AND_TIMES
 
 #ifdef TEST_PLUS_AND_TIMES
 // To try to check that + and - and * behave on the Bignum type I
@@ -3624,8 +3482,8 @@ int main(int argc, char *argv[])
 // where the two values differ I have uncovered a bug.
 // I will try numbers of up to 640 bits and 4 million test cases.
 
-    maxbits = 1000;
-    ntries = 1000000;
+    maxbits = 2500;
+    ntries = 10000000;
     int bad = 0;
 
     for (int i=0; i<ntries; i++)
@@ -3659,8 +3517,8 @@ int main(int argc, char *argv[])
 #define TEST_DIVISION 1
 
 #ifdef TEST_DIVISION
-    maxbits = 1000;
-    ntries = 1000000;
+    maxbits = 2500;
+    ntries = 10000000;
 
     std::cout << "Start of division testing" << std::endl;
 
