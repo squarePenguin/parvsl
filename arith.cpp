@@ -3562,9 +3562,17 @@ int main(int argc, char *argv[])
     for (int i=0; i<ntries; i++)
     {   //std::cout << i << "  ";
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
-//      divisor += Bignum(1) << 65; // @@@
         Bignum remainder = uniform_upto_bignum(divisor);
         Bignum quotient = random_upto_bits_bignum(maxbits);
+        uint64_t rr = mersenne_twister();
+        if ((rr & 1) != 0)
+        {   divisor = -divisor;
+            remainder = -remainder;
+        }
+        if ((rr & 2) != 0)
+        {   quotient = -quotient;
+            remainder = -remainder;
+        }
         Bignum dividend = quotient*divisor + remainder;
         Bignum q1 = dividend / divisor;
 std::cout << "About to compute remainder" << std::endl;
