@@ -628,8 +628,8 @@ static inline bool negative(uint64_t a)
 }
 
 static inline void internal_copy(const uint64_t *a, size_t lena,
-                                 uint64_t *aa)
-{   memcpy(aa, a, lena*sizeof(uint64_t));
+                                 uint64_t *b)
+{   memcpy(b, a, lena*sizeof(uint64_t));
 }
 
 // This internal functions sets b to be -a without altering its length.
@@ -1014,8 +1014,12 @@ typedef void *malloc_t(size_t);
 typedef void *realloc_t(void *, size_t);
 typedef void free_t(void *);
 
+void *my_realloc(void *v, size_t n)
+{   return v;
+}
+
 malloc_t  *malloc_function = malloc;
-realloc_t *realloc_function = realloc;
+realloc_t *realloc_function = my_realloc;
 free_t    *free_function   = free;
 
 uint64_t *preallocate(size_t n)
@@ -2647,8 +2651,8 @@ void division(const uint64_t *a, size_t lena,
 // Now the absolute value of b will be at least 2 digits of 64-bits with the
 // high digit non-zero. I need to make a copy of it because I will scale
 // it during long division.
+    uint64_t *bb;
     size_t lenbb = lenb;
-    uint64_t *bb = preallocate(lenb);
     olenr = lenb;
     bool b_negative = negative(b[lenb-1]);
     if (b_negative)
@@ -2661,6 +2665,7 @@ void division(const uint64_t *a, size_t lena,
 // and extra leading 0. Because the value I generate here is to be treated
 // as unsigned this leading top bit does not matter and so the absolute value
 // of b fits in the same amount of space that b did with no risk of overflow.  
+        bb = preallocate(lenb);
         internal_negate(b, lenb, bb);
         if (bb[lenbb] == 0) lenbb--;
     }
@@ -2710,13 +2715,13 @@ void division(const uint64_t *a, size_t lena,
 // I will need space where I store something that starts off as a scaled
 // copy of the dividend and gradually have values subtracted from it until
 // it ends up as the remainder.
-    lenr = lena + 1;
-    r = preallocate(lenr);
+    lenr = lena;
+    r = preallocate(lenr+1);
     bool a_negative = negative(a[lena-1]);
     if (a_negative) internal_negate(a, lena, r);
     else internal_copy(a, lena, r);
     unsigned_long_division(r, lenr, bb, lenbb, want_q, q, olenq, lenq);
-// While performing the long division I will have had thee vectors that
+// While performing the long division I will have had three vectors that
 // were newly allocated. r starts off containing a copy of a but ends up
 // holding the remainder. It is rather probable that this remainder will
 // often be a distinctly shorter vector than a was. The vector q is only
@@ -2726,6 +2731,7 @@ void division(const uint64_t *a, size_t lena,
 // remainder is smaller than the divisor and so it will be a closer fit into
 // bb than r. So copy it into there so that the allocate/abandon and
 // size confirmation code is given less extreme things to cope with.
+    my_assert(lenr<=lenbb, [&]{ });
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
@@ -2735,7 +2741,7 @@ void division(const uint64_t *a, size_t lena,
         }
         else truncate_positive(q, lenq);
     }
-    else abandon(q);
+//  else abandon(q);
     if (want_r)
     {   r = bb;
         if (a_negative)
@@ -2981,8 +2987,10 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
 //temp("remainder unscaled", a, lena);
 // The quotient is OK correct now but has been computed as an unsigned value
 // so if its top digit has its top bit set I need to prepend a zero;
-    if (negative(q[lenq-1])) q[lenq++] = 0;
-    else truncate_positive(q, lenq);
+    if (want_q)
+    {   if (negative(q[lenq-1])) q[lenq++] = 0;
+        else truncate_positive(q, lenq);
+    }
     if (negative(a[lena-1])) a[lena++] = 0;
     else truncate_positive(a, lena);
 }
@@ -2995,8 +3003,8 @@ number_representation bigquotient(number_representation aa, number_representatio
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
     division(a, lena, b, lenb,
-              true, q, olenq, lenq,
-              false, r, olenr, lenr);
+             true, q, olenq, lenq,
+             false, r, olenr, lenr);
     return confirm_size(q, olenq, lenq);
 }
 
@@ -3008,8 +3016,8 @@ number_representation bigremainder(number_representation aa, number_representati
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
     division(a, lena, b, lenb,
-              false, q, olenq, lenq,
-              true, r, olenr, lenr);
+             false, q, olenq, lenq,
+             true, r, olenr, lenr);
     return confirm_size(r, olenr, lenr);
 }
 
@@ -3021,8 +3029,8 @@ cons_representation bigdivide(number_representation aa, number_representation bb
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
     division(a, lena, b, lenb,
-              true, q, olenq, lenq,
-              true, r, olenr, lenr);
+             true, q, olenq, lenq,
+             true, r, olenr, lenr);
     number_representation rr = confirm_size(r, olenr, lenr);
     number_representation qq = confirm_size_x(q, olenq, lenq);
     return cons(qq, rr);
@@ -3530,7 +3538,7 @@ int main(int argc, char *argv[])
     for (int i=0; i<ntries; i++)
     {   //std::cout << i << "  ";
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
-        divisor += Bignum(1) << 65; // @@@
+//      divisor += Bignum(1) << 65; // @@@
         Bignum remainder = uniform_upto_bignum(divisor);
         Bignum quotient = random_upto_bits_bignum(maxbits);
         Bignum dividend = quotient*divisor + remainder;
