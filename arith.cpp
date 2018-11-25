@@ -108,6 +108,12 @@ inline void my_assert(bool ok, F&& action)
     if (!ok) { action(); my_abort(); }
 }
 
+inline void my_assert(bool ok)
+{
+//     my_assert(predicate);
+    if (!ok) { std::cout << "my_assert failure" << std::endl; my_abort(); }
+}
+
 static FILE *logfile = NULL;
 
 // Making this "inline" results in no warning messages if it is not
@@ -487,7 +493,7 @@ static inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
 static inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
                             uint64_t &q, uint64_t &r)
 {   UINT128 dividend = pack128(hi, lo);
-    assert(divisor != 0);
+    my_assert(divisor != 0);
     q = dividend / divisor;
     r = dividend % divisor;
 }
@@ -841,7 +847,7 @@ uint64_t *preallocate(size_t n)
 // No attempt at garbage collection here - I will just allocate
 // bignums linearly in memory until I run out of space. And I do not
 // provide any scheme for the user to release them.
-    assert(memory_used <= MEMORY_SIZE);
+    my_assert(memory_used <= MEMORY_SIZE);
 }
 
 cons_representation cons(number_representation a, number_representation b)
@@ -1033,7 +1039,7 @@ uint64_t *preallocate(size_t n)
 {   my_assert(n > 0 && n < 10000,
        [&]{ std::cout << "my_allocate " << n << std::endl; });
     uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
-    assert(r != NULL);
+    my_assert(r != NULL);
 //    printf("[%d] malloc(%d) = %p\n", ++counter, (int)(n*8), r);
     return &r[1];
 }
@@ -1049,7 +1055,7 @@ number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
 //    printf("confirm_size %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
     p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
-    assert(p != NULL);
+    my_assert(p != NULL);
 //    printf("[%d] realloc -> %p\n", ++counter, p);
     p[0] = final_n;
     return &p[1];
@@ -1066,7 +1072,7 @@ number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 //    printf("confirm_size_x %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
     p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
-    assert(p != NULL);
+    my_assert(p != NULL);
 //    printf("[%d] realloc -> %p\n", ++counter, p);
     p[0] = final_n;
     return &p[1];
@@ -1098,7 +1104,7 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 // there will always have been space for it because we are losing the header
 // word.
     const char *cc = (const char *)(*realloc_function)(c, final_n+1);
-    assert(cc != NULL);
+    my_assert(cc != NULL);
 //    printf("[%d] realloc -> %p\n", ++counter, p);
     return cc;
 }
@@ -1352,7 +1358,7 @@ void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
         r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
     r[lenr-1] |= UINT64_C(1) << ((bits-1)%64);
     if (bits%64 == 0) r[lenr++] = 0;
-    assert(!negative(r[lenr-1]));
+    my_assert(!negative(r[lenr-1]));
 }
 
 number_representation random_upto_bits(size_t bits)
@@ -1445,7 +1451,7 @@ number_representation string_to_bignum(const char *s)
     {   uint64_t d = 0;
 // assemble 19 digit blocks from the input into a value (d).
         while (chars != next)
-        {   assert(std::isdigit(*s));
+        {   my_assert(std::isdigit(*s));
             d = 10*d + (*s++ - '0');
             chars--;
         }
@@ -1610,7 +1616,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
     {   *p1++ = buffer[--bp];
         len++;
     } while (bp != 0);
-    assert(len <= m*sizeof(uint64_t));
+    my_assert(len <= m*sizeof(uint64_t));
     while (p < m)
     {   top = r[p++];
 // Here I want to print exactly 19 decimal digits.
@@ -1621,7 +1627,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
         *p1 = '0' + (int)top;
         p1 += 19;
         len += 19;
-        assert(len <= m*sizeof(uint64_t));
+        my_assert(len <= m*sizeof(uint64_t));
     }
     return confirm_size_string(r, m, len);
 }
@@ -2109,7 +2115,7 @@ number_representation bigrightshift(number_representation a, int n)
 static inline void ordered_bigadd(const uint64_t *a, size_t lena,
                                   const uint64_t *b, size_t lenb,
                                   uint64_t *r, size_t &lenr)
-{   assert(lena >= lenb);
+{   my_assert(lena >= lenb);
     uint64_t carry = 0;
     size_t i = 0;
 // The lowest digits can be added without there being any carry-in.
@@ -2180,7 +2186,7 @@ number_representation bigadd_small(number_representation a, int64_t b)
 static inline void ordered_bigsubtract(const uint64_t *a, size_t lena,
                                        const uint64_t *b, size_t lenb,
                                        uint64_t *r, size_t &lenr)
-{   assert(lena >= lenb);
+{   my_assert(lena >= lenb);
     uint64_t carry = 1;
     size_t i;
 // Add the digits that (a) and (b) have in common
@@ -2207,7 +2213,7 @@ static inline void ordered_bigsubtract(const uint64_t *a, size_t lena,
 static inline void ordered_bigrevsubtract(const uint64_t *a, size_t lena,
                                           const uint64_t *b, size_t lenb,
                                           uint64_t *r, size_t &lenr)
-{   assert(lena >= lenb);
+{   my_assert(lena >= lenb);
     uint64_t carry = 1;
     size_t i;
 // Add the digits that (a) and (b) have in common
@@ -2453,7 +2459,7 @@ void bigpow(const uint64_t *a, size_t lena, uint64_t n,
 }
 
 // In cases where n is too large this can fail. At present I deal with that
-// with assert() statements rather than any comfortable scheme for reporting
+// with my_assert() statements rather than any comfortable scheme for reporting
 // the trouble.
 
 number_representation bigpow(number_representation aa, uint64_t n)
@@ -2469,12 +2475,12 @@ number_representation bigpow(number_representation aa, uint64_t n)
     size_t bitsa = bignum_bits(a, lena);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
-    assert(hi == 0); // astonishingly too large!
+    my_assert(hi == 0); // astonishingly too large!
     uint64_t lenr1 = 1 + bitsr/64;
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
 // truncating from uint64_t to size_t.
-    assert(lenr == lenr1);
+    my_assert(lenr == lenr1);
     uint64_t olenr = lenr;
     uint64_t *r = preallocate(lenr);
     uint64_t *v = preallocate(lenr);
@@ -2526,8 +2532,8 @@ number_representation bigpow(number_representation aa, uint64_t n)
 // code has not thought through all the cases carefully enough!
 
 
-// Divide the unsigned bignum a by the unsigned number b, returning a
-// quotient or a remainder or both.
+// Divide the bignum a by the unsigned number b, returning a quotient or
+// a remainder or both. Note that at this stage a may still be negative!
 
 static void positive_short_division(const uint64_t *a, size_t lena,
                                     uint64_t b,
@@ -2536,6 +2542,15 @@ static void positive_short_division(const uint64_t *a, size_t lena,
                                     bool want_r, uint64_t *&r,
                                     size_t &olenr, size_t &lenr)
 {   uint64_t hi = 0;
+    bool a_negative = false;
+    uint64_t *aa;
+    if (negative(a[lena-1]))
+    {   a_negative = true;
+// Take absolute value of a if necessary.
+        aa = preallocate(lena);
+        internal_negate(a, lena, aa);
+        a = (const uint64_t *)aa;
+    }
     size_t i=lena-1;
     if (want_q)
     {   olenq = lena;
@@ -2548,24 +2563,53 @@ static void positive_short_division(const uint64_t *a, size_t lena,
         if (i == 0) break;
         i--;
     }
+    if (a_negative) abandon(aa);
     if (want_q)
     {   lenq = lena;
-        truncate_positive(q, lenq);
+        if (a_negative)
+        {   internal_negate(q, lenq, q);
+            truncate_negative(q, lenq);
+        }
+        else truncate_positive(q, lenq);
     }
     if (want_r)
-    {   if (negative(hi))
-        {   olenr = lenr = 2;
-            r = preallocate(olenr);
-            r[0] = hi;
-            r[1] = 0;
+    {
+// The remainder will be strictly smaller then b, and the largest possible
+// value for b is 0xffffffffffffffff. This can still require two words in
+// its representation.
+        if (a_negative)
+        {   if (negative(hi))
+            {   olenr = lenr = 2;
+                r = preallocate(olenr);
+                r[0] = -hi;
+                r[1] = -1;
+            }
+            else
+            {   olenr = lenr = 1;
+                r = preallocate(olenr);
+                r[0] = -hi;
+            }
         }
         else
-        {   olenr = lenr = 1;
-            r = preallocate(olenr);
-            r[0] = hi;
+        {   if (negative(hi))
+            {   olenr = lenr = 2;
+                r = preallocate(olenr);
+                r[0] = hi;
+                r[1] = 0;
+            }
+            else
+            {   olenr = lenr = 1;
+                r = preallocate(olenr);
+                r[0] = hi;
+            }
         }
     }
 }
+
+// In this case the value of b that is passed is the absolute
+// value of a negative divisor. As compared against the positive
+// case above I just need to negate the quotient that is to be
+// returned.
 
 static void negative_short_division(const uint64_t *a, size_t lena,
                                     uint64_t b,
@@ -2573,8 +2617,69 @@ static void negative_short_division(const uint64_t *a, size_t lena,
                                     size_t &olenq, size_t &lenq,
                                     bool want_r, uint64_t *&r,
                                     size_t &olenr, size_t &lenr)
-{
-    my_abort("negative short division");   
+{   uint64_t hi = 0;
+    bool a_negative = false;
+    uint64_t *aa;
+    if (negative(a[lena-1]))
+    {   a_negative = true;
+// Take absolute value of a if necessary.
+        aa = preallocate(lena);
+        internal_negate(a, lena, aa);
+        a = (const uint64_t *)aa;
+    }
+    size_t i=lena-1;
+    if (want_q)
+    {   olenq = lena;
+        q = preallocate(olenq);
+    }
+    for (;;)
+    {   uint64_t d;
+        divide64(hi, a[i], b, d, hi);
+        if (want_q) q[i] = d;
+        if (i == 0) break;
+        i--;
+    }
+    if (a_negative) abandon(aa);
+    if (want_q)
+    {   lenq = lena;
+        if (!a_negative)
+        {   internal_negate(q, lenq, q);
+            truncate_negative(q, lenq);
+        }
+        else truncate_positive(q, lenq);
+    }
+    if (want_r)
+    {
+// The remainder will be strictly smaller then b, and the largest possible
+// value for b is 0xffffffffffffffff. This can still require two words in
+// its representation.
+        if (a_negative)
+        {   if (negative(hi))
+            {   olenr = lenr = 2;
+                r = preallocate(olenr);
+                r[0] = -hi;
+                r[1] = -1;
+            }
+            else
+            {   olenr = lenr = 1;
+                r = preallocate(olenr);
+                r[0] = -hi;
+            }
+        }
+        else
+        {   if (negative(hi))
+            {   olenr = lenr = 2;
+                r = preallocate(olenr);
+                r[0] = hi;
+                r[1] = 0;
+            }
+            else
+            {   olenr = lenr = 1;
+                r = preallocate(olenr);
+                r[0] = hi;
+            }
+        }
+    }
 }
 
 static void signed_short_division(const uint64_t *a, size_t lena,
@@ -2613,7 +2718,7 @@ void division(const uint64_t *a, size_t lena,
               const uint64_t *b, size_t lenb,
               bool want_q, uint64_t *&q, size_t &olenq, size_t &lenq,
               bool want_r, uint64_t *&r, size_t &olenr, size_t &lenr)
-{   assert(want_q || want_r);
+{   my_assert(want_q || want_r);
 // First I will filter out a number of cases where the divisor is "small".
 // I only want to proceed into the general case code if it is a "genuine"
 // big number with at least two digits. This bit of the code is messier
@@ -2624,7 +2729,7 @@ void division(const uint64_t *a, size_t lena,
 // The first case is when the single digit if b is a signed value in the
 // range -2^63 to 2^63-1.
     if (lenb == 1)
-    {   assert(b[0] != 0); // would be division by zero
+    {   my_assert(b[0] != 0); // would be division by zero
         signed_short_division(a, lena, (int64_t)b[0],
                               want_q, q, olenq, lenq,
                               want_r, r, olenr, lenr);
@@ -2697,10 +2802,10 @@ void division(const uint64_t *a, size_t lena,
 // of b fits in the same amount of space that b did with no risk of overflow.  
         bb = preallocate(lenb);
         internal_negate(b, lenb, bb);
-        if (bb[lenbb] == 0) lenbb--;
+        if (bb[lenbb-1] == 0) lenbb--;
     }
     else if (b[lenb-1] == 0) lenbb--;
-    assert(lenbb >= 2);
+    my_assert(lenbb >= 2);
 // Now I should look at the dividend. If it is shorter than the divisor
 // then I know that the quotient will be zero and the dividend will be the
 // remainder. If I had made this test before normalizing the divisor I could
@@ -2813,7 +2918,7 @@ static uint64_t scale_for_division(uint64_t *r, size_t lenr, int s)
 static void multiply_and_subtract(uint64_t *r, size_t lenr,
                                   uint64_t q0,
                                   uint64_t *b, size_t lenb)
-{   assert(lenr > lenb);
+{   my_assert(lenr > lenb);
     uint64_t hi = 0, lo, carry = 1;
     for (size_t i=0; i<lenb; i++)
     {   multiplyadd64(b[i], q0, hi, hi, lo);
@@ -2831,7 +2936,7 @@ static void multiply_and_subtract(uint64_t *r, size_t lenr,
  
 static void add_back_correction(uint64_t *r, size_t lenr,
                                 uint64_t *b, size_t lenb)
-{   assert(lenr > lenb);
+{   my_assert(lenr > lenb);
     uint64_t carry = 0;
     for (size_t i=0; i<lenb; i++)
         carry = add_with_carry(r[i+lenr-lenb-1], b[i], carry, r[i+lenr-lenb-1]);
@@ -2840,9 +2945,9 @@ static void add_back_correction(uint64_t *r, size_t lenr,
 
 static inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
                                            uint64_t *b, size_t lenb)
-{   assert(lenr > lenb);
-    assert(lenb >= 2);
-    assert(b[lenb-1] != 0);
+{   my_assert(lenr > lenb);
+    my_assert(lenb >= 2);
+    my_assert(b[lenb-1] != 0);
     UINT128 p0 = pack128(r[lenr-1], r[lenr-2]);
     uint64_t q0 =  (uint64_t)(p0 / (UINT128)b[lenb-1]);
     uint64_t r0 =  (uint64_t)(p0 % (UINT128)b[lenb-1]);
@@ -2886,7 +2991,7 @@ static void unscale_for_division(uint64_t *r, size_t &lenr, int s)
             if (i == 0) break;
             i--;
         }
-        assert(carry==0);
+        my_assert(carry==0);
     }
     truncate_positive(r, lenr);
 }
@@ -2924,7 +3029,7 @@ int64_t signedshortquotrem(uint64_t *a, size_t lena,
                            int64_t b,
                            uint64_t *q, size_t &lenq)
 {   lenq = lena;
-    assert(b != 0);
+    my_assert(b != 0);
     if (b == 1)
     {   internal_copy(a, lena, q);
         return 0;
@@ -2975,8 +3080,8 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
                                    uint64_t *b, size_t &lenb,
                                    bool want_q, uint64_t *q,
                                    size_t &olenq, size_t &lenq)
-{   assert(lenb >= 2);
-    assert(lena >= lenb);
+{   my_assert(lenb >= 2);
+    my_assert(lena >= lenb);
 //std::cout << "Start of quotrem" << std::endl;
 //display("quotrem b", b, lenb);
 //display("a", a, lena);
@@ -2986,7 +3091,7 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
 //
 // The scaling is done here using a shift, which seems cheaper to sort out
 // then multiplication by a single-digit value.
-    assert(b[lenb-1] != 0);
+    my_assert(b[lenb-1] != 0);
     int ss = nlz(b[lenb-1]);
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
@@ -2994,7 +3099,7 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
     a[lena] = scale_for_division(a, lena, ss);
     lena++;
 //display("scaled", a, lena);
-    assert(scale_for_division(b, lenb, ss) == 0);
+    my_assert(scale_for_division(b, lenb, ss) == 0);
     lenq = lena-lenb; // potential length of quotient.
 //std::cout << "lenq = " << lenq << std::endl;
     size_t m = lenq-1;
@@ -3554,8 +3659,8 @@ int main(int argc, char *argv[])
 #define TEST_DIVISION 1
 
 #ifdef TEST_DIVISION
-    maxbits = 100;
-    ntries = 100;
+    maxbits = 1000;
+    ntries = 1000000;
 
     std::cout << "Start of division testing" << std::endl;
 
@@ -3575,14 +3680,9 @@ int main(int argc, char *argv[])
         }
         Bignum dividend = quotient*divisor + remainder;
         Bignum q1 = dividend / divisor;
-std::cout << "About to compute remainder" << std::endl;
         Bignum r1 = dividend % divisor;
-std::cout << "Remainder done" << std::endl;
-printf("r1.val = %p\n", r1.val);
-fflush(stdout);
-std::cout << "rem data = " << (void *)r1.val << std::endl;
         if (q1 == quotient && r1 == remainder)
-        {    std::cout << "Passed pass " << i << std::endl << std::endl;
+        {   // std::cout << "Passed pass " << i << std::endl << std::endl;
             continue;
         }
         std::cout << "FAILED" << std::endl;
