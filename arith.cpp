@@ -2,23 +2,133 @@
 
 // There are quite a lot of bignumber packages out there on the web,
 // but none of them seemed to be such that I could readily use them
-// for arithmetic within a Lisp at all easily. The code here tries to
-// support "big-numbers as objects" where the exact structure of the object
-// and storage management for it is done elsewhere, and also "big-numbers
-// as block of memory managed by malloc and free".
+// for arithmetic within a Lisp at all easily, for instance because of
+// the storage management arangements used.
 //
 // The code uses 64-bit digits and a 2s complement representation for
 // negative numbers. This means it will work best on 64-bit platforms
 // (which by now are by far the most important), and it provides bitwise
 // logical operations (logand and logor) as well as arithmetic.
 //
-// If VSL is defined when this is compiled it uses Lisp-style object
-// representation, otherwise malloc(). Well I use malloc() and free()
-// rather than the C++ equivalents because that way I can provide an easy
-// way for the user to plug in replacements....
+// I will provide two levels of access and abstraction. At the low level
+// a big number is represented as and array of uint64_t digits along with
+// a size_t value that indicates the number of digits in use. The most
+// significant digit in any number lives in memory with type uint64_t but
+// is treated as signed (ie int64_t) in the arithmetic. For the purposes
+// of the bitwise operations (and, or, xor and not) negative values are
+// processed as if they had an infinite number of 1 bits above their
+// most significant stored digit.
+// If a positive value has a top digit whose unsigned value has its top bit
+// set then an additional zero digit is used ahead of that, and equivalently
+// for negative values.
+//
+// vectors to represent numbers are allocated using a function reserve()
+// which takes an argument indicating how long the number might be. It will
+// often be necessary to reserve memory in a conservative manner, ie to
+// allocate more memory than will eventually prove to be needed.
+// At the end of an arithmetic operation a reserved block of memory can be
+// passed to abandon() when it is no longer required, or there can be a
+// call to confirm_size() to establish the exact size that is to be retained.
+// A variant call confirm_size_x() is used when the vector whose size is being
+// confirmed is not the one that was most recently allocated.
+//
+// A higher level packaging represents numbers using a class Bignum. This
+// has just one field which will hold a potentially encoded version of a
+// pointer to a vector that is the number. This vector will have a first
+// item that is a header word containing length information and then the
+// uint64_t values representing the numeric value. The representation of the
+// header and the encoding of the pointer will be done in one of several
+// ways, these being intended to provide models of the implementation tuned
+// for different use cases. These cases are included in this file using
+// conditional compilation:
+// MALLOC:
+//   A bignum with n digits is held in a vector of length n+1, and the
+//   "encoded pointer" to it is a native pointer to the second element.
+//   If this pointer is p then the number of words (n) is kept at p[-1]
+//   and the least significant digit of the number is at p[0]. reserve()
+//   uses malloc() to obtain space. confirm_size() uses realloc() to trim
+//   the allocated space, and abandon() maps onto use of free(). This
+//   uses C rather than C++ memory management because it wants to use realloc
+//   which is not supported in the tidy C++ world. Performance of the code
+//   as a whold will be sensitive to the malloc/realloc/free implementation
+//   on the platform that is in use. To allow for a user who wished to
+//   customize allocation, all calls to the basic memory allocation primitives
+//   are made indirectly so that alternative equivalents can be plugged in.
+// NEW:
+//   A bignum with n digits will be stored in a vector whose size is the
+//   next power of two strictly larger than n. As with the MALLOC case
+//   the numeric data starts one word into this block and the initial word
+//   of the block contains a header of length information. Here the header
+//   is split into two 32-bit parts. One contains the length of the number
+//   as before (but note that in general that will not fill up the entire
+//   memory block), the other contains log2(block_size), ie it is a compact
+//   indication of the size of the block. There will be free-chains for
+//   blocks of size 2,4,8,... so that abandon() just pushes the released
+//   memory onto one and reserve() can often merely retrieve a previously
+//   used block. In most cases confirm_size just needs to write the actual
+//   length of a number into the header word. When two large numbers are
+//   subtracted the number of digits in the result may be much smaller than
+//   the size of block that had to have been reserved. To allow for that sort
+//   of situation confirm_size() reserves the right to notice cases where used
+//   size in a block is much smaller than the capacity, and in such cases
+//   allocate a fresh smaller block and copy information into it, allowing it
+//   to abandon the overlarge chunk of memory.
+//   The reference to the vector of digits is held uwing type uintptr_t and
+//   can be cast to obtain the address of the least significant digit of the
+//   value. But so that this scheme as a whole provides better performance
+//   for general users, small integer values will be handled specially. If
+//   the "encoded pointer" has its bottom bit set than it represents a 63-bit
+//   signed value. The intent here is that the class Bignum, by containing
+//   just one integer-sized field, can be stored and passed around really
+//   efficiently, and if in its use most arithmetic remains on values that
+//   fit within 63 bits it will not do much storage allocation at all. If this
+//   works well it should represent a reasonably convenient and tolerably
+//   efficient C++ facility for general use.
+// LISP:
+//   The arrangements here are based on the arrangements I have in my VSL
+//   and CSL Lisp implementations. I still hope that between the above options
+//   and this one the code can be adapted reasonably easily. As before the
+//   basic representation of a number with n digits is a vector of length
+//   n+1, with the initial word containing a header. In VSL/CSL a header word
+//   contains some tage bits identifying it as a header, then some type
+//   bite that here will indicate that it is a header of a big number. Finally
+//   it contains a length field. The exact bit-patterns and packing here will
+//   be specific to the particular Lisp (obviously!). A reference to a big
+//   number will be the address of the header word of this vector plus some
+//   tag bits in the bottom 3 bits. This "low tagging" relies on all block
+//   of memory being aligned to 8-byte boundaries (even on 32-bit platforms).
+//   On a 32-bit system the header will only occupy the first 32-bits of the
+//   initial 64-bit memory unit, and the second 32-bit region is spare and
+//   would be best set to zero.
+//   There are two expectations about memory management. The first is that
+//   garbage collection has left a large block of contiguous memory within
+//   which new material can be allocated linearly. Under this supposition the
+//   most recently allocated block of memory can be shrunk or discarded by
+//   simply resetting a heap-fringe pointer. The second is that it will
+//   at least occasionally be desirable to perform linear scans of all memory.
+//   To support that when a block that is not the most recently allocated one
+//   is shrunk or discarded a header word is placed in the released space
+//   leaving a valid but dummy Lisp item there.
+//   Calls to memory allocation primitives are made without any special
+//   concern for garbage collector safety of other pointers, and so in its
+//   current form this code insistes on running in a context where the garbage
+//   collector is conservative, so that for instance the untagged pointers to
+//   raw vectors of digits are safe. This aspect of the code may well limit
+//   its direct usefulness, but resolving the issue would involve an
+//   understanding of how to arrange that particular items got treated as
+//   list bases in some system.
+//   In Lisp mode it is anticipated that as well as a tagged representation
+//   of small integers that the generic arithemetic will need to support
+//   floating point numbers (and possibly multiple widths of floating point
+//   values, plus ratios and complex numbers) and so the dispatch on tagged
+//   numbers needs to live at a higher level within the Lisp then just thise
+//   code.
 //
 // If TEST is defined then this file becomes a self-contained one with
 // a few demonstration and test examples at the end.
+
+#define NEW  1
+#define TEST 1
 
 
 /**************************************************************************
@@ -64,7 +174,6 @@
 //   float, floor, ceil, fix
 //   isqrt
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
-//   support where int128 is not available
 
 // A LOT of testing. Some profiling and performance tuning.
 
@@ -260,20 +369,16 @@ static inline LispObject boxfloat(double a)
 // space will be needed - the exact number of words to be used only emerges
 // at the end. So the protocol I support is based on the calls:
 //
-//   uint64_t *preallocate(size_t n)
+//   uint64_t *reserve(size_t n)
 //      This returns a pointer to n 64-bit words (and it may have allocated
 //      a space for a header in front of that).
 //   void adandon(uint64_t *p, size_t n)
-//      Abandon an item from preallocate given its size. This should only
-//      used to discard the most recently preallocated unit. Well it will
-//      support v1=preapplocate(n1); v2=preallocate(n2); abandon(v2);
+//      Abandon an item from reserve given its size. This should only
+//      used to discard the most recently reserved unit. Well it will
+//      support v1=reserve(n1); v2=reserve(n2); abandon(v2);
 //      and then abandon(v1);
-//   void abandon_x(uint64_t *p)
-//      To be used to abandon memory when that which is to be abandoned is
-//      not the most recently allocated chunk. It sort of does what you might
-//      have expected confirm_size_x(p, n, 0) might have done.
 //   number_representation_t confirm_size(uint64_t *p, size_t n, size_t final_n)
-//      The pointer p was as returned by preallocate, but it is now known
+//      The pointer p was as returned by reserve, but it is now known
 //      that just final_n words will be needed (this must be no larger than
 //      the number originally given. The effect can be somewhat as if a call
 //      to realloc was given. Very often this will also write the final_n
@@ -281,19 +386,19 @@ static inline LispObject boxfloat(double a)
 //      be able to detect (eg) a special case of small numbers are return
 //      them in a different way, and add any other tag or marker bits that
 //      are required. When confirm_size() is called the system can be
-//      confident that no other calls to preallocate() have been made - this
+//      confident that no other calls to reserve() have been made - this
 //      can help because it then "knows" that the memory involved is right
 //      at the fringe of active memory.
 //   number_representation_t confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 //      This behave just like confirm_size apart from the fact that it is to
 //      used in a context where two (or more) regions of memory have been
-//      preallocated. This must be used on all but the last allocated one
+//      reserved. This must be used on all but the last allocated one
 //      when their length is confirmed. The thought behind this is that
 //      when a block shrinks or is discarded and it is not the most recent one
 //      allocated it may be necessary to put some padding material in the
 //      gap that is left, or it may be possible to place that released
 //      space on a free-chain for future re-use.
-//      As a special case if two blocks are preallocated and the second
+//      As a special case if two blocks are reserved and the second
 //      has its size confirmed as zero then the first one may use
 //      confirm_size rather than needing confirm_size_x.
 //   void free_bignum(number_representation p)
@@ -302,13 +407,13 @@ static inline LispObject boxfloat(double a)
 //      can use free().
 //
 // For strings (as returned when I want to prepare a bignum for printing)
-// I will use preallocate as before and an effect is that the string will
+// I will use reserve as before and an effect is that the string will
 // be built up within a block of memory that is a multiple of 8 bytes long.
 // Again there MAY be space left for a header. When I know exactly how many
 // characters are present I will confirm the exact size required:
 //
 //   string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
-//       In this call n is the original size as used with preallocate, so it
+//       In this call n is the original size as used with reserve, so it
 //       measures in units of sizeof(uint64_t), while final_size is measured
 //       in BYTES and is the number of characters present. For native style
 //       strings this will add a '\0' as a terminator and use realloc to
@@ -692,67 +797,6 @@ static inline int read_u3(const uint64_t *v, size_t n, size_t i)
     return (int)(w & 0x7);
 }
 
-// Now code that lets me read half-digits, ie treat the big number as if
-// it was using a radix of 2^32 rather than 2^64. This is provided here
-// in case I feel I can optimise support on machines that do not have an
-// integer type with width 128-bits by working using it.
-
-// Both clang and gcc defined the symbols I check here to know abiut
-// byte orderings within words.
-
-#if defined __BYTE_ORDER__ && \
-    defined __ORDER_LITTLE_ENDIAN__ && \
-    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-
-static inline uint32_t read_u32(const uint64_t *v, size_t n)
-{   uint32_t r;
-// Use of memcpy complies with strict aliasing restrictions and so the
-// compiler can not make wilfull changes based on the delicate behavior
-// here. Furthermove I expect good compilers to recognize calls to memcpy
-// and generate efficient inline code...
-    std::memcpy(&r, (const char *)v + 4*n, sizeof(uint32_t));
-    return r;
-}
-
-static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   std::memcpy((char *)v + 4*n, &r, sizeof(uint32_t));
-}
-
-#elif defined __BYTE_ORDER__ && \
-    defined __ORDER_BIG_ENDIAN__ && \
-    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-
-static inline uint32_t read_u32(const uint64_t *v, size_t n)
-{   uint32_t r;
-    std::memcpy(&r, (const char *)v + 4*(n^1), sizeof(uint32_t));
-    return r;
-}
-
-static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   std::memcpy((char *)v + 4*(n^1), &r, sizeof(uint32_t));
-}
-
-#else // endianness not known at compile time
-
-// If I am uncertain about endianness I can extract or insert data
-// using shift operations. It is not actually TOO bad.
-`
-static inline uint32_t read_u32(const uint64_t *v, size_t n)
-{   uint64_t r = v[n/2];
-    if ((n & 1) != 0) r >>= 32;
-    return (uint32_t)r;
-}
-
-static inline void write_u32(uint64_t *v, size_t n, uint32_t r)
-{   uint64_t w = v[n/2];
-    if ((n & 1) != 0) w = ((uint32_t)w) | ((uint64_t)r << 32);
-    else w = (w & ((uint64_t)(-1)<<32)) | r;
-    v[n/2] = w;
-}
-
-#endif // endianness
-
-
 //=========================================================================
 //=========================================================================
 // Some support for two models of memory layout. If VSL is set a number
@@ -846,7 +890,7 @@ uintptr_t &string_header(uint64_t *a)
 static uint64_t memory[MEMORY_SIZE];
 static size_t memory_used = 0;
 
-uint64_t *preallocate(size_t n)
+uint64_t *reserve(size_t n)
 {   uint64_t *r = &memory[memory_used+1];
     memory_used += (n + 1);
 // No attempt at garbage collection here - I will just allocate
@@ -869,7 +913,7 @@ cons_representation cons(number_representation a, number_representation b)
 
 void abandon(uint64_t *p)
 {
-// preallocate does basically: r = memory + 8*(memory_used+1) when thinking
+// reserve does basically: r = memory + 8*(memory_used+1) when thinking
 // in bytes and machine addresses. So I can undo that by going something like
 //         memory_used = (p-memory)/8-1
     memory_used = ((char *)p - (char *)memory)/sizeof(uint64_t) - 1;
@@ -909,13 +953,6 @@ LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 // I insert an item with typeGAP as a filler...
     p[final_n] = tagHDR + typeGAP + packlength((n-final_n)*sizeof(uint64_t));
     return (LispObject)&bignum_header(p) + tagATOM;
-}
-
-// If I abandon an item other than the most recently allocated one I will
-// fill in where it used to be with a padder.
-
-void abandon_x(uint64_t *p, size_t n)
-{   p[-1] = tagHDR + typeGAP + packlength(n*sizeof(uint64_t));
 }
 
 LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
@@ -995,7 +1032,7 @@ void free_string(string_representation p)
 // as having a lesser number of digits in use, or I could perform more
 // enthusiastic adjustment when the size had changed significantly.
 // I could also look at all uses of free_bignum() and see if I was about to
-// perform a preallocate() that could use the space released. This would
+// perform a reserve() that could use the space released. This would
 // work particularly well with some cases of Bignum::operator= where the
 // bignum presently in the variable is at present discarded and could
 // instead often be recycled. If I make all memory blocks a power of 2 in
@@ -1040,7 +1077,7 @@ malloc_t  *malloc_function = malloc;
 realloc_t *realloc_function = my_realloc;
 free_t    *free_function   = free;
 
-uint64_t *preallocate(size_t n)
+uint64_t *reserve(size_t n)
 {   my_assert(n > 0 && n < 10000,
        [&]{ std::cout << "my_allocate " << n << std::endl; });
     uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
@@ -1064,11 +1101,6 @@ number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
 //    printf("[%d] realloc -> %p\n", ++counter, p);
     p[0] = final_n;
     return &p[1];
-}
-
-void abandon_x(uint64_t *p, size_t n)
-{
-    (*free_function)((void *)&p[-1]);
 }
 
 number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
@@ -1118,7 +1150,7 @@ number_representation copy_if_no_garbage_collector(number_representation p)
 {   if (p == (number_representation)0) return p;
     size_t n = number_size(p);
     uint64_t *d = number_data(p);
-    uint64_t *r = preallocate(n);
+    uint64_t *r = reserve(n);
     std::memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -1164,7 +1196,7 @@ number_representation cdr(cons_representation a)
 number_representation always_copy_bignum(number_representation p)
 {   size_t n = number_size(p);
     uint64_t *d = number_data(p);
-    uint64_t *r = preallocate(n);
+    uint64_t *r = reserve(n);
     std::memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -1278,7 +1310,7 @@ number_representation uniform_positive(size_t n)
 {   size_t lenr = (n + 63)/64;
     if (lenr == 0) lenr = 1; // special case!
     size_t save = lenr;
-    uint64_t *r = preallocate(lenr);
+    uint64_t *r = reserve(lenr);
     uniform_positive(r, lenr, n);
     return confirm_size(r, save, lenr);
 }
@@ -1307,7 +1339,7 @@ void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
 number_representation uniform_signed(size_t n)
 {   size_t lenr = n/64+1;
     size_t save = lenr;
-    uint64_t *r = preallocate(lenr);
+    uint64_t *r = reserve(lenr);
     uniform_signed(r, lenr, n);
     return confirm_size(r, save, lenr);
 }
@@ -1335,7 +1367,7 @@ void uniform_upto(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 number_representation uniform_upto(number_representation aa)
 {   size_t lena = number_size(aa);
     uint64_t *a = number_data(aa);
-    uint64_t *r = preallocate(lena);
+    uint64_t *r = reserve(lena);
     size_t lenr;
     uniform_upto(a, lena, r, lenr);
     return confirm_size(r, lena, lenr);
@@ -1369,7 +1401,7 @@ void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
 number_representation random_upto_bits(size_t bits)
 {   size_t m = 1+bits/64;
     if (m == 0) m = 1;
-    uint64_t *r = preallocate(m);
+    uint64_t *r = reserve(m);
     size_t lenr;
     random_upto_bits(r, lenr, bits);
     return confirm_size(r, m, lenr);
@@ -1395,7 +1427,7 @@ static inline void int_to_bignum(int64_t n, uint64_t *r)
 }
 
 number_representation int_to_bignum(int64_t n)
-{   uint64_t *r = preallocate(1);
+{   uint64_t *r = reserve(1);
     int_to_bignum(n, r);
     return confirm_size(r, 1, 1);
 }
@@ -1411,7 +1443,7 @@ static inline void unsigned_int_to_bignum(uint64_t n, uint64_t *r, size_t &lenr)
 
 number_representation unsigned_int_to_bignum(uint64_t n)
 {   size_t w = (negative(n) ? 2 : 1);
-    uint64_t *r = preallocate(w);
+    uint64_t *r = reserve(w);
     size_t lenr;
     unsigned_int_to_bignum(n, r, lenr);
     return confirm_size(r, w, lenr);
@@ -1445,7 +1477,7 @@ number_representation string_to_bignum(const char *s)
 // overestimate so that the vector that I allocate never overflows. Somewhat
 // rarely it will be and overestimate and it will be necessary to trim the
 // vector at the end.
-    uint64_t *r = preallocate(words);
+    uint64_t *r = reserve(words);
     for (size_t i=0; i<words; i++) r[i] = 0;
 // Now for each chunk of digits NNNN in the input I want to go in effect
 //     r = 10^19*r + NNNN;
@@ -1558,7 +1590,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
 {
 // Making the value zero a special case simplifies things later on!
     if (lena == 1 && a[0] == 0)
-    {   uint64_t *r = preallocate(1);
+    {   uint64_t *r = reserve(1);
         strcpy((char *)r, "0");
         return confirm_size_string(r, 1, 1);
     }
@@ -1574,7 +1606,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
 // I will copy my input into a fresh vector. And I will force it to be
 // positive. The made-positive version might have a leading digit with
 // its top bit set - that will not worry me because I view it as unsigned.
-    uint64_t *r = preallocate(m);
+    uint64_t *r = reserve(m);
     size_t i;
     for (i=0; i<lena; i++) r[i] = a[i];
     for (; i<m; i++) r[i] = 0;
@@ -1650,7 +1682,7 @@ string_representation bignum_to_string_hex(number_representation aa)
     uint64_t *a = number_data(aa);
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
-    {   uint64_t *r = preallocate(1);
+    {   uint64_t *r = reserve(1);
         strcpy((char *)r, "0");
         return confirm_size_string(r, 1, 1);
     }
@@ -1672,7 +1704,7 @@ string_representation bignum_to_string_hex(number_representation aa)
         }
     }
     size_t nn = (m + 7)/8;
-    uint64_t *r = preallocate(nn);
+    uint64_t *r = reserve(nn);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -1714,7 +1746,7 @@ string_representation bignum_to_string_octal(number_representation aa)
         nn = width;
     }
     nn = (nn + 7)/8;   // words needed for string result
-    uint64_t *r = preallocate(nn);
+    uint64_t *r = reserve(nn);
     char *p = (char *)r;
     if (sign)
     {   *p++ = '~';
@@ -1730,7 +1762,7 @@ string_representation bignum_to_string_binary(number_representation aa)
     uint64_t *a = number_data(aa);
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
-    {   uint64_t *r = preallocate(1);
+    {   uint64_t *r = reserve(1);
         strcpy((char *)r, "0");
         return confirm_size_string(r, 1, 1);
     }
@@ -1751,7 +1783,7 @@ string_representation bignum_to_string_binary(number_representation aa)
         }
     }
     size_t nn = (m + 7)/8;
-    uint64_t *r = preallocate(nn);
+    uint64_t *r = reserve(nn);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -1906,7 +1938,7 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 
 number_representation bignegate(number_representation a)
 {   size_t n = number_size(a);
-    uint64_t *p = preallocate(n+1);
+    uint64_t *p = reserve(n+1);
     size_t final_n;
     bignegate(number_data(a), n, p, final_n);
     return confirm_size(p, n, final_n);
@@ -1923,7 +1955,7 @@ static void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 
 number_representation biglognot(number_representation a)
 {   size_t n = number_size(a);
-    uint64_t *p = preallocate(n+1);
+    uint64_t *p = reserve(n+1);
     size_t final_n;
     biglognot(number_data(a), n, p, final_n);
     return confirm_size(p, n, final_n);
@@ -1953,7 +1985,7 @@ number_representation biglogand(number_representation a, number_representation b
     size_t n;
     if (na >= nb) n = na;
     else n = nb;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     biglogand(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -1983,7 +2015,7 @@ number_representation biglogor(number_representation a, number_representation b)
     size_t n;
     if (na >= nb) n = na;
     else n = nb;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     biglogor(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2020,7 +2052,7 @@ number_representation biglogxor(number_representation a, number_representation b
     size_t n;
     if (na >= nb) n = na;
     else n = nb;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     biglogxor(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2069,7 +2101,7 @@ number_representation bigleftshift(number_representation a, int n)
     else if (n < 0) return bigrightshift(a, -n);
     size_t na = number_size(a);
     size_t nr = na + (n/64) + 1;
-    uint64_t *p = preallocate(nr);
+    uint64_t *p = reserve(nr);
     size_t final_n;
     bigleftshift(number_data(a), na, n, p, final_n);
     return confirm_size(p, nr, final_n);
@@ -2109,7 +2141,7 @@ number_representation bigrightshift(number_representation a, int n)
     else if (n < 0) return bigleftshift(a, -n);
     size_t na = number_size(a);
     size_t nr = na - (n/64);
-    uint64_t *p = preallocate(nr);
+    uint64_t *p = reserve(nr);
     size_t final_n;
     bigrightshift(number_data(a), na, n, p, final_n);
     return confirm_size(p, nr, final_n);
@@ -2171,7 +2203,7 @@ number_representation bigadd(number_representation a, number_representation b)
     size_t n;
     if (na >= nb) n = na+1;
     else n = nb+1;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     bigadd(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2179,7 +2211,7 @@ number_representation bigadd(number_representation a, number_representation b)
 
 number_representation bigadd_small(number_representation a, int64_t b)
 {   size_t na = number_size(a);
-    uint64_t *p = preallocate(na+1);
+    uint64_t *p = reserve(na+1);
     size_t final_n;
     bigadd_small(number_data(a), na, b, p, final_n);
     return confirm_size(p, na+1, final_n);
@@ -2276,7 +2308,7 @@ number_representation bigsubtract(number_representation a, number_representation
     size_t n;
     if (na >= nb) n = na+1;
     else n = nb+1;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     bigsubtract(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2288,7 +2320,7 @@ number_representation bigrevsubtract(number_representation a, number_representat
     size_t n;
     if (a >= b) n = na+1;
     else n = nb+1;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     bigsubtract(number_data(b), nb, number_data(a), na, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2352,7 +2384,7 @@ number_representation bigmultiply(number_representation a, number_representation
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n = na+nb;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     bigmultiply(number_data(a), na, number_data(b), nb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2420,7 +2452,7 @@ void bigsquare(const uint64_t *a, size_t lena,
 number_representation bigsquare(number_representation a)
 {   size_t na = number_size(a);
     size_t n = 2*na;
-    uint64_t *p = preallocate(n);
+    uint64_t *p = reserve(n);
     size_t final_n;
     bigsquare(number_data(a), na, p, final_n);
     return confirm_size(p, n, final_n);
@@ -2472,7 +2504,7 @@ void bigpow(const uint64_t *a, size_t lena, uint64_t n,
 
 number_representation bigpow(number_representation aa, uint64_t n)
 {   if (n == 0)
-    {   uint64_t *r = preallocate(0);
+    {   uint64_t *r = reserve(0);
         r[0] = 1;
         return confirm_size(r, 1, 1);
     }
@@ -2490,9 +2522,9 @@ number_representation bigpow(number_representation aa, uint64_t n)
 // truncating from uint64_t to size_t.
     my_assert(lenr == lenr1);
     uint64_t olenr = lenr;
-    uint64_t *r = preallocate(lenr);
-    uint64_t *v = preallocate(lenr);
-    uint64_t *w = preallocate(lenr);
+    uint64_t *r = reserve(lenr);
+    uint64_t *v = reserve(lenr);
+    uint64_t *w = reserve(lenr);
     bigpow(a, lena, n, v, w, r, lenr);
     abandon(w);
     abandon(v);
@@ -2545,25 +2577,25 @@ number_representation bigpow(number_representation aa, uint64_t n)
 // passed in sign and magnitide form as b/b_negative
 
 static void short_division(const uint64_t *a, size_t lena,
-                                    uint64_t b, bool b_negative,
-                                    bool want_q, uint64_t *&q,
-                                    size_t &olenq, size_t &lenq,
-                                    bool want_r, uint64_t *&r,
-                                    size_t &olenr, size_t &lenr)
+                           uint64_t b, bool b_negative,
+                           bool want_q, uint64_t *&q,
+                           size_t &olenq, size_t &lenq,
+                           bool want_r, uint64_t *&r,
+                           size_t &olenr, size_t &lenr)
 {   uint64_t hi = 0;
     bool a_negative = false;
     uint64_t *aa;
     if (negative(a[lena-1]))
     {   a_negative = true;
 // Take absolute value of a if necessary.
-        aa = preallocate(lena);
+        aa = reserve(lena);
         internal_negate(a, lena, aa);
         a = (const uint64_t *)aa;
     }
     size_t i=lena-1;
     if (want_q)
     {   olenq = lena;
-        q = preallocate(olenq);
+        q = reserve(olenq);
     }
     for (;;)
     {   uint64_t d;
@@ -2575,7 +2607,7 @@ static void short_division(const uint64_t *a, size_t lena,
     if (a_negative) abandon(aa);
     if (want_q)
     {   lenq = lena;
-        if (a_negative)
+        if (a_negative != b_negative)
         {   internal_negate(q, lenq, q);
             truncate_negative(q, lenq);
         }
@@ -2586,29 +2618,29 @@ static void short_division(const uint64_t *a, size_t lena,
 // The remainder will be strictly smaller then b, and the largest possible
 // value for b is 0xffffffffffffffff. This can still require two words in
 // its representation.
-        if (a_negative != b_negative)
+        if (a_negative)
         {   if (negative(hi))
             {   olenr = lenr = 2;
-                r = preallocate(olenr);
+                r = reserve(olenr);
                 r[0] = -hi;
                 r[1] = -1;
             }
             else
             {   olenr = lenr = 1;
-                r = preallocate(olenr);
+                r = reserve(olenr);
                 r[0] = -hi;
             }
         }
         else
         {   if (negative(hi))
             {   olenr = lenr = 2;
-                r = preallocate(olenr);
+                r = reserve(olenr);
                 r[0] = hi;
                 r[1] = 0;
             }
             else
             {   olenr = lenr = 1;
-                r = preallocate(olenr);
+                r = reserve(olenr);
                 r[0] = hi;
             }
         }
@@ -2685,7 +2717,7 @@ void division(const uint64_t *a, size_t lena,
         if (b[0] == 0)
         {   if (want_q)
             {   lenq = lena;
-                q = preallocate(lena);
+                q = reserve(lena);
                 olenq = lena;
                 internal_negate(&a[1], lena-1, q);
                 if (q[lenq-1]==0 && lenq>1 && positive(q[lenq-2])) lenq--;
@@ -2702,7 +2734,7 @@ void division(const uint64_t *a, size_t lena,
                 {   padr = 0;
                     lenr++;
                 }
-                r = preallocate(lenr);
+                r = reserve(lenr);
                 olenr = lenr;
                 r[0] = rr;
                 if (lenr != 1) r[1] = padr;
@@ -2731,7 +2763,7 @@ void division(const uint64_t *a, size_t lena,
 // and extra leading 0. Because the value I generate here is to be treated
 // as unsigned this leading top bit does not matter and so the absolute value
 // of b fits in the same amount of space that b did with no risk of overflow.  
-        bb = preallocate(lenb);
+        bb = reserve(lenb);
         internal_negate(b, lenb, bb);
         if (bb[lenbb-1] == 0) lenbb--;
     }
@@ -2746,13 +2778,13 @@ void division(const uint64_t *a, size_t lena,
 // as 1. But here with the divisor made tidy this test is safe!
     if (lena < lenbb)
     {   if (want_q)
-        {   q = preallocate(1);
+        {   q = reserve(1);
             olenq = 1;
             q[0] = 0;
             lenq = 1;
         }
         if (want_r)
-        {   r = preallocate(lena);
+        {   r = reserve(lena);
             internal_copy(a, lena, r);
             lenr = lena;
         }
@@ -2767,7 +2799,7 @@ void division(const uint64_t *a, size_t lena,
 // it yet. I delay creation of that copy until now because that lets my
 // avoid a spurious allocation in the various small cases.
     if (!b_negative)
-    {   bb = preallocate(lenbb);
+    {   bb = reserve(lenbb);
         internal_copy(b, lenbb, bb);
     }
 // If I actually return the quotient I may need to add a leading 0 or -1 to
@@ -2775,14 +2807,14 @@ void division(const uint64_t *a, size_t lena,
 // the more obvious "+1" here.
     if (want_q)
     {   lenq = lena - lenb + 2;
-        q = preallocate(lenq);
+        q = reserve(lenq);
         olenq = lenq;
     }
 // I will need space where I store something that starts off as a scaled
 // copy of the dividend and gradually have values subtracted from it until
 // it ends up as the remainder.
     lenr = lena;
-    r = preallocate(lenr+1);
+    r = reserve(lenr+1);
     bool a_negative = negative(a[lena-1]);
     if (a_negative) internal_negate(a, lena, r);
     else internal_copy(a, lena, r);
@@ -2879,19 +2911,21 @@ static inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
 {   my_assert(lenr > lenb);
     my_assert(lenb >= 2);
     my_assert(b[lenb-1] != 0);
-    UINT128 p0 = pack128(r[lenr-1], r[lenr-2]);
-    uint64_t q0 =  (uint64_t)(p0 / (UINT128)b[lenb-1]);
-    uint64_t r0 =  (uint64_t)(p0 % (UINT128)b[lenb-1]);
+    uint64_t q0, r0;
+    divide64(r[lenr-1], r[lenr-2], b[lenb-1], q0, r0);
 // At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
 // but never any worse than that.
 //
-// The test on the next line should detect all case where q0 was in error
+// The tests on the next lines should detect all case where q0 was in error
 // by 2 and most when it was in error by 1.
 //
-    if (q0 == UINT64_C(0x8000000000000000) ||
-        (UINT128)q0*(UINT128)b[lenb-2] >
-        pack128(r0, r[lenr-3]))
-        q0--;
+    if (q0 == UINT64_C(0x8000000000000000)) q0--;
+    else
+    {   uint64_t hi, lo;
+        multiply64(q0, b[lenb-2], hi, lo);
+        if (hi > r0 ||
+            (hi == r0 && lo > r[lenr-3])) q0--;
+    }
 //
 // Now I want to go "r = r - b*q0*2^(64*(lenr-lenb));" so that r
 // is set to an accurate remainder after using q0 as (part of) the
