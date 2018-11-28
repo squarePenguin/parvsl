@@ -1,17 +1,109 @@
-#! /bin/bash
+#! /bin/bash -v
+time ./test1.sh alg
+time ./test1.sh poly
+time ./test1.sh polydiv
+time ./test1.sh arith
+time ./test1.sh factor
+time ./test1.sh int
+time ./test1.sh matrix
+time ./test1.sh solve
+time ./test1.sh desir
+time ./test1.sh ineq
+time ./test1.sh modsr
+time ./test1.sh rsolve
+time ./test1.sh algint
+time ./test1.sh arnum
+time ./test1.sh assist
+time ./test1.sh dummy
+time ./test1.sh cantens
+time ./test1.sh atensor
+time ./test1.sh avector
+time ./test1.sh invbase
+time ./test1.sh boolean
+time ./test1.sh cali
+time ./test1.sh camal
+time ./test1.sh changevr
+time ./test1.sh compact
+time ./test1.sh dfpart
+time ./test1.sh lie
+time ./test1.sh assert
+time ./test1.sh odesolve
+time ./test1.sh pf
+time ./test1.sh trigd
+time ./test1.sh cvit
+time ./test1.sh physop
+time ./test1.sh excalc
+time ./test1.sh gentran
+time ./test1.sh fide
+time ./test1.sh numeric
+time ./test1.sh randpoly
+time ./test1.sh reacteqn
+time ./test1.sh roots
+time ./test1.sh rlfi
+time ./test1.sh sets
+time ./test1.sh xideal
+time ./test1.sh eds
+time ./test1.sh groebner
+time ./test1.sh ideals
+time ./test1.sh linalg
+time ./test1.sh ncpoly
+time ./test1.sh normform
+time ./test1.sh orthovec
+time ./test1.sh laplace
+time ./test1.sh pm
+time ./test1.sh qsum
+time ./test1.sh scope
+time ./test1.sh sparse
+time ./test1.sh spde
+time ./test1.sh specfn
+time ./test1.sh specfn2
+time ./test1.sh tps
+time ./test1.sh limits
+time ./test1.sh defint
+time ./test1.sh fps
+time ./test1.sh trigint
+time ./test1.sh ratint
+time ./test1.sh mathml
+time ./test1.sh mathmlom
+time ./test1.sh rltools
+time ./test1.sh redlog
+time ./test1.sh cgb
+time ./test1.sh ofsf
+time ./test1.sh acfsf
+time ./test1.sh ibalp
+time ./test1.sh pasf
+time ./test1.sh qqe_ofsf
+time ./test1.sh mri
+time ./test1.sh talp
+time ./test1.sh sum
+time ./test1.sh zeilberg
+time ./test1.sh symmetry
+time ./test1.sh taylor
+time ./test1.sh mrvlimit
+time ./test1.sh residue
+time ./test1.sh susy2
+time ./test1.sh tri
+time ./test1.sh trigsimp
+time ./test1.sh crack
+time ./test1.sh liepde
+time ./test1.sh applysym
+time ./test1.sh conlaw
+time ./test1.sh xcolor
+time ./test1.sh wu
+time ./test1.sh ztrans
+time ./test1.sh geoprover
+time ./test1.sh rataprx
+time ./test1.sh lpdo
+time ./test1.sh guardian
+time ./test1.sh cdiff
+time ./test1.sh bibasis
+time ./test1.sh clprl
+time ./test1.sh gcref
+time ./test1.sh smt
+time ./test1.sh lalr
+time ./test1.sh ranum
+time ./test1.sh listvecops
+time ./test1.sh cde
+time ./test1.sh sstools
 
-#     ./testall.sh
-#
-# Run test.sh on every module of Reduce that has a test file.
-# Note that plenty of these will not run at all and that everything
-# will be so slow that running ALL tests is liable to be an overnight task.
-
-for x in `grep -v ^% package.map | grep \ test\  | \
-          sed -e 's/".*$//;s/(//'`
-do
-  printf "About to test $x\n"
-  time ./test.sh $x
-  printf "\n\n\n"
-done
-
-exit 0
+# end of all tests!
