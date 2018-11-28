@@ -2011,8 +2011,8 @@ LispObject token()
             boffop = 0;
             if (boffo[boffop] == '+') boffop++;
             else if (boffo[boffop] == '-') neg=1, boffop++;
-            while (boffo[boffop] != 0)
-            {   r = call2("plus2", call2("times2", packfixnum(10), r),
+            while (boffo[boffop] != 0) {   
+                r = call2("plus2", call2("times2", packfixnum(10), r),
                            packfixnum(boffo[boffop++] - '0'));
             }
             if (neg) r = call1("minus", r);
@@ -2050,8 +2050,8 @@ extern LispObject readT();
 
 LispObject readS()
 {   LispObject q, w;
-    while (1)
-    {   switch (symtype)
+    while (1) {
+        switch (symtype)
         {   case '?':
                 cursym = token();
                 continue;
@@ -2246,7 +2246,7 @@ LispObject interpreted1(LispObject b, LispObject a1)
     }
     bvl = r;
     // save1 = qvalue(bvl);
-    assert(isSYMBOL(bvl));
+
     par::Shallow_bind bind_bvl(bvl, a1);
     // qvalue(bvl) = a1;
     r = nil;
@@ -2273,8 +2273,7 @@ LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
     }
     bvl = qcar(bvl);
     v2 = qcar(v2);
-    assert(isSYMBOL(bvl));
-    assert(isSYMBOL(v2));
+
     par::Shallow_bind bind_bvl(bvl, a1);
     par::Shallow_bind bind_v2(v2, a2);
     // swap(a1, qvalue(bvl));
@@ -2492,7 +2491,7 @@ LispObject eval(LispObject x)
         }
     }
     if (isSYMBOL(x))
-    {   LispObject v = qvalue(x);
+    {   LispObject v = par::symval(x);
         if (v == undefined) {
             return error1("undefined variable", x);
         }
@@ -4181,7 +4180,8 @@ public:
 };
 
 static LispObject Nplus2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Adder>(a, b);
+{
+    return number_dispatcher::binary<LispObject,Adder>(a, b);
 }
 
 
@@ -4278,7 +4278,8 @@ public:
 };
 
 static LispObject Ntimes2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Multiplier>(a, b);
+{
+    return number_dispatcher::binary<LispObject,Multiplier>(a, b);
 }
 
 // ====== quotient =====
@@ -5551,7 +5552,8 @@ void readevalprint(int loadp)
         else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
-        {   r = eval(r);
+        {   
+            r = eval(r);
             if (showallreads || (unwindflag == unwindNONE && !loadp))
             {   linepos += printf("Value: ");
 #ifdef DEBUG
@@ -5659,15 +5661,15 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 {   return Lerrorset_3(lits, a1, nil, nil);
 }
 
-// LispObject Lthread(LispObject lits, LispObject x) {
-//     auto f = [=]() {
-//         LispObject r = eval(x);
-//         print(r);
-//     };
+LispObject Lthread(LispObject lits, LispObject x) {
+    auto f = [=]() {
+        LispObject r = eval(x);
+        print(r);
+    };
 
-//     int tid = par::start_thread(f);
-//     return makeinteger(tid);
-// }
+    int tid = par::start_thread(f);
+    return packfixnum(tid);
+}
 
 #define SETUPSPEC                                               \
     SETUP_TABLE_SELECT("quote",             Lquote),            \
@@ -5802,6 +5804,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("vectorp",           Lvectorp),          \
     SETUP_TABLE_SELECT("wrs",               Lwrs),              \
     SETUP_TABLE_SELECT("vector",            Lvector_1),         \
+    SETUP_TABLE_SELECT("thread",            Lthread),           \
     SETUP_TABLE_SELECT("zerop",             Lzerop),
 
 #define SETUP1a
