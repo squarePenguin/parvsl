@@ -1,5 +1,37 @@
 // Big-number arithmetic.                                  A C Norman, 2018
 
+
+/**************************************************************************
+ * Copyright (C) 2018, Codemist.                         A C Norman       *
+ *                                                                        *
+ * Redistribution and use in source and binary forms, with or without     *
+ * modification, are permitted provided that the following conditions are *
+ * met:                                                                   *
+ *                                                                        *
+ *     * Redistributions of source code must retain the relevant          *
+ *       copyright notice, this list of conditions and the following      *
+ *       disclaimer.                                                      *
+ *     * Redistributions in binary form must reproduce the above          *
+ *       copyright notice, this list of conditions and the following      *
+ *       disclaimer in the documentation and/or other materials provided  *
+ *       with the distribution.                                           *
+ *                                                                        *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS    *
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      *
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS      *
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE         *
+ * COPYRIGHT OWNERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,   *
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,   *
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS  *
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND *
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR  *
+ * TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF     *
+ * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH   *
+ * DAMAGE.                                                                *
+ *************************************************************************/
+
+
+
 // There are quite a lot of bignumber packages out there on the web,
 // but none of them seemed to be such that I could readily use them
 // for arithmetic within a Lisp at all easily, for instance because of
@@ -30,7 +62,14 @@
 // passed to abandon() when it is no longer required, or there can be a
 // call to confirm_size() to establish the exact size that is to be retained.
 // A variant call confirm_size_x() is used when the vector whose size is being
-// confirmed is not the one that was most recently allocated.
+// confirmed is not the one that was most recently allocated. confirm_size()
+// returns a handle for the vector, not the vector itself.
+//
+// In addition to numbers I will generate strings (I have code to make a
+// string representation of a number, with hex, decimal, octal and binary
+// variants). Space for the string will be allocated using reserve_string()
+// and finalized using confirm_size_string(), with both of those indicating
+// sized in bytes. 
 //
 // A higher level packaging represents numbers using a class Bignum. This
 // has just one field which will hold a potentially encoded version of a
@@ -38,9 +77,12 @@
 // item that is a header word containing length information and then the
 // uint64_t values representing the numeric value. The representation of the
 // header and the encoding of the pointer will be done in one of several
-// ways, these being intended to provide models of the implementation tuned
-// for different use cases. These cases are included in this file using
-// conditional compilation:
+// ways, these being intended to provide models of the implementation intended
+// for different use cases. The issue of disposing of strings returned by
+// the conversion routines is scheme dependent and is described below.
+//
+//These cases are included in this file using conditional compilation:
+//
 // MALLOC:
 //   A bignum with n digits is held in a vector of length n+1, and the
 //   "encoded pointer" to it is a native pointer to the second element.
@@ -54,6 +96,8 @@
 //   on the platform that is in use. To allow for a user who wished to
 //   customize allocation, all calls to the basic memory allocation primitives
 //   are made indirectly so that alternative equivalents can be plugged in.
+//   Strings and allocated using malloc() and returned as simple nul-terminated
+//   C strings. They must be released using free() after use.
 // NEW:
 //   A bignum with n digits will be stored in a vector whose size is the
 //   next power of two strictly larger than n. As with the MALLOC case
@@ -73,7 +117,7 @@
 //   size in a block is much smaller than the capacity, and in such cases
 //   allocate a fresh smaller block and copy information into it, allowing it
 //   to abandon the overlarge chunk of memory.
-//   The reference to the vector of digits is held uwing type uintptr_t and
+//   The reference to the vector of digits is held using type intptr_t and
 //   can be cast to obtain the address of the least significant digit of the
 //   value. But so that this scheme as a whole provides better performance
 //   for general users, small integer values will be handled specially. If
@@ -84,6 +128,10 @@
 //   fit within 63 bits it will not do much storage allocation at all. If this
 //   works well it should represent a reasonably convenient and tolerably
 //   efficient C++ facility for general use.
+//   Strings live in store allocated using "new char[nnn]" and are returned
+//   as C style strings that must be disposed of using "delete". The use of
+//   C rather than C++ style strings because I hope that makes storage
+//   management interaction clearer.
 // LISP:
 //   The arrangements here are based on the arrangements I have in my VSL
 //   and CSL Lisp implementations. I still hope that between the above options
@@ -123,7 +171,14 @@
 //   values, plus ratios and complex numbers) and so the dispatch on tagged
 //   numbers needs to live at a higher level within the Lisp then just thise
 //   code.
-//
+//   Strings are allocated using reserve_string() and finalized using
+//   confirm_size_string. They will end up as blocks of memory with
+//   the first word holding a "string header" (which includes length
+//   information. The characters of the string follow that aligned at a 4-byte
+//   boundary and without a trailing NUL. The final 8-byte doubleword of
+//   the string will be NUL padded.
+
+
 // If TEST is defined then this file becomes a self-contained one with
 // a few demonstration and test examples at the end.
 
@@ -131,51 +186,21 @@
 #define TEST 1
 
 
-/**************************************************************************
- * Copyright (C) 2018, Codemist.                         A C Norman       *
- *                                                                        *
- * Redistribution and use in source and binary forms, with or without     *
- * modification, are permitted provided that the following conditions are *
- * met:                                                                   *
- *                                                                        *
- *     * Redistributions of source code must retain the relevant          *
- *       copyright notice, this list of conditions and the following      *
- *       disclaimer.                                                      *
- *     * Redistributions in binary form must reproduce the above          *
- *       copyright notice, this list of conditions and the following      *
- *       disclaimer in the documentation and/or other materials provided  *
- *       with the distribution.                                           *
- *                                                                        *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS    *
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT      *
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS      *
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE         *
- * COPYRIGHT OWNERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,   *
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,   *
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS  *
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND *
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR  *
- * TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF     *
- * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH   *
- * DAMAGE.                                                                *
- *************************************************************************/
-
 
 
 // TODO:
-
-// short_negative_division done better
-// malloc just in powers of 2
-// VSL and C++ versions closer together
-// bigsquare done better
- 
-
 //   gcdn, lcmn
 //   float, floor, ceil, fix
 //   isqrt
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
 
-// A LOT of testing. Some profiling and performance tuning.
+
+
+// The following 3 macros ought not to be required, however C99 had proposed
+// them, and although no C++ standard adopted them and C11 removed the idea,
+// some C++ compilers have in fact needed them, and defining them is pretty
+// harmless apart from the extra text both of the definitions and of this
+// comment.
 
 #define __STDC_FORMAT_MACROS 1
 #define __STDC_CONST_MACROS 1
@@ -195,25 +220,26 @@
 #include <thread>
 #include <ctime>
 
-// An "my_assert" scheme that lets me write in my own code to print the
+// A scheme "my_assert" lets me write in my own code to print the
 // diagnostics.
 
 // my_abort() mainly exists so I can set a breakpoint on it! Setting one
 // on the system abort() function sometimes does not give me as much help
-// as I might have hoped.
+// as I might have hoped on at le4ast some platforms, while a break-point
+// on my_abort() does what I expect.
 
-void my_abort(const char *msg)
+static void my_abort(const char *msg)
 {   std::cout << "About to abort: " << msg << std::endl;
     abort();
 }
 
-void my_abort()
+static void my_abort()
 {   std::cout << "About to abort" << std::endl;
     abort();
 }
 
 template <typename F>
-inline void my_assert(bool ok, F&& action)
+static inline void my_assert(bool ok, F&& action)
 {
 // Use this as in
 //     my_assert(predicate, [&]{...});
@@ -222,11 +248,15 @@ inline void my_assert(bool ok, F&& action)
     if (!ok) { action(); my_abort(); }
 }
 
-inline void my_assert(bool ok)
+static inline void my_assert(bool ok)
 {
 //     my_assert(predicate);
     if (!ok) { std::cout << "my_assert failure" << std::endl; my_abort(); }
 }
+
+// At times during development it is useful to be able to send messages
+// to a log file.... This should not be used in final production code
+// but still may help while debugging.
 
 static FILE *logfile = NULL;
 
@@ -235,13 +265,786 @@ static FILE *logfile = NULL;
 // I like this option.
 
 static inline void logprintf(const char *fmt, ...)
-{   if (logfile == NULL) logfile = std::fopen("arith.log", "w");
+{
+// I use a fixed name for the log file. This is another respect in which
+// this has to be seen as code only suitable for temporary use.
+    if (logfile == NULL) logfile = std::fopen("arith.log", "w");
     std::va_list args;
     va_start(args, fmt);
     std::vfprintf(logfile, fmt, args);
     va_end(args);
     std::fflush(logfile);
 }
+
+//=========================================================================
+//=========================================================================
+// I have a class Bignum that wraps up the representation of a number
+// and then allows me to overload most operators so that big numbers can be
+// used in C++ code anmost as if they were a natural proper type. The main
+// big oddity will be that to denote a Bignum literal it will be necessary
+// to use a constructor, with obvious constructors accepting integers of up
+// to 64-bits and a perhaps less obvious one taking a string that is the
+// decimal denotation of the integer concerned.
+//=========================================================================
+//=========================================================================
+
+extern uint64_t *reserve(size_t n);
+extern intptr_t confirm_size(uint64_t *p, size_t n, size_t final);
+extern intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final);
+extern void abandon(intptr_t *p);
+
+extern char *reserve_string(size_t n);
+extern char *confirm_size_string(char *p, size_t n, size_t final);
+
+extern intptr_t vector_to_handle(uint64_t *p);
+extern uint64_t *vector_of_handle(intptr_t n);
+
+
+#if defined MALLOC
+
+// The MALLOC option is perhaps the simplest! It uses C style
+// malloc/realloc and free functions and the vector if turned into a
+// handle by just casting it to an intptr_t value.
+
+
+// The following are provided so that a user can update malloc_function,
+// realloc_function and free_function to refer to their own choice of
+// allocation technology.
+
+typedef void *malloc_t(size_t);
+typedef void *realloc_t(void *, size_t);
+typedef void free_t(void *);
+
+malloc_t  *malloc_function = malloc;
+realloc_t *realloc_function = realloc;
+free_t    *free_function   = free;
+
+inline uint64_t *reserve(size_t n)
+{   uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
+    my_assert(r != NULL);
+    return &r[1];
+}
+
+inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
+{   p = (uint64_t *)
+        (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
+    my_assert(p != NULL);
+    p[0] = final_n;
+    return vector_to_handle(&p[1]);
+}
+
+// In this model confirm_size_x() is just the same as confirm_size().
+
+inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
+{   confirm_size(p, n, final);
+}
+
+inline void abandon(intptr_t *p)
+{   (*free_function)((void *)&p[-1]);
+}
+
+inline char *reserve_string(size_t n)
+{   char *r = (char *)(*malloc_function)(n);
+    my_assert(r != NULL);
+    return r;
+}
+
+// When I confirm the size of a string all I do is to write a NUL byte
+// to terminate it. I expect the code to have reserved an amount of memory
+// that is not much longer than the amount that I will need, so using
+// realloc to shrink things to the exact size that is filled would not
+// be a good bargain.
+
+inline char *confirm_size_string(char *p, size_t n, size_t final)
+{   r[final] = 0;
+    return r;
+}
+
+// In the C/malloc model I will represent a number by the intptr_t style
+// integer that is obtained from a pointer to the first digit of the bignum.
+
+inline intptr_t vector_to_handle(uint64_t *p)
+{   return (intptr_t)p;
+}
+
+inline uint64_t *handle_to_number(intptr_t n)
+{   return (uint64_t *)n;
+}
+
+// When I use Bignums that are allocated using malloc() and operated on
+// via C++ overloaded operators I often need to copy the data. However when
+// memory management uses garbage collection I can allow multiple references
+// to the same object and so copying is not needed as much. I have two
+// copying functions. One only copies if the system is using MALLOC or
+// NEW (but leaves data sharable on systems with garbage collection) while
+// the other unconditionally copies.
+
+intptr_t always_copy_bignum(uint64_t *p)
+{   size_t n = p[-1];
+    uint64_t *r = reserve(n);
+    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+intptr_t copy_if_no_garbage_collector(uint64_t *p)
+{   size_t n = p[-1];
+    uint64_t *r = reserve(n);
+    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+#elif defined NEW
+
+// The NEW code is intended to be a reasonably sensible implementation for
+// use of thie code free-standing within C++. Memory is allocated in units
+// whose size is a power of 2, and I keep track of memory that I have used
+// and discarded so that I do not need to go back to the system-provided
+// allocator too often.
+
+
+static unsigned int log_next_power_of_2(size_t n);
+
+class freechains
+{
+public:
+// I keep my freechain table within an object so that the object can
+// be created as the program starts up and particularly so that it will
+// then be deleted on program termination. Its destructor can free all the
+// memory that it is keeping track of.
+    static uint64_t *freechain_table[64];
+    freechains()
+    {   for (size_t i=0; i<64; i++) freechain_table[i] = NULL;
+    }
+    ~freechains()
+    {   for (size_t i=0; i<64; i++)
+        {   uint64_t *f = freechain_table[i];
+            while (f != NULL)
+            {   uint64_t w = f[0];
+                delete f;
+                f = (uint64_t *)w;
+            }
+            freechain_table[i] = NULL;
+        }
+    }
+// Finding the number of bits in n is achieved by counting the leading
+// zeros in the representation of n, and on many platforms an intrinsic
+// function will compile this into a single machine code instruction.
+    static uint64_t *allocate(size_t n)
+    {   int bits = log_next_power_of_2(n);
+        uint64_t *r = freechain_table[bits];
+        if (r == NULL)
+        {   r = new uint64_t[((size_t)1)<<bits];
+            my_assert(r != NULL);
+        }
+        else freechain_table[bits] = (uint64_t *)r[0];
+// Just the first 32-bits of the header word record the clock capacity.
+// The casts here look (and indeed are) ugly, but when I store data into
+// memory as a 32-bit value that is how I will read it later on, and the
+// messy notation here does not correspond to complicated computation.
+        ((uint32_t *)r)[0] = bits;
+        return r;
+    }
+// When I abandon a memory block I will push it onto a relevant free chain.
+    static void abandon(uint64_t *p)
+    {   p = &p[-1];
+        int bits = ((uint32_t *)p)[0];
+// Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
+// risking loss of information.
+        p[0] = (uint64_t)freechain_table[bits];
+        freechain_table[bits] = p;
+    }
+};
+
+// Set up the object that contains the freechains.
+static freechains fc;
+
+inline uint64_t *reserve(size_t n)
+{   return &(fc.allocate(n+1))[1];
+}
+
+inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
+{
+// I compare the final size with the capacity and if it is a LOT smaller
+// I allocate a new smaller block and copy the data across.
+// That situation can most plausibly arise when two similar-values big
+// numbers are subtracted.
+    int bits = ((uint32_t *)(&p[-1]))[0]; 
+    size_t capacity = ((size_t)1)<<bits;
+    if (capacity > 4*final)
+    {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
+        memcpy(w, &p[-1], (final+1)*sizeof(uint64_t));
+        fc.abandon(p);
+        p = w;
+    }
+    ((uint32_t *)(&p[-1]))[1] = final;
+    return vector_to_handle(p);
+}
+
+inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
+{   return confirm_size(p, n, final);
+}
+
+inline void abandon(intptr_t *p)
+{   fc.abandon(p);
+}
+
+inline char *reserve_string(size_t n)
+{    return new char[n];
+}
+
+inline char *confirm_size_string(char *p, size_t n, size_t final)
+{   p[final] = 0;
+    return p;
+}
+
+inline intptr_t vector_to_handle(uint64_t *p)
+{   return (intptr_t)p;
+}
+
+inline uint64_t *vector_of_handle(intptr_t n)
+{   return (uint64_t *)n;
+}
+
+inline bool stored_as_fixnum(intptr_t a)
+{    return ((int)a & 1) != 0;
+}
+
+// I rather hope that a good compiler will implement this as just an
+// arithmetic shift right by 1 bit, and so it is a very cheap operation.
+
+inline int64_t int_of_handle(intptr_t a)
+{   return ((int64_t)a & ~(int64_t)1)/2;
+}
+
+// This function should only ever be called in situations where the
+// arithmetic indicated will not overflow.
+
+inline intptr_t int_to_handle(int64_t n)
+{   return (intptr_t)(2*n + 1);
+}
+
+static intptr_t MIN_FIXNUM = int_to_handle(INTPTR_MIN);
+static intptr_t MAX_FIXNUM = int_to_handle(INTPTR_MAX);
+
+inline bool fits_into_fixnum(int64_t a)
+{   return a>=MIX_FIXNUM && a<=MAX_FIXNUM;
+}
+
+#define fixnum_dispatch1(name, a1)                                 \
+    if (stored_as_fixnum(a1)) return name##_i(int_of_handle(a1));  \
+    else return name##_b(vector_of_handle(a1));
+
+#define fixnum_dispatch2(name, a1, a2)                                     \
+    if (stored_as_fixnum(a1))                                              \
+        if (stored_as_fixnum(a2))                                          \
+            return name##_ii(int_of_handle(a1), int_of_handle(a2));        \
+        else return name##_ib(int_of_handle(a1), vector_of_handle(a2)); \
+    else                                                                   \
+        if (stored_as_fixnum(a2))                                          \
+            return name##_bi(vector_of_handle(a1), int_of_handle(a2));     \
+        else return name##_bb(vector_of_handle(a1), vector_of_handle(a2));
+
+intptr_t always_copy_bignum(uint64_t *p)
+{   size_t n = ((uint32_t *)(&p[-1]))[1];
+    uint64_t *r = reserve(n);
+    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+intptr_t copy_if_no_garbage_collector(uint64_t *p)
+{   size_t n = ((uint32_t *)(&p[-1]))[1];
+    uint64_t *r = reserve(n);
+    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+#elif defined LISP
+
+// What I have here is a skeletal indication of how data representation
+// and storage allocation might work. I do not have a garbage collector
+// so this is not suitable for serious use!
+// I allocate memory sequentially, so reserving space is very cheap.
+// Discarding the most recently allocated item can be achieved by resetting
+// the allocation pointer. If something other than the most recent item
+// is released and when such an item shrinks I write in a header for a
+// padder item so that the memory can always be parsed in a linear scan.
+
+#define MEMORY_SIZE 1000000
+static uint64_t memory[MEMORY_SIZE];
+static size_t fringe = 0;
+
+inline uint64_t *reserve(size_t n)
+{   uint64_t *r = &memory[fringe+1];
+    fringe += (n + 1);
+    my_assert(fringe <= MEMORY_SIZE);
+}
+
+// Lisp Objects will be represeted using intptr_t with the low 3 bits
+// used as a tag. Every object in memory will be 8-byte aligned, so this
+// does not impact on addressability. The numeric codes established here
+// will not match the ones I actually use in wither VSL or CSL, but they
+// suffice for an illustration of the concepts.
+
+const intptr_t tagBITS   = 0x7;
+const intptr_t tagCONS   = 0x0;
+const intptr_t tagFIXNUM = 0x1;
+const intptr_t tagBIGNUM = 0x2;
+const intptr_t tagSTRING = 0x3;
+const intptr_t tagHEADER = 0x4;
+
+// In memory any object tagged as a BIGNUM or a STRING will have a header
+// word at its start. This will have tagHEADER as its low 3 bits. It then
+// has 5 bits that are reserved to give rich information about its type, which
+//in a full system could cover many sorts of vectors and several other numeric
+// types (eg complex numbers).
+
+const intptr_t typeBITS   = 0xf8;
+const intptr_t typeBIGNUM = 0x08;
+const intptr_t typeSTRING = 0x10;
+const intptr_t typeFILLER = 0x18;
+
+// The remaining bits of the header word hold the length of the object.
+// Here I will store that measuring in bytes.
+
+static inline intptr_t pack_header(intptr_t type, size_t length)
+{
+// Note that the shifting of length is on an unsigned value, and so even if
+// it ends up setting the top bit of the word its value is defined - while
+// if we had a signed type that would count as overflow and undefined. On a
+// 64-bit system this can never happen for achievable lengths, but on a 32
+// bit machine it could rather easily. Adding in the tag and type information
+// only impacts the low 8 bits and so can not overflow regardless of what sort
+// of arithmetic is used.
+    return (intptr_t)(tagHEADER + type + (length<<8));
+}
+
+static inline size_t object_length(intptr_t header)
+{
+// Perform the shift on an unsigned value so that the top bit is handled
+// simply.
+    return (size_t)((uintptr_t)header)>>8);
+}
+
+// With this representation a small number can be represented by a
+// uintptr_t that has tagFIXNUM in its low 3 bits and all the rest of the
+// bits treated as a signed integer. However the dispatch into the various
+// integer-big and big-bit variants of functions is handled elsewhere and in
+// a rather broader context than just this code (in particular it will need
+// to support floating point, complex and rational numbers as well as just
+// small and large integers) so here I make the basic arithmetic support
+// JUST the bignum case.
+
+inline bool stored_as_fixnum(intptr_t a)
+{    return ((int)a & tagBITS) == tagFIXNUM;
+}
+
+inline int64_t int_of_handle(intptr_t a)
+{   return ((int64_t)(a & ~tagBITS))/8;
+}
+
+inline intptr_t int_to_handle(int64_t n)
+{   return tagFIXNUM + 8*(uintptr_t)n;
+}
+
+#define fixnum_dispatch1(name, a1)
+    return name##_b(vector_of_handle(a1))
+
+#define fixnum_dispatch2(name, a1, a2)
+    return name##_bb(vector_of_handle(a1), vector_of_handle(a2))
+
+static inline uintptr_t pack_fixnum(int64_t n)
+{   return tagFIXNUM + 8*(uintptr_t)n;
+}
+
+static intline int64_t unpack_fixnum(uintptr_t a)
+{   return ((int64_t)(a & ~tagBITS))/8;
+}
+
+
+inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
+{
+// If bignum result ends up such that it could be represented as a
+// fixnum I will detect this here.
+    if (final_n == 1)
+    {   fringe =- (n+1);
+        int64_t v = (int64_t)p[0];
+        if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
+            return pack_fixnum(v);
+    }
+    memory_used -= (n - final_n);
+    bignum_header(p) = pack_header(typeBIGNUM, n*sizeof(uint64_t));
+    return vector_to_handle(p);
+}
+
+inline uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final)
+{
+}
+
+inline void abandon(uintptr_t *p)
+{
+}
+
+
+inline char *reserve_string(size_t n)
+{
+}
+
+inline char *confirm_size_string(char *p, size_t n, size_t final)
+{
+}
+
+
+inline intptr_t vector_to_handle(uint64_t *p)
+{
+}
+
+inline uint64_t *vector_of_handle(intptr_t n)
+{
+}
+
+uint64_t *always_copy_bignum(uint64_t *p)
+{   size_t n = p[-1];
+    uint64_t *r = reserve(n);
+    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+intptr_t copy_if_no_garbage_collector(uint64_t *p)
+{   return vector_to_handle(p);
+}
+
+#else
+#error Unspecified memory model
+#endif
+
+extern intptr_t string_to_bignum(const char *s);
+extern intptr_t unsigned_int_to_bignum(uint64_t n);
+extern intptr_t uniform_positive(size_t n);
+extern intptr_t uniform_signed(size_t n);
+extern intptr_t uniform_upto(uint64_t *aa);
+extern uintptr_t random_upto_bits(size_t bits);
+extern uintptr_t int_to_bignum(int64_t n);
+
+
+class Bignum
+{
+public:
+// a Bignum only had one data field, and that is simple plain data.
+    intptr_t val;
+
+
+// A default constructor build a Bignum with no stored data.
+    Bignum()
+    {   val = 0;
+    }
+    ~Bignum()
+    {   if (val != 0) abandon(vector_of_handle(val));
+        val = 0;
+    }
+    Bignum(uint64_t *p)
+    {   val = vector_to_handle(p);
+    }
+    Bignum(int32_t n)
+    {   val = vector_to_handle(int_to_bignum((int64_t)n));
+    }
+    Bignum(int64_t n)
+    {   val = vector_to_handle(int_to_bignum(n));
+    }
+    Bignum(const char *s)
+    {   val = vector_to_handle(string_to_bignum(s));
+    }
+    Bignum(const Bignum &a)
+    {
+// On the next line in the NEW case (at least) the handle might be a handle
+// of an immediate fixnum, and in that case a.vec() should be considered
+// an invalid operation and this code will need to be adjusted!
+        val = copy_if_no_garbage_collector(a.vec());
+    }
+
+    uint64_t *vec() const
+    {   return vector_of_handle(val);
+    }
+
+    inline void operator = (const Bignum &x)
+    {   if (this == &x) return; // assign to self - a silly case!
+        if (val != 0) abandon(vector_of_handle(val));
+// See comment in the copy constructor.
+        val = copy_if_no_garbage_collector(x.vec());
+    }
+
+    inline void operator = (const int64_t x)
+    {   if (val != 0) abandon(vector_of_handle(val));
+        val = vector_to_handle(int_to_bignum(x));
+    }
+
+    inline void operator = (const uint64_t x)
+    {   if (val != 0) abandon(vector_of_handle(val));
+        val = vector_to_handle(unsigned_int_to_bignum(x));
+    }
+
+    inline void operator = (const int32_t x)
+    {   if (val != 0) abandon(vector_of_handle(val));
+        val = vector_to_handle(int_to_bignum((int64_t)x));
+    }
+
+    inline void operator = (const uint32_t x)
+    {   if (val != 0) abandon(vector_of_handle(val));
+        val = vector_to_handle(int_to_bignum((int64_t)x));
+    }
+
+    inline void operator = (const char *x)
+    {   if (val != 0) abandon(vector_of_handle(val));
+        val = vector_to_handle(string_to_bignum(x));
+    }
+
+    inline Bignum operator +(const Bignum &x) const
+    {   return Bignum(bigadd(this->val, x.vec()));
+    }
+
+    inline Bignum operator -(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = bigsubtract(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator *(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = bigmultiply(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator /(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = bigquotient(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator %(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = bigremainder(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator -() const
+    {   Bignum ans;
+        ans.vec() = bignegate(this->val);
+        return ans;
+    }
+
+    inline Bignum operator &(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = biglogand(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator |(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = biglogor(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator ^(const Bignum &x) const
+    {   Bignum ans;
+        ans.vec() = biglogxor(this->val, x.vec());
+        return ans;
+    }
+
+    inline Bignum operator <<(int n) const
+    {   Bignum ans;
+        ans.vec() = bigleftshift(this->val, n);
+        return ans;
+    }
+
+    inline Bignum operator >>(int n) const
+    {   Bignum ans;
+        ans.vec() = bigrightshift(this->val, n);
+        return ans;
+    }
+
+    inline Bignum operator ~() const
+    {   Bignum ans;
+        ans.vec() = biglognot(this->val);
+        return ans;
+    }
+
+    inline bool operator ==(const Bignum &x) const
+    {   return bigeqn(this->val, x.vec());
+    }
+
+    inline bool operator >(const Bignum &x) const
+    {   return biggreaterp(this->val, x.vec());
+    }
+
+    inline bool operator >=(const Bignum &x) const
+    {   return biggeq(this->val, x.vec());
+    }
+
+    inline bool operator <(const Bignum &x) const
+    {   return biglessp(this->val, x.vec());
+    }
+
+    inline bool operator <=(const Bignum &x) const
+    {   return bigleq(this->val, x.vec());
+    }
+
+    inline void operator +=(const Bignum &x)
+    {   uint64_t * r = bigadd(val, x.vec());
+        free_bignum(val);
+        val = r;
+    }
+
+    inline void operator -=(const Bignum &x)
+    {   uint64_t * r = bigsubtract(val, x.vec());
+        free_bignum(val);
+        val = r;
+    }
+
+    inline void operator *=(const Bignum &x)
+    {   uint64_t * r = bigmultiply(val, x.vec());
+        free_bignum(val);
+        val = r;
+    }
+
+    inline void operator /=(const Bignum &x)
+    {   uint64_t * r = bigquotient(val, x.vec());
+        free_bignum(val);
+        val = r;
+    }
+
+    inline void operator %=(const Bignum &x)
+    {   uint64_t * r = bigremainder(val, x.vec());
+        free_bignum(val);
+        val = r;
+    } 
+
+    inline void operator &=(const Bignum &x)
+    {   uint64_t * r = biglogand(val, x.vec());
+        free_bignum(val);
+        val = r;
+    } 
+
+    inline void operator |=(const Bignum &x)
+    {   uint64_t * r = biglogor(val, x.vec());
+        free_bignum(val);
+        val = r;
+    } 
+
+    inline void operator ^=(const Bignum &x)
+    {   uint64_t * r = biglogxor(val, x.vec());
+        free_bignum(val);
+        val = r;
+    } 
+
+    inline void operator <<=(int n)
+    {   uint64_t * r = bigleftshift(val, n);
+        free_bignum(val);
+        val = r;
+    }
+
+    inline void operator >>=(int n)
+    {   uint64_t * r = bigrightshift(val, n);
+        free_bignum(val);
+        val = r;
+    }
+
+    inline Bignum operator ++()
+    {   uint64_t * r = bigadd_small(val, 1);
+        free_bignum(val);
+        val = r;
+        return *this;
+    }
+
+    inline Bignum operator ++(int)
+    {   uint64_t * r = bigadd_small(val, 1);
+        Bignum oldval;
+        oldval.vec() = val;
+        val = r;
+        return oldval;
+    }
+
+    inline Bignum operator --()
+    {   uint64_t * r = bigadd_small(val, -1);
+        free_bignum(val);
+        val = r;
+        return *this;
+    }
+
+    inline Bignum operator --(int)
+    {   uint64_t * r = bigadd_small(val, -1);
+        Bignum oldval;
+        oldval.vec() = val;
+        val = r;
+        return oldval;
+    }
+    
+    friend std::ostream & operator << (std::ostream &out, const Bignum &a)
+    {   std::ios_base::fmtflags fg = out.flags();
+        char *s;
+        if ((fg & std::ios_base::hex) != 0)
+            s = bignum_to_string_hex(a.vec());
+        else if ((fg & std::ios_base::oct) != 0)
+            s = bignum_to_string_octal(a.vec());
+        else if ((fg & std::ios_base::dec) != 0)
+            s = bignum_to_string(a.vec());
+        else if (radix::is_binary_output(out))
+            s = bignum_to_string_binary(a.vec());
+        else s = bignum_to_string(a.vec());
+        out << std::setw(string_size(s)) << string_data(s);
+        free_string(s);
+        return out;
+    }
+    friend std::istream & operator >> (std::istream &in, Bignum &a)
+    {   int64_t n;
+// What I really want to do is to read in a string of digits and then
+// use string_to_bignum().
+        in >> n;
+        a.vec() = int_to_bignum(n);
+        return in;
+    }
+};
+
+const char *to_string(Bignum x)
+{   return bignum_to_string(x.vec());
+}
+
+Bignum uniform_positive_bignum(size_t n)
+{   return Bignum(uniform_positive(n));
+}
+
+Bignum uniform_signed_bignum(size_t n)
+{   return Bignum(uniform_signed(n));
+}
+
+Bignum uniform_upto_bignum(Bignum a)
+{   return Bignum(uniform_upto(a.vec()));
+}
+
+Bignum random_upto_bits_bignum(size_t n)
+{   return Bignum(random_upto_bits(n));
+}
+
+Bignum square(const Bignum &x)
+{   Bignum ans;
+    ans.vec() = bigsquare(x.vec());
+    return ans;
+}
+
+Bignum pow(const Bignum &x, uint64_t n)
+{   Bignum ans;
+    ans.vec() = bigpow(x.vec(), n);
+    return ans;
+}
+
+Bignum pow(const Bignum &x, uint32_t n)
+{   return pow(x, (uint64_t)n);
+}
+
+//=========================================================================
+//=========================================================================
+// 
+//=========================================================================
+//=========================================================================
+
 
 #ifdef VSL
 
@@ -357,7 +1160,7 @@ static inline LispObject boxfloat(double a)
 
 #endif // VSL
 
-// Hmmmm. AT present I have a typedef "number_representation" that exists to
+// Hmmmm. AT present I have a typedef "uint64_t *" that exists to
 // abstract over C++-like and Lisp-like interfaces. I will want to change
 // things so as to remove that and use a Bignum class as the only leyer
 // above the raw data of vectors of 64-bit unsigned integers. But I will
@@ -377,7 +1180,7 @@ static inline LispObject boxfloat(double a)
 //      used to discard the most recently reserved unit. Well it will
 //      support v1=reserve(n1); v2=reserve(n2); abandon(v2);
 //      and then abandon(v1);
-//   number_representation_t confirm_size(uint64_t *p, size_t n, size_t final_n)
+//   uint64_t *_t confirm_size(uint64_t *p, size_t n, size_t final_n)
 //      The pointer p was as returned by reserve, but it is now known
 //      that just final_n words will be needed (this must be no larger than
 //      the number originally given. The effect can be somewhat as if a call
@@ -389,7 +1192,7 @@ static inline LispObject boxfloat(double a)
 //      confident that no other calls to reserve() have been made - this
 //      can help because it then "knows" that the memory involved is right
 //      at the fringe of active memory.
-//   number_representation_t confirm_size_x(uint64_t *p, size_t n, size_t final_n)
+//   uint64_t *_t confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 //      This behave just like confirm_size apart from the fact that it is to
 //      used in a context where two (or more) regions of memory have been
 //      reserved. This must be used on all but the last allocated one
@@ -401,30 +1204,31 @@ static inline LispObject boxfloat(double a)
 //      As a special case if two blocks are reserved and the second
 //      has its size confirmed as zero then the first one may use
 //      confirm_size rather than needing confirm_size_x.
-//   void free_bignum(number_representation p)
+//   void free_bignum(uint64_t * p)
 //      Release memory. In a Lisp system this will be a no-op because garbage
 //      collection will do the job. In a freestanding application this
 //      can use free().
 //
 // For strings (as returned when I want to prepare a bignum for printing)
-// I will use reserve as before and an effect is that the string will
+// I will use reserve_string() to reserve space before starting to generate
+// the characters that will fill it.
 // be built up within a block of memory that is a multiple of 8 bytes long.
 // Again there MAY be space left for a header. When I know exactly how many
 // characters are present I will confirm the exact size required:
 //
-//   string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
+//   char *confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 //       In this call n is the original size as used with reserve, so it
 //       measures in units of sizeof(uint64_t), while final_size is measured
 //       in BYTES and is the number of characters present. For native style
 //       strings this will add a '\0' as a terminator and use realloc to
 //       trim the size down to include just that.
-//   void free_string(string_representation s)
+//   void free_string(char *s)
 //       Release memory for the string.
 //
 // and finally for JUST the function "divide" I want
-//   cons_representation cons(number_representation a, number_representation b)
-//   number_representation car(cons_representation x)
-//   number_representation cdr(cons_representation x)
+//   cons_representation cons(uint64_t * a, uint64_t * b)
+//   uint64_t * car(cons_representation x)
+//   uint64_t * cdr(cons_representation x)
 
 // display() will show the internal representation of a bignum as a
 // sequence of hex values. This is obviously useful while debugging!
@@ -484,6 +1288,10 @@ static inline int nlz(uint64_t x)
 
 static inline size_t next_power_of_2(size_t n)
 {   return ((size_t)1) << (64-nlz((uint64_t)(n-1)));
+}
+
+static inline unsigned int log_next_power_of_2(size_t n)
+{   return (64-nlz((uint64_t)(n-1)));
 }
 
 // I am going to represent bignums as arrays of 64-bit digits.
@@ -836,11 +1644,11 @@ static inline int read_u3(const uint64_t *v, size_t n, size_t i)
 // This version has NOT BEEN TESTED YET and is really a place-holder for
 // when I try to use the code within my Lisp system!
 
-typedef LispObject number_representation;
+typedef LispObject uint64_t *;
 typedef LispObject string_representation;
 typedef LispObject cons_representation;
 
-size_t number_size(number_representation a)
+size_t number_size(uint64_t * a)
 {   return veclength(qheader(a))/sizeof(uint64_t);
 }
 
@@ -848,26 +1656,26 @@ size_t number_size(number_representation a)
 // indicated by the leader word that preceeds them having a length
 // field in it.
 
-size_t string_size(number_representation a)
+size_t string_size(uint64_t * a)
 {   return veclength(qheader(a));
 }
 
-uint64_t *number_data(number_representation a)
+uint64_t *number_data(uint64_t * a)
 {   return (uint64_t *)qbignum(a);
 }
 
-const char *string_data(string_representation a)
+const char *string_data(char *a)
 {   return (const char *)qstring(a);
 }
 
-number_representation &car(cons_representation a)
+uint64_t * &car(cons_representation a)
 {   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
-    return ((number_representation *)aw)[0];
+    return ((uint64_t * *)aw)[0];
 ]
 
-number_representation &cdr(cons_representation a)
+uint64_t * &cdr(cons_representation a)
 {   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
-    return ((number_representation *)w)[1];
+    return ((uint64_t * *)w)[1];
 ]
 
 // My representation has a header word that is an intptr_t stored 8 bytes
@@ -899,7 +1707,7 @@ uint64_t *reserve(size_t n)
     my_assert(memory_used <= MEMORY_SIZE);
 }
 
-cons_representation cons(number_representation a, number_representation b)
+cons_representation cons(uint64_t * a, uint64_t * b)
 {   uint64_t r = tagCONS + (uint64_t)&memory[memory_used];
     memory_used += 2;
     cons_representation c = (cons_representation)r;
@@ -988,15 +1796,11 @@ LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return (LispObject)&bignum_header(p) + tagATOM;
 }
 
-number_representation copy_if_no_garbage_collector(number_representation p)
-{   return p;
-}
-
-void free_bignum(number_representation p)
+void free_bignum(uint64_t * p)
 {
 }
 
-void free_string(string_representation p)
+void free_string(char *p)
 {
 }
 
@@ -1033,49 +1837,33 @@ void free_string(string_representation p)
 // enthusiastic adjustment when the size had changed significantly.
 // I could also look at all uses of free_bignum() and see if I was about to
 // perform a reserve() that could use the space released. This would
-// work particularly well with some cases of Bignum::operator= where the
+// work particularly well with some cases of operator= where the
 // bignum presently in the variable is at present discarded and could
 // instead often be recycled. If I make all memory blocks a power of 2 in
 // size I might consider a "buddy" scheme for managing them...
 
-typedef uint64_t *number_representation;
+typedef uint64_t *uint64_t *;
 typedef const char *string_representation;
 typedef struct _Cons
-{   number_representation car;
-    number_representation cdr;
+{   uint64_t * car;
+    uint64_t * cdr;
 } Cons, *cons_representation;
 
-size_t number_size(number_representation a)
+size_t number_size(uint64_t * a)
 {   return a[-1];
 }
 
-size_t string_size(string_representation a)
+size_t string_size(char *a)
 {   return strlen(a);
 }
 
-uint64_t *number_data(number_representation a)
+uint64_t *number_data(uint64_t * a)
 {   return a;
 }
 
-const char *string_data(string_representation a)
+const char *string_data(char *a)
 {   return a;
 }
-
-// The following are provided so that a user can update malloc_function,
-// realloc_function and free_function to refer to their own choice of
-// allocation technology.
-
-typedef void *malloc_t(size_t);
-typedef void *realloc_t(void *, size_t);
-typedef void free_t(void *);
-
-void *my_realloc(void *v, size_t n)
-{   return v;
-}
-
-malloc_t  *malloc_function = malloc;
-realloc_t *realloc_function = my_realloc;
-free_t    *free_function   = free;
 
 uint64_t *reserve(size_t n)
 {   my_assert(n > 0 && n < 10000,
@@ -1091,7 +1879,7 @@ void abandon(uint64_t *p)
     (*free_function)((void *)&p[-1]);
 }
 
-number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
+uint64_t *confirm_size(uint64_t *p, size_t n, size_t final_n)
 {   my_assert(final_n>0 && final_n<=n,
        [&]{ std::cout << "confirm_size final=" << final_n << " orig=" << n << std::endl; });
 //    printf("confirm_size %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
@@ -1103,7 +1891,7 @@ number_representation confirm_size(uint64_t *p, size_t n, size_t final_n)
     return &p[1];
 }
 
-number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
+uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 {   my_assert(final_n>0 && final_n<=n,
        [&]{ std::cout << "confirm_size_x" << final_n << " " << n << std::endl; });
 //    printf("confirm_size_x %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
@@ -1122,7 +1910,7 @@ number_representation confirm_size_x(uint64_t *p, size_t n, size_t final_n)
 // the number of data words in a bignum (not including the header) and
 // final_n measures the string in characters.
 
-string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
+char *confirm_size_string(uint64_t *p, size_t n, size_t final_n)
 {   my_assert(final_n>0 && final_n+1<(n+1)*sizeof(uint64_t),
        [&]{ std::cout << "confirm_size_string " << final_n << " " << n << std::endl; });
 //    printf("confirm_size_string %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
@@ -1146,28 +1934,19 @@ string_representation confirm_size_string(uint64_t *p, size_t n, size_t final_n)
     return cc;
 }
 
-number_representation copy_if_no_garbage_collector(number_representation p)
-{   if (p == (number_representation)0) return p;
-    size_t n = number_size(p);
-    uint64_t *d = number_data(p);
-    uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
-    return confirm_size(r, n, n);
-}
-
-void free_bignum(number_representation p)
+void free_bignum(uint64_t * p)
 {//   printf("[%d] free %p\n", ++counter, (void *)p);
-    if (p != (number_representation)0)
+    if (p != (uint64_t *)0)
         (*free_function)((void *)&p[-1]);
 }
 
-void free_string(string_representation p)
+void free_string(char *p)
 {//   printf("[%d] free %p\n", ++counter, (void *)p);
-    if ((number_representation)p != (number_representation)0)
+    if ((uint64_t *)p != (uint64_t *)0)
        (*free_function)((void *)p);
 }
 
-cons_representation cons(number_representation a, number_representation b)
+cons_representation cons(uint64_t * a, uint64_t * b)
 {   cons_representation r =
         (cons_representation)(*malloc_function)(sizeof(Cons));
     r->car = a;
@@ -1175,31 +1954,16 @@ cons_representation cons(number_representation a, number_representation b)
     return r;
 }
 
-number_representation car(cons_representation a)
+uint64_t *car(cons_representation a)
 {   return a->car;
 }
 
-number_representation cdr(cons_representation a)
+uint64_t *cdr(cons_representation a)
 {   return a->cdr;
 }
 
 #endif // VSL
 
-// When I use Bignums that are allocated using malloc() and operated on
-// via C++ overloaded operators I often need to copy the data. However when
-// memory management uses garbage collection I can allow multiple references
-// to the same object and so copying is not needed as much. This copies
-// in the cases where that is relevant.
-
-// This version ALWAYS creates a fresh copy of the Bignum.
-
-number_representation always_copy_bignum(number_representation p)
-{   size_t n = number_size(p);
-    uint64_t *d = number_data(p);
-    uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &d[-1], (n+1)*sizeof(uint64_t));
-    return confirm_size(r, n, n);
-}
 
 
 //=========================================================================
@@ -1306,7 +2070,8 @@ void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
     while (lenr!=1 && r[lenr-1] == 0 && positive(r[lenr-2])) lenr--;
 }
 
-number_representation uniform_positive(size_t n)
+uint64_t *uniform_positive(size_t n)
+uint64_t *uniform_positive(size_t n)
 {   size_t lenr = (n + 63)/64;
     if (lenr == 0) lenr = 1; // special case!
     size_t save = lenr;
@@ -1336,7 +2101,7 @@ void uniform_signed(uint64_t *r, size_t &lenr, size_t bits)
     }
 }
 
-number_representation uniform_signed(size_t n)
+uintptr_t uniform_signed(size_t n)
 {   size_t lenr = n/64+1;
     size_t save = lenr;
     uint64_t *r = reserve(lenr);
@@ -1364,7 +2129,10 @@ void uniform_upto(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     }
 }
 
-number_representation uniform_upto(number_representation aa)
+uint64_t *uniform_positive(size_t n)
+uintptr_t uniform_signed(size_t n)
+uint64_t *uniform_upto(uint64_t * aa)
+uint64_t *uniform_upto(uint64_t * aa)
 {   size_t lena = number_size(aa);
     uint64_t *a = number_data(aa);
     uint64_t *r = reserve(lena);
@@ -1398,7 +2166,7 @@ void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
     my_assert(!negative(r[lenr-1]));
 }
 
-number_representation random_upto_bits(size_t bits)
+uint64_t *random_upto_bits(size_t bits)
 {   size_t m = 1+bits/64;
     if (m == 0) m = 1;
     uint64_t *r = reserve(m);
@@ -1426,7 +2194,7 @@ static inline void int_to_bignum(int64_t n, uint64_t *r)
 {   r[0] = (uint64_t)n;
 }
 
-number_representation int_to_bignum(int64_t n)
+uint64_t *int_to_bignum(int64_t n)
 {   uint64_t *r = reserve(1);
     int_to_bignum(n, r);
     return confirm_size(r, 1, 1);
@@ -1441,7 +2209,7 @@ static inline void unsigned_int_to_bignum(uint64_t n, uint64_t *r, size_t &lenr)
     else lenr = 1;
 }
 
-number_representation unsigned_int_to_bignum(uint64_t n)
+uint64_t *unsigned_int_to_bignum(uint64_t n)
 {   size_t w = (negative(n) ? 2 : 1);
     uint64_t *r = reserve(w);
     size_t lenr;
@@ -1459,7 +2227,7 @@ static inline void truncate_negative(const uint64_t *r, size_t &n)
 {   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
 }
 
-number_representation string_to_bignum(const char *s)
+uint64_t *string_to_bignum(const char *s)
 {   bool sign = false;
     if (*s == '-')
     {   sign = true;
@@ -1585,7 +2353,7 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // internal debugging because at times I work with values that are known
 // to be positive and so where the top digit must be treated as unsigned...
 
-string_representation bignum_to_string(const uint64_t *a, size_t lena,
+char *bignum_to_string(const uint64_t *a, size_t lena,
                                        bool as_unsigned=false)
 {
 // Making the value zero a special case simplifies things later on!
@@ -1669,7 +2437,7 @@ string_representation bignum_to_string(const uint64_t *a, size_t lena,
     return confirm_size_string(r, m, len);
 }
 
-string_representation bignum_to_string(number_representation aa)
+char *bignum_to_string(uint64_t * aa)
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
     return bignum_to_string(a, n);
@@ -1677,7 +2445,7 @@ string_representation bignum_to_string(number_representation aa)
 
 // As well as converting to decimal I can do hex, octal or binary!
 
-string_representation bignum_to_string_hex(number_representation aa)
+char *bignum_to_string_hex(uint64_t * aa)
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
 // Making the value zero a special case simplifies things later on!
@@ -1727,7 +2495,7 @@ string_representation bignum_to_string_hex(number_representation aa)
     return confirm_size_string(r, nn, m);
 }
 
-string_representation bignum_to_string_octal(number_representation aa)
+char *bignum_to_string_octal(uint64_t * aa)
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
     size_t width = (64*n + 2)/3; // raw number of octal digits needed.
@@ -1757,7 +2525,7 @@ string_representation bignum_to_string_octal(number_representation aa)
     return confirm_size_string(r, nn, width);
 }
 
-string_representation bignum_to_string_binary(number_representation aa)
+char *bignum_to_string_binary(uint64_t * aa)
 {   size_t n = number_size(aa);
     uint64_t *a = number_data(aa);
 // Making the value zero a special case simplifies things later on!
@@ -1820,7 +2588,7 @@ bool bigeqn(const uint64_t *a, size_t lena,
     return std::memcmp(a, b, lena*sizeof(uint64_t)) == 0;   
 }
 
-bool bigeqn(number_representation a, number_representation b)
+bool bigeqn(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     return bigeqn(number_data(a), na, number_data(b), nb);
@@ -1851,7 +2619,7 @@ bool biggreaterp(const uint64_t *a, size_t lena,
     }
 }
 
-bool biggreaterp(number_representation a, number_representation b)
+bool biggreaterp(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     return biggreaterp(number_data(a), na, number_data(b), nb);
@@ -1877,7 +2645,7 @@ bool biggeq(const uint64_t *a, size_t lena,
     }
 }
 
-bool biggeq(number_representation a, number_representation b)
+bool biggeq(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     return biggeq(number_data(a), na, number_data(b), nb);
@@ -1890,7 +2658,7 @@ bool biglessp(const uint64_t *a, size_t lena,
 {   return biggreaterp(b, lenb, a, lena);
 }
 
-bool biglessp(number_representation a, number_representation b)
+bool biglessp(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     return biglessp(number_data(a), na, number_data(b), nb);
@@ -1903,7 +2671,7 @@ bool bigleq(const uint64_t *a, size_t lena,
 {   return biggeq(b, lenb, a, lena);
 }
 
-bool bigleq(number_representation a, number_representation b)
+bool bigleq(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     return bigleq(number_data(a), na, number_data(b), nb);
@@ -1936,7 +2704,7 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-number_representation bignegate(number_representation a)
+uint64_t *bignegate(uint64_t * a)
 {   size_t n = number_size(a);
     uint64_t *p = reserve(n+1);
     size_t final_n;
@@ -1953,7 +2721,7 @@ static void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-number_representation biglognot(number_representation a)
+uintptr_t biglognot(uint64_t * a)
 {   size_t n = number_size(a);
     uint64_t *p = reserve(n+1);
     size_t final_n;
@@ -1979,7 +2747,7 @@ void biglogand(const uint64_t *a, size_t lena,
     else return ordered_biglogand(b, lenb, a, lena, r, lenr);
 }
 
-number_representation biglogand(number_representation a, number_representation b)
+uintptr_t biglogand(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
@@ -2009,7 +2777,7 @@ void biglogor(const uint64_t *a, size_t lena,
     else return ordered_biglogor(b, lenb, a, lena, r, lenr);
 }
 
-number_representation biglogor(number_representation a, number_representation b)
+uintptr_t biglogor(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
@@ -2046,7 +2814,7 @@ void biglogxor(const uint64_t *a, size_t lena,
     else return ordered_biglogxor(b, lenb, a, lena, r, lenr);
 }
 
-number_representation biglogxor(number_representation a, number_representation b)
+uintptr_t biglogxor(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
@@ -2094,9 +2862,9 @@ void bigleftshift(const uint64_t *a, size_t lena,
     
 }
 
-extern number_representation bigrightshift(number_representation a, int n);
+extern uint64_t * bigrightshift(uint64_t * a, int n);
 
-number_representation bigleftshift(number_representation a, int n)
+uint64_t *bigleftshift(uint64_t *a, int n)
 {   if (n == 0) return copy_if_no_garbage_collector(a);
     else if (n < 0) return bigrightshift(a, -n);
     size_t na = number_size(a);
@@ -2136,7 +2904,7 @@ void bigrightshift(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-number_representation bigrightshift(number_representation a, int n)
+uintptr_t bigrightshift(uint64_t * a, int n)
 {   if (n == 0) return copy_if_no_garbage_collector(a);
     else if (n < 0) return bigleftshift(a, -n);
     size_t na = number_size(a);
@@ -2197,7 +2965,7 @@ void bigadd(const uint64_t *a, size_t lena,
     else return ordered_bigadd(b, lenb, a, lena, r, lenr);
 }
 
-number_representation bigadd(number_representation a, number_representation b)
+uintptr_t bigadd(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
@@ -2209,7 +2977,7 @@ number_representation bigadd(number_representation a, number_representation b)
     return confirm_size(p, n, final_n);
 }
 
-number_representation bigadd_small(number_representation a, int64_t b)
+uintptr_t bigadd_small(uint64_t * a, int64_t b)
 {   size_t na = number_size(a);
     uint64_t *p = reserve(na+1);
     size_t final_n;
@@ -2302,7 +3070,7 @@ void bigsubtract(const uint64_t *a, size_t lena,
     else return ordered_bigrevsubtract(b, lenb, a, lena, r, lenr);
 }
 
-number_representation bigsubtract(number_representation a, number_representation b)
+uintptr_t bigsubtract(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
@@ -2314,7 +3082,7 @@ number_representation bigsubtract(number_representation a, number_representation
     return confirm_size(p, n, final_n);
 }
 
-number_representation bigrevsubtract(number_representation a, number_representation b)
+uintptr_t bigrevsubtract(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
@@ -2380,7 +3148,7 @@ void bigmultiply(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-number_representation bigmultiply(number_representation a, number_representation b)
+uintptr_t bigmultiply(uint64_t * a, uint64_t * b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n = na+nb;
@@ -2449,7 +3217,7 @@ void bigsquare(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-number_representation bigsquare(number_representation a)
+uintptr_t bigsquare(uint64_t * a)
 {   size_t na = number_size(a);
     size_t n = 2*na;
     uint64_t *p = reserve(n);
@@ -2502,7 +3270,7 @@ void bigpow(const uint64_t *a, size_t lena, uint64_t n,
 // with my_assert() statements rather than any comfortable scheme for reporting
 // the trouble.
 
-number_representation bigpow(number_representation aa, uint64_t n)
+uintptr_t bigpow(uint64_t * aa, uint64_t n)
 {   if (n == 0)
     {   uint64_t *r = reserve(0);
         r[0] = 1;
@@ -3016,7 +3784,7 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
     else truncate_positive(a, lena);
 }
 
-number_representation bigquotient(number_representation aa, number_representation bb)
+uintptr_t bigquotient(uint64_t * aa, uint64_t * bb)
 {   size_t lena = number_size(aa);
     uint64_t *a = number_data(aa);
     size_t lenb = number_size(bb);
@@ -3029,7 +3797,7 @@ number_representation bigquotient(number_representation aa, number_representatio
     return confirm_size(q, olenq, lenq);
 }
 
-number_representation bigremainder(number_representation aa, number_representation bb)
+uintptr_t bigremainder(uint64_t * aa, uint64_t * bb)
 {   size_t lena = number_size(aa);
     uint64_t *a = number_data(aa);
     size_t lenb = number_size(bb);
@@ -3042,7 +3810,7 @@ number_representation bigremainder(number_representation aa, number_representati
     return confirm_size(r, olenr, lenr);
 }
 
-cons_representation bigdivide(number_representation aa, number_representation bb)
+cons_representation bigdivide(uint64_t * aa, uint64_t * bb)
 {   size_t lena = number_size(aa);
     uint64_t *a = number_data(aa);
     size_t lenb = number_size(bb);
@@ -3052,8 +3820,8 @@ cons_representation bigdivide(number_representation aa, number_representation bb
     division(a, lena, b, lenb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
-    number_representation rr = confirm_size(r, olenr, lenr);
-    number_representation qq = confirm_size_x(q, olenq, lenq);
+    uint64_t * rr = confirm_size(r, olenr, lenr);
+    uint64_t * qq = confirm_size_x(q, olenq, lenq);
     return cons(qq, rr);
 }
 
@@ -3104,366 +3872,6 @@ namespace std
 
 //=========================================================================
 //=========================================================================
-// I have a class Bignum that wraps up the representation of a number
-// and then allows me to overload most operators so that big numbers can be
-// used in C++ code anmost as if they were a natural proper type. The main
-// big oddity will be that to denote a Bignum literal it will be necessary
-// to use a constructor, with obvious constructors accepting integers of up
-// to 64-bits and a perhaps less obvious one taking a string that is the
-// decimal denotation of the integer concerned.
-//=========================================================================
-//=========================================================================
-
-class Bignum
-{
-public:
-    number_representation val;
-// A default constructor build a Bignum with no stored data.
-    Bignum()
-    {   val = (number_representation)0;
-    }
-    ~Bignum()
-    {   free_bignum(val);
-        val = (number_representation)0;
-    }
-    Bignum(int32_t n)
-    {   val = int_to_bignum((int64_t)n);
-    }
-    Bignum(int64_t n)
-    {   val = int_to_bignum(n);
-    }
-    Bignum(const char *s)
-    {   val = string_to_bignum(s);
-    }
-    Bignum(const Bignum &a)
-    {   val = copy_if_no_garbage_collector(a.val);
-    }
-
-    void operator = (const Bignum &x)
-    {   if (this == &x) return; // assign to self - a silly case!
-        if (val != (number_representation)0) free_bignum(val);
-        val = copy_if_no_garbage_collector(x.val);
-    }
-
-    void operator = (const int64_t x)
-    {   if (val != (number_representation)0) free_bignum(val);
-        val = int_to_bignum(x);
-    }
-
-    void operator = (const uint64_t x)
-    {   if (val != (number_representation)0) free_bignum(val);
-        val = unsigned_int_to_bignum(x);
-    }
-
-    void operator = (const int32_t x)
-    {   if (val != (number_representation)0) free_bignum(val);
-        val = int_to_bignum((int64_t)x);
-    }
-
-    void operator = (const uint32_t x)
-    {   if (val != (number_representation)0) free_bignum(val);
-        val = int_to_bignum((int64_t)x);
-    }
-
-    void operator = (const char *x)
-    {   if (val != (number_representation)0) free_bignum(val);
-        val = string_to_bignum(x);
-    }
-
-    bool operator ==(const Bignum &x) const;
-    bool operator > (const Bignum &x) const;
-    bool operator >=(const Bignum &x) const;
-    bool operator < (const Bignum &x) const;
-    bool operator <=(const Bignum &x) const;
-
-    Bignum operator + (const Bignum &x) const;
-    Bignum operator - (const Bignum &x) const;
-    Bignum operator * (const Bignum &x) const;
-    Bignum operator / (const Bignum &x) const;
-    Bignum operator % (const Bignum &x) const;
-    Bignum operator - () const;
-
-
-    Bignum operator & (const Bignum &x) const;
-    Bignum operator | (const Bignum &x) const;
-    Bignum operator ^ (const Bignum &x) const;
-    Bignum operator ~ () const;
-
-    Bignum operator >> (int n) const;
-    Bignum operator << (int n) const;
-
-    void operator += (const Bignum &x);
-    void operator -= (const Bignum &x);
-    void operator *= (const Bignum &x);
-    void operator /= (const Bignum &x);
-    void operator %= (const Bignum &x);
-
-    void operator &= (const Bignum &x);
-    void operator |= (const Bignum &x);
-    void operator ^= (const Bignum &x);
-
-    void operator >>= (int n);
-    void operator <<= (int n);
-
-    Bignum operator ++();
-    Bignum operator ++(int);
-    Bignum operator --();
-    Bignum operator --(int);
-
-    friend std::ostream & operator << (std::ostream &out, const Bignum &a)
-    {   std::ios_base::fmtflags fg = out.flags();
-        string_representation s;
-        if ((fg & std::ios_base::hex) != 0)
-            s = bignum_to_string_hex(a.val);
-        else if ((fg & std::ios_base::oct) != 0)
-            s = bignum_to_string_octal(a.val);
-        else if ((fg & std::ios_base::dec) != 0)
-            s = bignum_to_string(a.val);
-        else if (radix::is_binary_output(out))
-            s = bignum_to_string_binary(a.val);
-        else s = bignum_to_string(a.val);
-        out << std::setw(string_size(s)) << string_data(s);
-        free_string(s);
-        return out;
-    }
-    friend std::istream & operator >> (std::istream &in, Bignum &a)
-    {   int64_t n;
-// What I really want to do is to read in a string of digits and then
-// use string_to_bignum().
-        in >> n;
-        a.val = int_to_bignum(n);
-        return in;
-    }
-};
-
-const char *to_string(Bignum x)
-{   return bignum_to_string(x.val);
-}
-
-Bignum uniform_positive_bignum(size_t n)
-{   Bignum r;
-    r.val = uniform_positive(n);
-    return r;
-}
-
-Bignum uniform_signed_bignum(size_t n)
-{   Bignum r;
-    r.val = uniform_signed(n);
-    return r;
-}
-
-Bignum uniform_upto_bignum(Bignum a)
-{   Bignum r;
-    r.val = uniform_upto(a.val);
-    return r;
-}
-
-Bignum random_upto_bits_bignum(size_t n)
-{   Bignum r;
-    r.val = random_upto_bits(n);
-    return r;
-}
-
-inline Bignum Bignum::operator +(const Bignum &x) const
-{   Bignum ans;
-    ans.val = bigadd(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator -(const Bignum &x) const
-{   Bignum ans;
-    ans.val = bigsubtract(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator *(const Bignum &x) const
-{   Bignum ans;
-    ans.val = bigmultiply(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator /(const Bignum &x) const
-{   Bignum ans;
-    ans.val = bigquotient(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator %(const Bignum &x) const
-{   Bignum ans;
-    ans.val = bigremainder(this->val, x.val);
-    return ans;
-}
-
-Bignum square(const Bignum &x)
-{   Bignum ans;
-    ans.val = bigsquare(x.val);
-    return ans;
-}
-
-Bignum pow(const Bignum &x, uint64_t n)
-{   Bignum ans;
-    ans.val = bigpow(x.val, n);
-    return ans;
-}
-
-Bignum pow(const Bignum &x, uint32_t n)
-{   return pow(x, (uint64_t)n);
-}
-
-inline Bignum Bignum::operator -() const
-{   Bignum ans;
-    ans.val = bignegate(this->val);
-    return ans;
-}
-
-inline Bignum Bignum::operator &(const Bignum &x) const
-{   Bignum ans;
-    ans.val = biglogand(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator |(const Bignum &x) const
-{   Bignum ans;
-    ans.val = biglogor(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator ^(const Bignum &x) const
-{   Bignum ans;
-    ans.val = biglogxor(this->val, x.val);
-    return ans;
-}
-
-inline Bignum Bignum::operator <<(int n) const
-{   Bignum ans;
-    ans.val = bigleftshift(this->val, n);
-    return ans;
-}
-
-inline Bignum Bignum::operator >>(int n) const
-{   Bignum ans;
-    ans.val = bigrightshift(this->val, n);
-    return ans;
-}
-
-inline Bignum Bignum::operator ~() const
-{   Bignum ans;
-    ans.val = biglognot(this->val);
-    return ans;
-}
-
-inline bool Bignum::operator ==(const Bignum &x) const
-{   return bigeqn(this->val, x.val);
-}
-
-inline bool Bignum::operator >(const Bignum &x) const
-{   return biggreaterp(this->val, x.val);
-}
-
-inline bool Bignum::operator >=(const Bignum &x) const
-{   return biggeq(this->val, x.val);
-}
-
-inline bool Bignum::operator <(const Bignum &x) const
-{   return biglessp(this->val, x.val);
-}
-
-inline bool Bignum::operator <=(const Bignum &x) const
-{   return bigleq(this->val, x.val);
-}
-
-inline void Bignum::operator +=(const Bignum &x)
-{   number_representation r = bigadd(val, x.val);
-    free_bignum(val);
-    val = r;
-}
-
-inline void Bignum::operator -=(const Bignum &x)
-{   number_representation r = bigsubtract(val, x.val);
-    free_bignum(val);
-    val = r;
-}
-
-inline void Bignum::operator *=(const Bignum &x)
-{   number_representation r = bigmultiply(val, x.val);
-    free_bignum(val);
-    val = r;
-}
-
-inline void Bignum::operator /=(const Bignum &x)
-{   number_representation r = bigquotient(val, x.val);
-    free_bignum(val);
-    val = r;
-}
-
-inline void Bignum::operator %=(const Bignum &x)
-{   number_representation r = bigremainder(val, x.val);
-    free_bignum(val);
-    val = r;
-} 
-
-inline void Bignum::operator &=(const Bignum &x)
-{   number_representation r = biglogand(val, x.val);
-    free_bignum(val);
-    val = r;
-} 
-
-inline void Bignum::operator |=(const Bignum &x)
-{   number_representation r = biglogor(val, x.val);
-    free_bignum(val);
-    val = r;
-} 
-
-inline void Bignum::operator ^=(const Bignum &x)
-{   number_representation r = biglogxor(val, x.val);
-    free_bignum(val);
-    val = r;
-} 
-
-inline void Bignum::operator <<=(int n)
-{   number_representation r = bigleftshift(val, n);
-    free_bignum(val);
-    val = r;
-}
-
-inline void Bignum::operator >>=(int n)
-{   number_representation r = bigrightshift(val, n);
-    free_bignum(val);
-    val = r;
-}
-
-inline Bignum Bignum::operator ++()
-{   number_representation r = bigadd_small(val, 1);
-    free_bignum(val);
-    val = r;
-    return *this;
-}
-
-inline Bignum Bignum::operator ++(int)
-{   number_representation r = bigadd_small(val, 1);
-    Bignum oldval;
-    oldval.val = val;
-    val = r;
-    return oldval;
-}
-
-inline Bignum Bignum::operator --()
-{   number_representation r = bigadd_small(val, -1);
-    free_bignum(val);
-    val = r;
-    return *this;
-}
-
-inline Bignum Bignum::operator --(int)
-{   number_representation r = bigadd_small(val, -1);
-    Bignum oldval;
-    oldval.val = val;
-    val = r;
-    return oldval;
-}
-
-//=========================================================================
-//=========================================================================
 // Testing and demonstration code.
 //=========================================================================
 //=========================================================================
@@ -3471,7 +3879,7 @@ inline Bignum Bignum::operator --(int)
 
 #ifdef TEST
 
-void display(const char *label, number_representation a)
+void display(const char *label, uint64_t * a)
 {   
     const uint64_t *d = number_data(a);
     size_t len = number_size(a);
@@ -3485,7 +3893,7 @@ void display(const char *label, number_representation a)
 }
 
 void display(const char *label, const Bignum &a)
-{   display(label, a.val);
+{   display(label, a.vec());
 }
 
 
@@ -3602,6 +4010,5 @@ int main(int argc, char *argv[])
 // End of everything.
 //=========================================================================
 //=========================================================================
-
 
 // end of arith.cpp
