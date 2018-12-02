@@ -54,6 +54,7 @@ However, if the user can modify these flags, then how do I get control over them
 *** TODO Make the new locations unambigous roots
 *** TODO Load symbols when starting from image
 *** TODO Save the state of the thread_local variables to the image
+*** TODO Keep fluids in a global store, to load them on new threads
 **** Might help that we should always join all threads before closing so only the start thread matters
 **** However need to scan all symbols and put values back
 
@@ -90,3 +91,5 @@ treat value cell as ambiguous?
 look for global in gc?
 use fixnum?
 
+
+implement harness to bisect
