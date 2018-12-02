@@ -1,6 +1,14 @@
 // Big-number arithmetic.                                  A C Norman, 2018
 
 
+
+// TODO:
+//   gcdn, lcmn
+//   float, floor, ceil, fix
+//   isqrt
+//   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
+
+
 /**************************************************************************
  * Copyright (C) 2018, Codemist.                         A C Norman       *
  *                                                                        *
@@ -37,10 +45,13 @@
 // for arithmetic within a Lisp at all easily, for instance because of
 // the storage management arangements used.
 //
-// The code uses 64-bit digits and a 2s complement representation for
+// This code uses 64-bit digits and a 2s complement representation for
 // negative numbers. This means it will work best on 64-bit platforms
 // (which by now are by far the most important), and it provides bitwise
-// logical operations (logand and logor) as well as arithmetic.
+// logical operations (logand and logor) as well as arithmetic. It will work
+// best where the C++ compiler supports a 128-bit integral type, but does not
+// need that. It should work on 32-bit systems as well, although one should
+// expect performance there to be lower.
 //
 // I will provide two levels of access and abstraction. At the low level
 // a big number is represented as and array of uint64_t digits along with
@@ -69,7 +80,10 @@
 // string representation of a number, with hex, decimal, octal and binary
 // variants). Space for the string will be allocated using reserve_string()
 // and finalized using confirm_size_string(), with both of those indicating
-// sized in bytes. 
+// sizes in bytes. Note that when you reserve or confirm string size the length
+// quoted is the number of characters that will be present excluding any
+// header or termination markers - reserve_tring() will allow for the needs
+// of suchlike.
 //
 // A higher level packaging represents numbers using a class Bignum. This
 // has just one field which will hold a potentially encoded version of a
@@ -78,8 +92,13 @@
 // uint64_t values representing the numeric value. The representation of the
 // header and the encoding of the pointer will be done in one of several
 // ways, these being intended to provide models of the implementation intended
-// for different use cases. The issue of disposing of strings returned by
-// the conversion routines is scheme dependent and is described below.
+// for different use cases.
+// In some cases (especially the NEW one) small integers are handled
+// specially to improve efficiency.
+// There are other support functions which will be described where they
+// are defined or used.
+
+
 //
 //These cases are included in this file using conditional compilation:
 //
@@ -179,20 +198,24 @@
 //   the string will be NUL padded.
 
 
-// If TEST is defined then this file becomes a self-contained one with
-// a few demonstration and test examples at the end.
+// I provide a default configuration, but by predefining one of the
+// symbols allow other versions to be built.
 
+#if !defined MALLOC && !defined NEW && !defined LISP
 #define NEW  1
+#endif
+
+
+// If TEST is defined then this file becomes a self-contained one with
+// a few demonstration and test examples at the end. Soon I will migrate this
+// stuff to a file arithtest.cpp, but before I can do that I will need
+// to have a header file that declares all the external functions etc
+// that I will need.
+
 #define TEST 1
 
 
 
-
-// TODO:
-//   gcdn, lcmn
-//   float, floor, ceil, fix
-//   isqrt
-//   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
 
 
 
@@ -225,7 +248,7 @@
 
 // my_abort() mainly exists so I can set a breakpoint on it! Setting one
 // on the system abort() function sometimes does not give me as much help
-// as I might have hoped on at le4ast some platforms, while a break-point
+// as I might have hoped on at least some platforms, while a break-point
 // on my_abort() does what I expect.
 
 static void my_abort(const char *msg)
@@ -241,15 +264,17 @@ static void my_abort()
 template <typename F>
 static inline void my_assert(bool ok, F&& action)
 {
-// Use this as in
+// Use this as in:
 //     my_assert(predicate, [&]{...});
 // where the "..." is an arbitrary sequence of actions to be taken
-// if the assertion fails.
+// if the assertion fails. The action will typically be to display
+// extra information about what went wrong.
     if (!ok) { action(); my_abort(); }
 }
 
 static inline void my_assert(bool ok)
 {
+// For simple use where a customised message is not required:
 //     my_assert(predicate);
     if (!ok) { std::cout << "my_assert failure" << std::endl; my_abort(); }
 }
@@ -278,15 +303,48 @@ static inline void logprintf(const char *fmt, ...)
 
 //=========================================================================
 //=========================================================================
-// I have a class Bignum that wraps up the representation of a number
-// and then allows me to overload most operators so that big numbers can be
-// used in C++ code anmost as if they were a natural proper type. The main
-// big oddity will be that to denote a Bignum literal it will be necessary
-// to use a constructor, with obvious constructors accepting integers of up
-// to 64-bits and a perhaps less obvious one taking a string that is the
-// decimal denotation of the integer concerned.
+// I want to make C++ output using the "<<" operator on an ostream cope
+// with big numbers. Doing so makes their use much smoother. The particular
+// aspect of this addresses here is the provision of an IO manipulator
+// called "std::bin" that sets for binary display of bignums (bit not of
+// other integer types).
 //=========================================================================
 //=========================================================================
+
+struct radix
+{
+public:
+// I would like setting hex or oct or dec to disable this, but at present
+// I do not know how to do that. So I will arrange that binary output is
+// only generated if none of those flags are set, because I can clear
+// them here. Then when I restore one of them I disable the test for binary.
+// I will arrange that if nobody has ever asked for binary they do not get it,
+// just so I feel safe.
+    static void set_binary_output(std::ios_base &s)
+    {   flag(s) = 1;
+        s.unsetf(std::ios_base::dec);
+        s.unsetf(std::ios_base::oct);
+        s.unsetf(std::ios_base::hex);
+    }
+    static bool is_binary_output(std::ios_base &s)
+    {   return flag(s) != 0;
+    }
+private:
+    static long & flag(std::ios_base &s)
+    {   static int n = std::ios_base::xalloc();
+        return s.iword(n);
+    }
+};
+
+// I want a new io manipulator "std::bin" to select binary mode output.
+// This will be used much as std::oct, std::dec and std::hex.
+
+namespace std
+{   std::ostream &bin(std::ostream &os)
+    {   radix::set_binary_output(os);
+        return os;
+    }
+}
 
 extern uint64_t *reserve(size_t n);
 extern intptr_t confirm_size(uint64_t *p, size_t n, size_t final);
@@ -295,18 +353,27 @@ extern void abandon(intptr_t *p);
 
 extern char *reserve_string(size_t n);
 extern char *confirm_size_string(char *p, size_t n, size_t final);
+extern size_t string_size(char *s);
+extern void abandon_string(char *s);
 
 extern intptr_t vector_to_handle(uint64_t *p);
 extern uint64_t *vector_of_handle(intptr_t n);
 extern size_t number_size(uint64_t *p);
 
+extern bool fits_into_fixnum(int64_t n);
+extern intptr_t int_to_handle(int64_t n);
+extern int64_t int_to_handle(intptr_t n);
 
 
 #if defined MALLOC
 
+//=========================================================================
+//=========================================================================
 // The MALLOC option is perhaps the simplest! It uses C style
 // malloc/realloc and free functions and the vector if turned into a
 // handle by just casting it to an intptr_t value.
+//=========================================================================
+//=========================================================================
 
 
 // The following are provided so that a user can update malloc_function,
@@ -346,7 +413,7 @@ inline void abandon(uint64_t *p)
 }
 
 inline char *reserve_string(size_t n)
-{   char *r = (char *)(*malloc_function)(n);
+{   char *r = (char *)(*malloc_function)(n+1);
     my_assert(r != NULL);
     return r;
 }
@@ -360,6 +427,10 @@ inline char *reserve_string(size_t n)
 inline char *confirm_size_string(char *p, size_t n, size_t final)
 {   r[final] = 0;
     return r;
+}
+
+intline void abandon_string(char *s)
+{   (*free_function)(s);
 }
 
 // In the C/malloc model I will represent a number by the intptr_t style
@@ -399,16 +470,30 @@ intptr_t copy_if_no_garbage_collector(uint64_t *p)
     return confirm_size(r, n, n);
 }
 
+intptr_t copy_if_no_garbage_collector(intptr_t pp)
+{   uint64_t *p = vector_of_handle(pp);
+    size_t n = number_size(p);
+    uint64_t *r = reserve(n);
+    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
 #elif defined NEW
 
+//=========================================================================
+//=========================================================================
 // The NEW code is intended to be a reasonably sensible implementation for
 // use of thie code free-standing within C++. Memory is allocated in units
 // whose size is a power of 2, and I keep track of memory that I have used
 // and discarded so that I do not need to go back to the system-provided
 // allocator too often.
+//=========================================================================
+//=========================================================================
 
 
 static unsigned int log_next_power_of_2(size_t n);
+
+static uint64_t *freechain_table[64];
 
 class freechains
 {
@@ -417,7 +502,6 @@ public:
 // be created as the program starts up and particularly so that it will
 // then be deleted on program termination. Its destructor can free all the
 // memory that it is keeping track of.
-    static uint64_t *freechain_table[64];
     freechains()
     {   for (size_t i=0; i<64; i++) freechain_table[i] = NULL;
     }
@@ -461,7 +545,10 @@ public:
     }
 };
 
-// Set up the object that contains the freechains.
+// Set up the object that manages the freechains. At program startup this
+// fills freechain_table with NULL entries, and at the end of execution
+// it frees all the memory blocks mentioned there.
+
 static freechains fc;
 
 inline uint64_t *reserve(size_t n)
@@ -469,7 +556,11 @@ inline uint64_t *reserve(size_t n)
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{
+{   if (final == 1 && fits_into_fixnum((int64_t)p[0]))
+    {   intptr_t r = int_to_handle((int64_t)p[0]);
+        fc.abandon(p);
+        return r;
+    }
 // I compare the final size with the capacity and if it is a LOT smaller
 // I allocate a new smaller block and copy the data across.
 // That situation can most plausibly arise when two similar-values big
@@ -536,7 +627,7 @@ inline void abandon(intptr_t p)
 }
 
 inline char *reserve_string(size_t n)
-{    return new char[n];
+{    return new char[n+1];
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
@@ -544,9 +635,26 @@ inline char *confirm_size_string(char *p, size_t n, size_t final)
     return p;
 }
 
-#define fixnum_dispatch1(name, a1)                                 \
-    if (stored_as_fixnum(a1)) return name##_i(int_of_handle(a1));  \
+inline void abandon_string(char *s)
+{   delete s;
+}
+
+// In the NEW case I will want to make all operations cope with both
+// shorter integers (up to 63 bits) stored as the "handle", or genuine
+// big numbers where the handle yields a pointer to a vector of 64-bit
+// words. I do this by arranging that each operation provides several
+// functions systematically names as op_ii, op_ib, op_bi and op_bb where
+// "op" stands for the name of the operation and the suffix indicates
+// argument types. 
+//
+
+#define fixnum_dispatch1(name, a1)                                         \
+    if (stored_as_fixnum(a1)) return name##_i(int_of_handle(a1));          \
     else return name##_b(vector_of_handle(a1));
+
+#define fixnum_dispatch2n(name, a1, n)                             \
+    if (stored_as_fixnum(a1)) return name##_i(int_of_handle(a1, n));       \
+    else return name##_b(vector_of_handle(a1, n));
 
 #define fixnum_dispatch2(name, a1, a2)                                     \
     if (stored_as_fixnum(a1))                                              \
@@ -565,8 +673,9 @@ intptr_t always_copy_bignum(uint64_t *p)
     return confirm_size(r, n, n);
 }
 
-intptr_t copy_if_no_garbage_collector(uint64_t *p)
-{   size_t n = ((uint32_t *)(&p[-1]))[1];
+intptr_t copy_if_no_garbage_collector(intptr_t pp)
+{   uint64_t *p = vector_of_handle(pp);
+    size_t n = number_size(p);
     uint64_t *r = reserve(n);
     std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
     return confirm_size(r, n, n);
@@ -574,6 +683,8 @@ intptr_t copy_if_no_garbage_collector(uint64_t *p)
 
 #elif defined LISP
 
+//=========================================================================
+//=========================================================================
 // What I have here is a skeletal indication of how data representation
 // and storage allocation might work. I do not have a garbage collector
 // so this is not suitable for serious use!
@@ -582,6 +693,8 @@ intptr_t copy_if_no_garbage_collector(uint64_t *p)
 // the allocation pointer. If something other than the most recent item
 // is released and when such an item shrinks I write in a header for a
 // padder item so that the memory can always be parsed in a linear scan.
+//=========================================================================
+//=========================================================================
 
 #define MEMORY_SIZE 1000000
 static uint64_t memory[MEMORY_SIZE];
@@ -707,6 +820,10 @@ inline char *confirm_size_string(char *p, size_t n, size_t final)
 {
 }
 
+intline void abandon_string(char *s)
+{
+}
+
 
 inline intptr_t vector_to_handle(uint64_t *p)
 {
@@ -727,8 +844,8 @@ uint64_t *always_copy_bignum(uint64_t *p)
     return confirm_size(r, n, n);
 }
 
-intptr_t copy_if_no_garbage_collector(uint64_t *p)
-{   return vector_to_handle(p);
+intptr_t copy_if_no_garbage_collector(intptr_t p)
+{   return p;
 }
 
 #else
@@ -740,27 +857,48 @@ extern intptr_t int_to_bignum(int64_t n);
 extern intptr_t unsigned_int_to_bignum(uint64_t n);
 extern intptr_t uniform_positive(size_t n);
 extern intptr_t uniform_signed(size_t n);
-extern intptr_t uniform_upto(uint64_t *aa);
+extern intptr_t uniform_upto(intptr_t a);
 extern intptr_t random_upto_bits(size_t bits);
 
-extern intptr_t bigadd(uint64_t *, uint64_t *);
-extern intptr_t bigsubtract(uint64_t *, uint64_t *);
-extern intptr_t bigmultiply(uint64_t *, uint64_t *);
-extern intptr_t bigquotient(uint64_t *, uint64_t *);
-extern intptr_t bigremainder(uint64_t *, uint64_t *);
-extern intptr_t bignegate(uint64_t *);
-extern intptr_t biglogand(uint64_t *, uint64_t *);
-extern intptr_t biglogor(uint64_t *, uint64_t *);
-extern intptr_t biglogxor(uint64_t *, uint64_t *);
-extern intptr_t bigleftshift(uint64_t *, int);
-extern intptr_t bigrightshift(uint64_t *, int);
-extern intptr_t biglognot(uint64_t *);
-extern bool bigeqn(uint64_t *, uint64_t *);
-extern bool biggreaterp(uint64_t *, uint64_t *);
-extern bool biggeq(uint64_t *, uint64_t *);
-extern bool biglessp(uint64_t *, uint64_t *);
-extern bool bigleq(uint64_t *, uint64_t *);
+extern intptr_t bigadd(intptr_t, intptr_t);
+extern intptr_t bigadd_small(intptr_t, uint64_t);
+extern intptr_t bigsubtract(intptr_t, intptr_t);
+extern intptr_t bigmultiply(intptr_t, intptr_t);
+extern intptr_t bigsquare(intptr_t);
+extern intptr_t bigpow (intptr_t, int64_t);
+extern intptr_t bigpow(intptr_t, int32_t);
+extern intptr_t bigquotient(intptr_t, intptr_t);
+extern intptr_t bigremainder(intptr_t, intptr_t);
+extern intptr_t bignegate(intptr_t);
+extern intptr_t biglogand(intptr_t, intptr_t);
+extern intptr_t biglogor(intptr_t, intptr_t);
+extern intptr_t biglogxor(intptr_t, intptr_t);
+extern intptr_t bigleftshift(intptr_t, int);
+extern intptr_t bigrightshift(intptr_t, int);
+extern intptr_t biglognot(intptr_t);
+extern bool bigeqn(intptr_t, intptr_t);
+extern bool biggreaterp(intptr_t, intptr_t);
+extern bool biggeq(intptr_t, intptr_t);
+extern bool biglessp(intptr_t, intptr_t);
+extern bool bigleq(intptr_t, intptr_t);
 
+extern char *bignum_to_string(intptr_t aa);
+extern char *bignum_to_string_hex(intptr_t aa);
+extern char *bignum_to_string_octal(intptr_t aa);
+extern char *bignum_to_string_binary(intptr_t aa);
+
+
+//=========================================================================
+//=========================================================================
+// I have a class Bignum that wraps up the representation of a number
+// and then allows me to overload most operators so that big numbers can be
+// used in C++ code anmost as if they were a natural proper type. The main
+// big oddity will be that to denote a Bignum literal it will be necessary
+// to use a constructor, with obvious constructors accepting integers of up
+// to 64-bits and a perhaps less obvious one taking a string that is the
+// decimal denotation of the integer concerned.
+//=========================================================================
+//=========================================================================
 
 class Bignum
 {
@@ -772,6 +910,9 @@ public:
 // A default constructor build a Bignum with no stored data.
     Bignum()
     {   val = 0;
+    }
+    Bignum(bool set_val, intptr_t v)
+    {   val = v;
     }
     ~Bignum()
     {   abandon(val);
@@ -794,7 +935,7 @@ public:
 // On the next line in the NEW case (at least) the handle might be a handle
 // of an immediate fixnum, and in that case a.vec() should be considered
 // an invalid operation and this code will need to be adjusted!
-        val = copy_if_no_garbage_collector(a.vec());
+        val = copy_if_no_garbage_collector(a.val);
     }
 
     uint64_t *vec() const
@@ -805,7 +946,7 @@ public:
     {   if (this == &x) return; // assign to self - a silly case!
         abandon(val);
 // See comment in the copy constructor.
-        val = copy_if_no_garbage_collector(x.vec());
+        val = copy_if_no_garbage_collector(x.val);
     }
 
     inline void operator = (const int64_t x)
@@ -834,142 +975,142 @@ public:
     }
 
     inline Bignum operator +(const Bignum &x) const
-    {   return Bignum(bigadd(vec(), x.vec()));
+    {   return Bignum(true, bigadd(val, x.val));
     }
 
     inline Bignum operator -(const Bignum &x) const
-    {   return Bignum(bigsubtract(vec(), x.vec()));
+    {   return Bignum(true, bigsubtract(val, x.val));
     }
 
     inline Bignum operator *(const Bignum &x) const
-    {   return Bignum(bigmultiply(vec(), x.vec()));
+    {   return Bignum(true, bigmultiply(val, x.val));
     }
 
     inline Bignum operator /(const Bignum &x) const
-    {   return Bignum(bigquotient(vec(), x.vec()));
+    {   return Bignum(true, bigquotient(val, x.val));
     }
 
     inline Bignum operator %(const Bignum &x) const
-    {   return Bignum(bigremainder(vec(), x.vec()));
+    {   return Bignum(true, bigremainder(val, x.val));
     }
 
     inline Bignum operator -() const
-    {   return Bignum(bignegate(vec()));
+    {   return Bignum(true, bignegate(val));
     }
 
     inline Bignum operator &(const Bignum &x) const
-    {   return Bignum(biglogand(vec(), x.vec()));
+    {   return Bignum(true, biglogand(val, x.val));
     }
 
     inline Bignum operator |(const Bignum &x) const
-    {   return Bignum(biglogor(vec(), x.vec()));
+    {   return Bignum(true, biglogor(val, x.val));
     }
 
     inline Bignum operator ^(const Bignum &x) const
-    {   return Bignum(biglogxor(vec(), x.vec()));
+    {   return Bignum(true, biglogxor(val, x.val));
     }
 
     inline Bignum operator <<(int n) const
-    {   return Bignum(bigleftshift(vec(), n));
+    {   return Bignum(true, bigleftshift(val, n));
     }
 
     inline Bignum operator >>(int n) const
-    {   return Bignum(bigrightshift(vec(), n));
+    {   return Bignum(true, bigrightshift(val, n));
     }
 
     inline Bignum operator ~() const
-    {   return Bignum(biglognot(vec()));
+    {   return Bignum(true, biglognot(val));
     }
 
     inline bool operator ==(const Bignum &x) const
-    {   return bigeqn(vec(), x.vec());
+    {   return bigeqn(val, x.val);
     }
 
     inline bool operator >(const Bignum &x) const
-    {   return biggreaterp(vec(), x.vec());
+    {   return biggreaterp(val, x.val);
     }
 
     inline bool operator >=(const Bignum &x) const
-    {   return biggeq(vec(), x.vec());
+    {   return biggeq(val, x.val);
     }
 
     inline bool operator <(const Bignum &x) const
-    {   return biglessp(vec(), x.vec());
+    {   return biglessp(val, x.val);
     }
 
     inline bool operator <=(const Bignum &x) const
-    {   return bigleq(vec(), x.vec());
+    {   return bigleq(val, x.val);
     }
 
     inline void operator +=(const Bignum &x)
-    {   intptr_t r = bigadd(vec(), x.vec());
+    {   intptr_t r = bigadd(val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator -=(const Bignum &x)
-    {   intptr_t r = bigsubtract(vec(), x.vec());
+    {   intptr_t r = bigsubtract(val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator *=(const Bignum &x)
-    {   intptr_t r = bigmultiply(vec(), x.vec());
+    {   intptr_t r = bigmultiply(val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator /=(const Bignum &x)
-    {   intptr_t r = bigquotient(vec(), x.vec());
+    {   intptr_t r = bigquotient(val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator %=(const Bignum &x)
-    {   intptr_t r = bigremainder(vec(), x.vec());
+    {   intptr_t r = bigremainder(val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator &=(const Bignum &x)
-    {   intptr_t r = biglogand(vec(), x.vec());
+    {   intptr_t r = biglogand(val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator |=(const Bignum &x)
-    {   intptr_t r = biglogor(vec(), x.vec());
+    {   intptr_t r = biglogor(val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator ^=(const Bignum &x)
-    {   intptr_t r = biglogxor(vec(), x.vec());
+    {   intptr_t r = biglogxor(val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator <<=(int n)
-    {   intptr_t r = bigleftshift(vec(), n);
+    {   intptr_t r = bigleftshift(val, n);
         abandon(val);
         val = r;
     }
 
     inline void operator >>=(int n)
-    {   intptr_t r = bigrightshift(vec(), n);
+    {   intptr_t r = bigrightshift(val, n);
         abandon(val);
         val = r;
     }
 
     inline Bignum operator ++()
-    {   intptr_t r = bigadd_small(vec(), 1);
+    {   intptr_t r = bigadd_small(val, 1);
         abandon(val);
         val = r;
         return *this;
     }
 
     inline Bignum operator ++(int)
-    {   intptr_t r = bigadd_small(vec(), 1);
+    {   intptr_t r = bigadd_small(val, 1);
 // I assign explicitly to oldval.val because trying to use a constructor
 // of Bignum or assigning to one would so things more complicated than I want!
         Bignum oldval;
@@ -979,14 +1120,14 @@ public:
     }
 
     inline Bignum operator --()
-    {   intptr_t r = bigadd_small(vec(), -1);
+    {   intptr_t r = bigadd_small(val, -1);
         abandon(val);
         val = r;
         return *this;
     }
 
     inline Bignum operator --(int)
-    {   intptr_t r = bigadd_small(vec(), -1);
+    {   intptr_t r = bigadd_small(val, -1);
         Bignum oldval;
         oldval.val = val;
         val = r;
@@ -997,16 +1138,16 @@ public:
     {   std::ios_base::fmtflags fg = out.flags();
         char *s;
         if ((fg & std::ios_base::hex) != 0)
-            s = bignum_to_string_hex(a.vec());
+            s = bignum_to_string_hex(a.val);
         else if ((fg & std::ios_base::oct) != 0)
-            s = bignum_to_string_octal(a.vec());
+            s = bignum_to_string_octal(a.val);
         else if ((fg & std::ios_base::dec) != 0)
-            s = bignum_to_string(a.vec());
+            s = bignum_to_string(a.val);
         else if (radix::is_binary_output(out))
-            s = bignum_to_string_binary(a.vec());
-        else s = bignum_to_string(a.vec());
-        out << std::setw(string_size(s)) << string_data(s);
-        free_string(s);
+            s = bignum_to_string_binary(a.val);
+        else s = bignum_to_string(a.val);
+        out << s;
+        abandon_string(s);
         return out;
     }
     friend std::istream & operator >> (std::istream &in, Bignum &a)
@@ -1021,236 +1162,45 @@ public:
 };
 
 const char *to_string(Bignum x)
-{   return bignum_to_string(x.vec());
+{   return bignum_to_string(x.val);
 }
 
 Bignum uniform_positive_bignum(size_t n)
-{   return Bignum(uniform_positive(n));
+{   return Bignum(true, uniform_positive(n));
 }
 
 Bignum uniform_signed_bignum(size_t n)
-{   return Bignum(uniform_signed(n));
+{   return Bignum(true, uniform_signed(n));
 }
 
 Bignum uniform_upto_bignum(Bignum a)
-{   return Bignum(uniform_upto(a.vec()));
+{   return Bignum(true, uniform_upto(a.val));
 }
 
 Bignum random_upto_bits_bignum(size_t n)
-{   return Bignum(random_upto_bits(n));
+{   return Bignum(true, random_upto_bits(n));
 }
 
 Bignum square(const Bignum &x)
-{   Bignum ans;
-    ans.vec() = bigsquare(x.vec());
-    return ans;
+{   return Bignum(true, bigsquare(x.val));
 }
 
-Bignum pow(const Bignum &x, uint64_t n)
-{   Bignum ans;
-    ans.vec() = bigpow(x.vec(), n);
-    return ans;
+Bignum pow(const Bignum &x, int64_t n)
+{   return Bignum(true, bigpow(x.val, n));
 }
 
-Bignum pow(const Bignum &x, uint32_t n)
-{   return pow(x, (uint64_t)n);
+Bignum pow(const Bignum &x, int32_t n)
+{   return pow(x, (int64_t)n);
 }
 
 //=========================================================================
 //=========================================================================
-// 
-//=========================================================================
-//=========================================================================
-
-
-#ifdef VSL
-
-// A Lisp item is represented as an integer and the low 3 bits
-// contain tag information that specify how the rest will be used.
-
-typedef intptr_t LispObject;
-
-#define TAGBITS    0x7
-
-#define tagCONS    0     // Traditional Lisp "cons" item.
-#define tagSYMBOL  1     // a symbol.
-#define tagFIXNUM  2     // An immediate integer value (29 or 61 bits).
-#define tagFLOAT   3     // A double-precision number.
-#define tagATOM    4     // Something else that will have a header word.
-#define tagFORWARD 5     // Used during garbage collection.
-#define tagHDR     6     // the header word at the start of an atom .
-#define tagSPARE   7     // not used!
-
-// Note that in the above I could have used tagATOM to include the case
-// of symbols (aka identifiers) but as an optimisation I choose to make that
-// a special case. I still have one spare code (tagSPARE) that could be
-// used to extend the system.
-
-// Now I provide macros that test the tag bits. These are all rather obvious!
-
-#define isCONS(x)    (((x) & TAGBITS) == tagCONS)
-#define isSYMBOL(x)  (((x) & TAGBITS) == tagSYMBOL)
-#define isFIXNUM(x)  (((x) & TAGBITS) == tagFIXNUM)
-#define isFLOAT(x)   (((x) & TAGBITS) == tagFLOAT)
-#define isATOM(x)    (((x) & TAGBITS) == tagATOM)
-#define isFORWARD(x) (((x) & TAGBITS) == tagFORWARD)
-#define isHDR(x)     (((x) & TAGBITS) == tagHDR)
-
-// In memory CONS cells and FLOATS exist as just 2-word items with
-// all their bits in use. All other sorts of data have a header word
-// at their start.
-// This contains extra information about the exact form of data present.
-
-#define TYPEBITS    0x78
-
-#define typeSYM     0x00
-#define typeSTRING  0x08
-#define typeVEC     0x10
-#define typeBIGNUM  0x18
-#define typeEQHASH  0x20
-#define typeEQHASHX 0x28
-#define typeGAP     0x30
-// Codes 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
-// 0x70 and 0x78 spare!
-
-#define veclength(h)  (((intptr_t)(h)) >> 7)
-#define packlength(n) (((LispObject)(n)) << 7)
-
-static inline LispObject *heapaddr(LispObject x)
-{
-    return (LispObject *)x;
-}
-
-// General indirection
-
-#define qind(x)     (*((LispObject *)(x)))
-
-// For all other types I must remove the tagging information before I
-// can use the item as a pointer.
-
-#define flagSPECFORM  0x100
-#define flagMACRO     0x200
-#define flagGLOBAL    0x400
-#define flagFLUID     0x800
-// There are LOTS more bits available for flags etc here if needbe!
-
-// Other atoms have a header that gives info about them. Well as a special
-// case I will allow that something tagged with tagATOM but with zero as
-// its address is a special marker value...
-
-#define NULLATOM   (tagATOM + 0)
-#define qheader(x) ((heapaddr((x)-tagATOM))[0])
-
-// Fixnums and Floating point numbers are rather easy!
-
-#define qfixnum(x)     (((intptr_t)(x)) / 8)
-
-// NB that C++ makes this undefined if there is overflow!
-#define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
-
-#define MIN_FIXNUM     qfixnum(INTPTR_MIN)
-#define MAX_FIXNUM     qfixnum(INTPTR_MAX)
-
-#define qfloat(x)      (((double *)((x)-tagFLOAT))[0])
-
-#define isBIGNUM(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeBIGNUM))
-#define qbignum(x) ((char *)((x) - tagATOM + sizeof(uint64_t)))
-
-#define isSTRING(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeSTRING))
-#define qstring(x) ((char *)((x) - tagATOM + sizeof(LispObject)))
-
-#define isVEC(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeVEC))
-#define isEQHASH(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH))
-#define isEQHASHX(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX))
-
-
-static inline LispObject boxfloat(double a)
-{  // LispObject r;
-//    check_space(8, __LINE__);
-//    setheapstartsandfp(fringe1);
-//    r = fringe1 + tagFLOAT;
-//    qfloat(r) = a;
-//    fringe1 += 8;
-//    return r;
-    return 0;
-}
-
-#endif // VSL
-
-// Hmmmm. AT present I have a typedef "uint64_t *" that exists to
-// abstract over C++-like and Lisp-like interfaces. I will want to change
-// things so as to remove that and use a Bignum class as the only leyer
-// above the raw data of vectors of 64-bit unsigned integers. But I will
-// leave that rationalization until a little bit leter.
-
-
-// Storage management for bignums is sort of delicate because at the
-// start of an operation one normally has just an upper bound on how much
-// space will be needed - the exact number of words to be used only emerges
-// at the end. So the protocol I support is based on the calls:
-//
-//   uint64_t *reserve(size_t n)
-//      This returns a pointer to n 64-bit words (and it may have allocated
-//      a space for a header in front of that).
-//   void adandon(uint64_t *p, size_t n)
-//      Abandon an item from reserve given its size. This should only
-//      used to discard the most recently reserved unit. Well it will
-//      support v1=reserve(n1); v2=reserve(n2); abandon(v2);
-//      and then abandon(v1);
-//   uint64_t *_t confirm_size(uint64_t *p, size_t n, size_t final_n)
-//      The pointer p was as returned by reserve, but it is now known
-//      that just final_n words will be needed (this must be no larger than
-//      the number originally given. The effect can be somewhat as if a call
-//      to realloc was given. Very often this will also write the final_n
-//      into a header tha preceeds the stored digits of the number. It would
-//      be able to detect (eg) a special case of small numbers are return
-//      them in a different way, and add any other tag or marker bits that
-//      are required. When confirm_size() is called the system can be
-//      confident that no other calls to reserve() have been made - this
-//      can help because it then "knows" that the memory involved is right
-//      at the fringe of active memory.
-//   uint64_t *_t confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-//      This behave just like confirm_size apart from the fact that it is to
-//      used in a context where two (or more) regions of memory have been
-//      reserved. This must be used on all but the last allocated one
-//      when their length is confirmed. The thought behind this is that
-//      when a block shrinks or is discarded and it is not the most recent one
-//      allocated it may be necessary to put some padding material in the
-//      gap that is left, or it may be possible to place that released
-//      space on a free-chain for future re-use.
-//      As a special case if two blocks are reserved and the second
-//      has its size confirmed as zero then the first one may use
-//      confirm_size rather than needing confirm_size_x.
-//   void abandon(intptr_t p)
-//      Release memory. In a Lisp system this will be a no-op because garbage
-//      collection will do the job. In a freestanding application this
-//      can use free().
-//
-// For strings (as returned when I want to prepare a bignum for printing)
-// I will use reserve_string() to reserve space before starting to generate
-// the characters that will fill it.
-// be built up within a block of memory that is a multiple of 8 bytes long.
-// Again there MAY be space left for a header. When I know exactly how many
-// characters are present I will confirm the exact size required:
-//
-//   char *confirm_size_string(uint64_t *p, size_t n, size_t final_n)
-//       In this call n is the original size as used with reserve, so it
-//       measures in units of sizeof(uint64_t), while final_size is measured
-//       in BYTES and is the number of characters present. For native style
-//       strings this will add a '\0' as a terminator and use realloc to
-//       trim the size down to include just that.
-//   void free_string(char *s)
-//       Release memory for the string.
-//
-// and finally for JUST the function "divide" I want
-//   cons_representation cons(intptr_t a, intptr_t b)
-//   intptr_t car(cons_representation x)
-//   intptr_t cdr(cons_representation x)
-
 // display() will show the internal representation of a bignum as a
 // sequence of hex values. This is obviously useful while debugging!
 // I make this inline solely because that gets rid of warnings about an
 // unused static function!
+//=========================================================================
+//=========================================================================
 
 static inline void display(const char *label, const uint64_t *a, size_t lena)
 {   std::cout << label << " [" << (int)lena << "]";
@@ -1661,10 +1611,6 @@ static inline int read_u3(const uint64_t *v, size_t n, size_t i)
 // This version has NOT BEEN TESTED YET and is really a place-holder for
 // when I try to use the code within my Lisp system!
 
-typedef LispObject uint64_t *;
-typedef LispObject string_representation;
-typedef LispObject cons_representation;
-
 size_t number_size(uint64_t * a)
 {   return veclength(qheader(a))/sizeof(uint64_t);
 }
@@ -1677,22 +1623,14 @@ size_t string_size(uint64_t * a)
 {   return veclength(qheader(a));
 }
 
-uint64_t *number_data(uint64_t * a)
-{   return (uint64_t *)qbignum(a);
-}
-
-const char *string_data(char *a)
-{   return (const char *)qstring(a);
-}
-
-uint64_t * &car(cons_representation a)
-{   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
-    return ((uint64_t * *)aw)[0];
+intptr_t &car(intptr_t a)
+{   intptr_t w = a & ~(uintptr_t)TAGBITS;
+    return ((intptr_t *)aw)[0];
 ]
 
-uint64_t * &cdr(cons_representation a)
-{   uint64_t w = (uint64_t)a & ~(uint64_t)TAGBITS;
-    return ((uint64_t * *)w)[1];
+intptr_t &cdr(intptr_t a)
+{   intptr_t w = a & ~(uintptr_t)TAGBITS;
+    return ((intptr_t *)w)[1];
 ]
 
 // My representation has a header word that is an intptr_t stored 8 bytes
@@ -1724,13 +1662,12 @@ uint64_t *reserve(size_t n)
     my_assert(memory_used <= MEMORY_SIZE);
 }
 
-cons_representation cons(uint64_t * a, uint64_t * b)
-{   uint64_t r = tagCONS + (uint64_t)&memory[memory_used];
+intptr_t cons(intptr_t a, intptr_t b)
+{   intptr_t r = tagCONS + (intptr_t)&memory[memory_used];
     memory_used += 2;
-    cons_representation c = (cons_representation)r;
-    car(c) = a;
-    cdr(c) = b;
-    return c
+    car(r) = a;
+    cdr(r) = b;
+    return r;
 }
 
 // The very most recent item allocated can be discarded by just winding
@@ -1831,152 +1768,13 @@ void free_string(char *p)
 // Strings are returned to the user as freshly malloced memory holding a
 // native-style C++ string with a terminating NUL character at the end.
 
-
-// As a first try I am using malloc() to allocate each memory block every
-// time I might want one, realloc() to adjust its size so it is precisely as
-// large as is needed and free() to release it. Doing things this way is
-// straightforward but may put severe strain on the memory management
-// subsystem! An alternative scheme that might be worth considering would
-// still represent each bignum by a block of uint64_t values with a header
-// word, but now the header word would hold two values packed together.
-// One would be the length of data used for the bignum and the second would
-// indicate the total size of the memory block. I think it would be reasonable
-// to use two uint32_t values in the space that could hold a uint64_t. If the
-// "length used" field counted in digits that could cope with up to 2^32
-// digits, each 8-bytes long, i.e. it could cope with individual bignums each
-// using up to 32 Gbytes of  memory. That seems sufficient for now and for all
-// rational use of this package. I would then keep every bignum in a block
-// of memory whose size was a power of 2, and so I would only need 5 bits in
-// the other half of the header.
-// Then where I now perform calls to realloc() to shorten a vector I might
-// either always leave the vector with its existing length and just mark it
-// as having a lesser number of digits in use, or I could perform more
-// enthusiastic adjustment when the size had changed significantly.
-// I could also look at all uses of abandon() and see if I was about to
-// perform a reserve() that could use the space released. This would
-// work particularly well with some cases of operator= where the
-// bignum presently in the variable is at present discarded and could
-// instead often be recycled. If I make all memory blocks a power of 2 in
-// size I might consider a "buddy" scheme for managing them...
-
-typedef uint64_t *uint64_t *;
-typedef const char *string_representation;
 typedef struct _Cons
-{   uint64_t * car;
-    uint64_t * cdr;
-} Cons, *cons_representation;
-
-size_t number_size(uint64_t * a)
-{   return a[-1];
-}
+{   intptr_t car;
+    intptr_t cdr;
+} Cons;
 
 size_t string_size(char *a)
 {   return strlen(a);
-}
-
-uint64_t *number_data(uint64_t * a)
-{   return a;
-}
-
-const char *string_data(char *a)
-{   return a;
-}
-
-uint64_t *reserve(size_t n)
-{   my_assert(n > 0 && n < 10000,
-       [&]{ std::cout << "my_allocate " << n << std::endl; });
-    uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
-    my_assert(r != NULL);
-//    printf("[%d] malloc(%d) = %p\n", ++counter, (int)(n*8), r);
-    return &r[1];
-}
-
-void abandon(uint64_t *p)
-{//   printf("[%d] free %p\n", ++counter, p);
-    (*free_function)((void *)&p[-1]);
-}
-
-uint64_t *confirm_size(uint64_t *p, size_t n, size_t final_n)
-{   my_assert(final_n>0 && final_n<=n,
-       [&]{ std::cout << "confirm_size final=" << final_n << " orig=" << n << std::endl; });
-//    printf("confirm_size %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
-    p = (uint64_t *)
-        (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
-    my_assert(p != NULL);
-//    printf("[%d] realloc -> %p\n", ++counter, p);
-    p[0] = final_n;
-    return &p[1];
-}
-
-uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{   my_assert(final_n>0 && final_n<=n,
-       [&]{ std::cout << "confirm_size_x" << final_n << " " << n << std::endl; });
-//    printf("confirm_size_x %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
-    p = (uint64_t *)
-        (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
-    my_assert(p != NULL);
-//    printf("[%d] realloc -> %p\n", ++counter, p);
-    p[0] = final_n;
-    return &p[1];
-}
-
-// The string data has been built up in a block of memory that was suited
-// to be a bignum, so it was preceeded by a header word that could have
-// been used to store its length. I copy the characters down to start at the
-// very start of the allocated block. Remember agaiin that n measures
-// the number of data words in a bignum (not including the header) and
-// final_n measures the string in characters.
-
-char *confirm_size_string(uint64_t *p, size_t n, size_t final_n)
-{   my_assert(final_n>0 && final_n+1<(n+1)*sizeof(uint64_t),
-       [&]{ std::cout << "confirm_size_string " << final_n << " " << n << std::endl; });
-//    printf("confirm_size_string %p %d %d\n", p, (int)n, (int)final_n); fflush(stdout);
-    char *c = (char *)&p[-1];
-// When a string is returned it will not need a preceeding header word, so
-// I memmove() the data down to the start of the memory block. This has
-// a cost and perhaps keeping the length information elsewhere would have
-// avoided that, but the scheme used here keeps the representation of
-// big numbers nice and tidy ans self-contained, and the linear cost of this
-// memort move tends to be associated with a quadratic cost convertion from
-// internal to character form so it is really not liable to dominate overall
-// timings.
-    std::memmove(c, (char *)p, final_n);
-    c[final_n] = 0; // write in terminator
-// Remember to allow for the terminator when adjusting the size! Well
-// there will always have been space for it because we are losing the header
-// word.
-    const char *cc = (const char *)(*realloc_function)(c, final_n+1);
-    my_assert(cc != NULL);
-//    printf("[%d] realloc -> %p\n", ++counter, p);
-    return cc;
-}
-
-void abandon(uint64_t * p)
-{//   printf("[%d] free %p\n", ++counter, (void *)p);
-    if (p != (uint64_t *)0)
-        (*free_function)((void *)&p[-1]);
-}
-
-void free_string(char *p)
-{//   printf("[%d] free %p\n", ++counter, (void *)p);
-    if ((uint64_t *)p != (uint64_t *)0)
-       (*free_function)((void *)p);
-}
-
-cons_representation cons(uint64_t * a, uint64_t * b)
-{   cons_representation r =
-        (cons_representation)(*malloc_function)(sizeof(Cons));
-    r->car = a;
-    r->cdr = b;
-    return r;
-}
-
-uint64_t *car(cons_representation a)
-{   return a->car;
-}
-
-uint64_t *cdr(cons_representation a)
-{   return a->cdr;
 }
 
 #endif // VSL
@@ -2366,13 +2164,12 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // internal debugging because at times I work with values that are known
 // to be positive and so where the top digit must be treated as unsigned...
 
-char *bignum_to_string(const uint64_t *a, size_t lena,
-                                       bool as_unsigned=false)
+char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 {
 // Making the value zero a special case simplifies things later on!
     if (lena == 1 && a[0] == 0)
-    {   uint64_t *r = reserve(1);
-        strcpy((char *)r, "0");
+    {   char *r = reserve_string(1);
+        strcpy(r, "0");
         return confirm_size_string(r, 1, 1);
     }
 // The size (m) for the block of memory that I put my result in is
@@ -2387,7 +2184,12 @@ char *bignum_to_string(const uint64_t *a, size_t lena,
 // I will copy my input into a fresh vector. And I will force it to be
 // positive. The made-positive version might have a leading digit with
 // its top bit set - that will not worry me because I view it as unsigned.
-    uint64_t *r = reserve(m);
+    char *rc = reserve_string(8*m-1);
+// I have allocated the space that will be needed for the eventual string of
+// characters. I will use that space to save numeric values along the way, so
+// here I cast so I can use that same memort as a vector of 64-bit integers.
+// I will only ever access data in the format that it was placed into memory!
+    uint64_t *r = (uint64_t *)rc;
     size_t i;
     for (i=0; i<lena; i++) r[i] = a[i];
     for (; i<m; i++) r[i] = 0;
@@ -2415,7 +2217,8 @@ char *bignum_to_string(const uint64_t *a, size_t lena,
 // digits data, and I have arranged to position everything to (just)
 // avoid overwriting myself.
     uint64_t top = r[p++];
-    char *p1 = (char *)r;
+// Get a pointer into the buffer as character data...
+    char *p1 = (char *)rc;
     size_t len = 0;
     if (sign)
     {   *p1++ = '-';
@@ -2447,13 +2250,12 @@ char *bignum_to_string(const uint64_t *a, size_t lena,
         len += 19;
         my_assert(len <= m*sizeof(uint64_t));
     }
-    return confirm_size_string(r, m, len);
+    return confirm_size_string(rc, 8*m-1, len);
 }
 
 char *bignum_to_string(intptr_t aa)
 {   uint64_t *a = vector_of_handle(aa);
-    size_t n = number_size(a);
-    return bignum_to_string(a, n);
+    return bignum_to_string(a, number_size(a));
 }
 
 // As well as converting to decimal I can do hex, octal or binary!
@@ -2463,8 +2265,8 @@ char *bignum_to_string_hex(intptr_t aa)
     size_t n = number_size(a);
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
-    {   uint64_t *r = reserve(1);
-        strcpy((char *)r, "0");
+    {   char *r = reserve_string(1);
+        strcpy(r, "0");
         return confirm_size_string(r, 1, 1);
     }
 // printing in hexadecimal should be way easier!
@@ -2485,7 +2287,7 @@ char *bignum_to_string_hex(intptr_t aa)
         }
     }
     size_t nn = (m + 7)/8;
-    uint64_t *r = reserve(nn);
+    char *r = reserve_string(8*nn-1);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -2505,7 +2307,7 @@ char *bignum_to_string_hex(intptr_t aa)
             *p++ = "0123456789abcdef"[d];
         }
     }   
-    return confirm_size_string(r, nn, m);
+    return confirm_size_string(r, 8*nn-1, m);
 }
 
 char *bignum_to_string_octal(intptr_t aa)
@@ -2527,7 +2329,7 @@ char *bignum_to_string_octal(intptr_t aa)
         nn = width;
     }
     nn = (nn + 7)/8;   // words needed for string result
-    uint64_t *r = reserve(nn);
+    char *r = reserve_string(8*nn-1);
     char *p = (char *)r;
     if (sign)
     {   *p++ = '~';
@@ -2535,7 +2337,7 @@ char *bignum_to_string_octal(intptr_t aa)
     }
     for (size_t i=0; i<width; i++)
         *p++ = '0' + read_u3(a, n, width-i-1);
-    return confirm_size_string(r, nn, width);
+    return confirm_size_string(r, 8*nn-1, width);
 }
 
 char *bignum_to_string_binary(intptr_t aa)
@@ -2543,8 +2345,8 @@ char *bignum_to_string_binary(intptr_t aa)
     size_t n = number_size(a);
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
-    {   uint64_t *r = reserve(1);
-        strcpy((char *)r, "0");
+    {   char *r = reserve_string(1);
+        strcpy(r, "0");
         return confirm_size_string(r, 1, 1);
     }
     size_t m = 64*n;
@@ -2564,7 +2366,7 @@ char *bignum_to_string_binary(intptr_t aa)
         }
     }
     size_t nn = (m + 7)/8;
-    uint64_t *r = reserve(nn);
+    char *r = reserve_string(8*nn-1);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -2584,7 +2386,7 @@ char *bignum_to_string_binary(intptr_t aa)
             *p++ = '0' + d;
         }
     }   
-    return confirm_size_string(r, nn, m);
+    return confirm_size_string(r, 8*nn-1, m);
 }
 
 //=========================================================================
@@ -2602,8 +2404,8 @@ bool bigeqn(const uint64_t *a, size_t lena,
 }
 
 bool bigeqn(intptr_t aa, intptr_t bb)
-{   uint64_t *a = handle_to_vector(aa);
-    uint64_t *b = handle_to_vector(bb);
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
     size_t na = number_size(a);
     size_t nb = number_size(b);
     return bigeqn(a, na, b, nb);
@@ -2634,10 +2436,12 @@ bool biggreaterp(const uint64_t *a, size_t lena,
     }
 }
 
-bool biggreaterp(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+bool biggreaterp(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
-    return biggreaterp(number_data(a), na, number_data(b), nb);
+    return biggreaterp(a, na, b, nb);
 }
 
 // geq
@@ -2660,10 +2464,12 @@ bool biggeq(const uint64_t *a, size_t lena,
     }
 }
 
-bool biggeq(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+bool biggeq(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
-    return biggeq(number_data(a), na, number_data(b), nb);
+    return biggeq(a, na, b, nb);
 }
 
 // lessp
@@ -2673,10 +2479,12 @@ bool biglessp(const uint64_t *a, size_t lena,
 {   return biggreaterp(b, lenb, a, lena);
 }
 
-bool biglessp(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+bool biglessp(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
-    return biglessp(number_data(a), na, number_data(b), nb);
+    return biglessp(a, na, b, nb);
 }
 
 // leq
@@ -2686,10 +2494,12 @@ bool bigleq(const uint64_t *a, size_t lena,
 {   return biggeq(b, lenb, a, lena);
 }
 
-bool bigleq(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+bool bigleq(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
-    return bigleq(number_data(a), na, number_data(b), nb);
+    return bigleq(a, na, b, nb);
 }
 
 // Negation, addition and subtraction. These are easy apart from a mess
@@ -2719,11 +2529,12 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-uint64_t *bignegate(intptr_t a)
-{   size_t n = number_size(a);
+intptr_t bignegate(intptr_t aa)
+{   uint64_t *a = vector_of_handle(aa);
+    size_t n = number_size(a);
     uint64_t *p = reserve(n+1);
     size_t final_n;
-    bignegate(number_data(a), n, p, final_n);
+    bignegate(a, n, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -2736,11 +2547,12 @@ static void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-intptr_t biglognot(intptr_t a)
-{   size_t n = number_size(a);
+intptr_t biglognot(intptr_t aa)
+{   uint64_t *a = vector_of_handle(aa);
+    size_t n = number_size(a);
     uint64_t *p = reserve(n+1);
     size_t final_n;
-    biglognot(number_data(a), n, p, final_n);
+    biglognot(a, n, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -2762,15 +2574,17 @@ void biglogand(const uint64_t *a, size_t lena,
     else return ordered_biglogand(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t biglogand(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t biglogand(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na;
     else n = nb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    biglogand(number_data(a), na, number_data(b), nb, p, final_n);
+    biglogand(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -2792,15 +2606,17 @@ void biglogor(const uint64_t *a, size_t lena,
     else return ordered_biglogor(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t biglogor(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t biglogor(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na;
     else n = nb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    biglogor(number_data(a), na, number_data(b), nb, p, final_n);
+    biglogor(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -2829,15 +2645,17 @@ void biglogxor(const uint64_t *a, size_t lena,
     else return ordered_biglogxor(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t biglogxor(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t biglogxor(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na;
     else n = nb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    biglogxor(number_data(a), na, number_data(b), nb, p, final_n);
+    biglogxor(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -2879,14 +2697,15 @@ void bigleftshift(const uint64_t *a, size_t lena,
 
 extern intptr_t bigrightshift(intptr_t a, int n);
 
-uint64_t *bigleftshift(uint64_t *a, int n)
-{   if (n == 0) return copy_if_no_garbage_collector(a);
-    else if (n < 0) return bigrightshift(a, -n);
+intptr_t bigleftshift(intptr_t aa, int n)
+{   if (n == 0) return copy_if_no_garbage_collector(aa);
+    else if (n < 0) return bigrightshift(aa, -n);
+    uint64_t *a = vector_of_handle(aa);
     size_t na = number_size(a);
     size_t nr = na + (n/64) + 1;
     uint64_t *p = reserve(nr);
     size_t final_n;
-    bigleftshift(number_data(a), na, n, p, final_n);
+    bigleftshift(a, na, n, p, final_n);
     return confirm_size(p, nr, final_n);
 }
 
@@ -2919,14 +2738,15 @@ void bigrightshift(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-intptr_t bigrightshift(intptr_t a, int n)
-{   if (n == 0) return copy_if_no_garbage_collector(a);
-    else if (n < 0) return bigleftshift(a, -n);
+intptr_t bigrightshift(intptr_t aa, int n)
+{   if (n == 0) return copy_if_no_garbage_collector(aa);
+    else if (n < 0) return bigleftshift(aa, -n);
+    uint64_t *a = vector_of_handle(aa);
     size_t na = number_size(a);
     size_t nr = na - (n/64);
     uint64_t *p = reserve(nr);
     size_t final_n;
-    bigrightshift(number_data(a), na, n, p, final_n);
+    bigrightshift(a, na, n, p, final_n);
     return confirm_size(p, nr, final_n);
 }
 
@@ -2980,23 +2800,26 @@ void bigadd(const uint64_t *a, size_t lena,
     else return ordered_bigadd(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t bigadd(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t bigadd(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na+1;
     else n = nb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigadd(number_data(a), na, number_data(b), nb, p, final_n);
+    bigadd(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
-intptr_t bigadd_small(intptr_t a, int64_t b)
-{   size_t na = number_size(a);
+intptr_t bigadd_small(intptr_t aa, int64_t b)
+{   uint64_t *a = vector_of_handle(aa);
+    size_t na = number_size(a);
     uint64_t *p = reserve(na+1);
     size_t final_n;
-    bigadd_small(number_data(a), na, b, p, final_n);
+    bigadd_small(a, na, b, p, final_n);
     return confirm_size(p, na+1, final_n);
 }
 
@@ -3085,27 +2908,31 @@ void bigsubtract(const uint64_t *a, size_t lena,
     else return ordered_bigrevsubtract(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t bigsubtract(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t bigsubtract(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na+1;
     else n = nb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigsubtract(number_data(a), na, number_data(b), nb, p, final_n);
+    bigsubtract(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
-intptr_t bigrevsubtract(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t bigrevsubtract(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (a >= b) n = na+1;
     else n = nb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigsubtract(number_data(b), nb, number_data(a), na, p, final_n);
+    bigsubtract(b, nb, a, na, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -3163,13 +2990,15 @@ void bigmultiply(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-intptr_t bigmultiply(intptr_t a, intptr_t b)
-{   size_t na = number_size(a);
+intptr_t bigmultiply(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n = na+nb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigmultiply(number_data(a), na, number_data(b), nb, p, final_n);
+    bigmultiply(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -3232,12 +3061,13 @@ void bigsquare(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-intptr_t bigsquare(intptr_t a)
-{   size_t na = number_size(a);
+intptr_t bigsquare(intptr_t aa)
+{   uint64_t *a = vector_of_handle(aa);
+    size_t na = number_size(a);
     size_t n = 2*na;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigsquare(number_data(a), na, p, final_n);
+    bigsquare(a, na, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -3285,20 +3115,37 @@ void bigpow(const uint64_t *a, size_t lena, uint64_t n,
 // with my_assert() statements rather than any comfortable scheme for reporting
 // the trouble.
 
-intptr_t bigpow(intptr_t aa, uint64_t n)
-{   if (n == 0)
+intptr_t bigpow(intptr_t aa, int64_t n)
+{
+//   a^0 == 1, including the case 0^0 == 1
+    if (n == 0)
     {   uint64_t *r = reserve(0);
-        r[0] = 1;
+        uint64_t *a = vector_of_handle(aa);
+        size_t lena = number_size(a);
+        r[0] = (lena==1 && (int64_t)a[0]==0) ? 0 : 1;
         return confirm_size(r, 1, 1);
     }
+//   a^1 == a
     else if (n == 1) return copy_if_no_garbage_collector(aa);
+//   a^2 == square(a)
     else if (n == 2) return bigsquare(aa);
-    uint64_t *a = number_data(aa);
-    size_t lena = number_size(aa); 
+    uint64_t *a = vector_of_handle(aa);
+    size_t lena = number_size(a);
+//  1^(-n) == 1,
+//  (-1)^(-n) == 1 if n is even or -1 if n is odd.
+//  a^(-n) == 0 when a is not -1, 0 or 1.
+    if (n < 0)
+    {   uint64_t *r = reserve(0);
+        uint64_t *a = vector_of_handle(aa);
+        size_t lena = number_size(a);
+        r[0] = (lena==1 && (int64_t)a[0]==1) ? 1 :
+               (lena==1 && (int64_t)a[0]==-1) ? (n%1==0 ? 1 : -1) : 0;
+        return confirm_size(r, 1, 1);
+    }
     size_t bitsa = bignum_bits(a, lena);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
-    my_assert(hi == 0); // astonishingly too large!
+    my_assert(hi == 0); // Check that size is at least somewhat sane!
     uint64_t lenr1 = 1 + bitsr/64;
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
@@ -3308,7 +3155,7 @@ intptr_t bigpow(intptr_t aa, uint64_t n)
     uint64_t *r = reserve(lenr);
     uint64_t *v = reserve(lenr);
     uint64_t *w = reserve(lenr);
-    bigpow(a, lena, n, v, w, r, lenr);
+    bigpow(a, lena, (uint64_t)n, v, w, r, lenr);
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
@@ -3800,39 +3647,46 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
 }
 
 intptr_t bigquotient(intptr_t aa, intptr_t bb)
-{   size_t lena = number_size(aa);
-    uint64_t *a = number_data(aa);
-    size_t lenb = number_size(bb);
-    uint64_t *b = number_data(bb);
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
+    size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, lena, b, lenb,
+    division(a, na, b, nb,
              true, q, olenq, lenq,
              false, r, olenr, lenr);
     return confirm_size(q, olenq, lenq);
 }
 
 intptr_t bigremainder(intptr_t aa, intptr_t bb)
-{   size_t lena = number_size(aa);
-    uint64_t *a = number_data(aa);
-    size_t lenb = number_size(bb);
-    uint64_t *b = number_data(bb);
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
+    size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, lena, b, lenb,
+    division(a, na, b, nb,
              false, q, olenq, lenq,
              true, r, olenr, lenr);
     return confirm_size(r, olenr, lenr);
 }
 
-cons_representation bigdivide(intptr_t aa, intptr_t bb)
-{   size_t lena = number_size(aa);
-    uint64_t *a = number_data(aa);
-    size_t lenb = number_size(bb);
-    uint64_t *b = number_data(bb);
+#ifdef LISP
+
+// In LISP mode I provide a function that returns both quotient and
+// remainder. In the other two modes I support the same idea but
+// as a function that delivers the quotient as its result and saves
+// the remainder via an additional argument.
+
+intptr_t bigdivide(intptr_t aa, intptr_t bb)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
+    size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, lena, b, lenb,
+    division(a, na, b, nb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -3840,50 +3694,23 @@ cons_representation bigdivide(intptr_t aa, intptr_t bb)
     return cons(qq, rr);
 }
 
-//=========================================================================
-//=========================================================================
-// I want to make C++ output using the "<<" operator on an ostream cope
-// with big numbers. Doing so makes their use much smoother. The particular
-// aspect of this addresses here is the provision of an IO manipulator
-// called "std::bin" that sets for binary display of bignums (bit not of
-// other integer types).
-//=========================================================================
-//=========================================================================
+#else
 
-struct radix
-{
-public:
-// I would like setting hex or oct or dec to disable this, but at present
-// I do not know how to do that. So I will arrange that binary output is
-// only generated if none of those flags are set, because I can clear
-// them here. Then when I restore one of them I disable the test for binary.
-// I will arrange that if nobody has ever asked for binary they do not get it,
-// just so I feel safe.
-    static void set_binary_output(std::ios_base &s)
-    {   flag(s) = 1;
-        s.unsetf(std::ios_base::dec);
-        s.unsetf(std::ios_base::oct);
-        s.unsetf(std::ios_base::hex);
-    }
-    static bool is_binary_output(std::ios_base &s)
-    {   return flag(s) != 0;
-    }
-private:
-    static long & flag(std::ios_base &s)
-    {   static int n = std::ios_base::xalloc();
-        return s.iword(n);
-    }
-};
-
-// I want a new io manipulator "std::bin" to select binary mode output.
-// This will be used much as std::oct, std::dec and std::hex.
-
-namespace std
-{   std::ostream &bin(std::ostream &os)
-    {   radix::set_binary_output(os);
-        return os;
-    }
+intptr_t bigdivide(intptr_t aa, intptr_t bb, intptr_t &rem)
+{   uint64_t *a = vector_of_handle(aa);
+    uint64_t *b = vector_of_handle(bb);
+    size_t na = number_size(a);
+    size_t nb = number_size(b);
+    uint64_t *q, *r;
+    size_t olenq, olenr, lenq, lenr;
+    division(a, na, b, nb,
+             true, q, olenq, lenq,
+             true, r, olenr, lenr);
+    rem = confirm_size(r, olenr, lenr);
+    return confirm_size_x(q, olenq, lenq);
 }
+
+#endif
 
 //=========================================================================
 //=========================================================================
@@ -3895,9 +3722,8 @@ namespace std
 #ifdef TEST
 
 void display(const char *label, intptr_t a)
-{   
-    const uint64_t *d = number_data(a);
-    size_t len = number_size(a);
+{   uint64_t *d = vector_of_handle(a);
+    size_t len = number_size(d);
     std::cout << label << " [" << (int)len << "]";
     for (size_t i=0; i<len; i++)
         std::cout << " "
@@ -3908,7 +3734,7 @@ void display(const char *label, intptr_t a)
 }
 
 void display(const char *label, const Bignum &a)
-{   display(label, a.vec());
+{   display(label, a.val);
 }
 
 
