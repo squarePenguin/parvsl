@@ -882,38 +882,80 @@ extern intptr_t times_ib(int64_t, uint64_t *);
 extern intptr_t times_bi(uint64_t *, int64_t);
 extern intptr_t times_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigsquare(intptr_t);
+extern intptr_t square_b(intptr_t);
+extern intptr_t square_i(intptr_t);
 
-extern intptr_t bigpow (intptr_t, int64_t);
-extern intptr_t bigpow(intptr_t, int32_t);
+extern intptr_t pow_b(intptr_t, int64_t);
+extern intptr_t pow_b(intptr_t, int32_t);
+extern intptr_t pow_i(intptr_t, int64_t);
+extern intptr_t pow_i(intptr_t, int32_t);
 
-extern intptr_t bigquotient(intptr_t, intptr_t);
+extern intptr_t quotient_ii(int64_t, int64_t);
+extern intptr_t quotient_ib(int64_t, uint64_t *);
+extern intptr_t quotient_bi(uint64_t *, int64_t);
+extern intptr_t quotient_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigremainder(intptr_t, intptr_t);
+extern intptr_t remainder_ii(int64_t, int64_t);
+extern intptr_t remainder_ib(int64_t, uint64_t *);
+extern intptr_t remainder_bi(uint64_t *, int64_t);
+extern intptr_t remainder_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bignegate(intptr_t);
+extern intptr_t divide_ii(int64_t, int64_t);
+extern intptr_t divide_ib(int64_t, uint64_t *);
+extern intptr_t divide_bi(uint64_t *, int64_t);
+extern intptr_t divide_bb(uint64_t *, uint64_t *);
 
-extern intptr_t biglogand(intptr_t, intptr_t);
+extern intptr_t minus_b(intptr_t);
+extern intptr_t minus_i(intptr_t);
 
-extern intptr_t biglogor(intptr_t, intptr_t);
+extern intptr_t logand_ii(int64_t, int64_t);
+extern intptr_t logand_ib(int64_t, uint64_t *);
+extern intptr_t logand_bi(uint64_t *, int64_t);
+extern intptr_t logand_bb(uint64_t *, uint64_t *);
 
-extern intptr_t biglogxor(intptr_t, intptr_t);
+extern intptr_t logor_ii(int64_t, int64_t);
+extern intptr_t logor_ib(int64_t, uint64_t *);
+extern intptr_t logor_bi(uint64_t *, int64_t);
+extern intptr_t logor_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigleftshift(intptr_t, int);
+extern intptr_t logxor_ii(int64_t, int64_t);
+extern intptr_t logxor_ib(int64_t, uint64_t *);
+extern intptr_t logxor_bi(uint64_t *, int64_t);
+extern intptr_t logxor_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigrightshift(intptr_t, int);
+extern intptr_t leftshift_b(intptr_t, int);
+extern intptr_t leftshift_i(intptr_t, int);
 
-extern intptr_t biglognot(intptr_t);
+extern intptr_t rightshift_b(intptr_t, int);
+extern intptr_t rightshift_i(intptr_t, int);
 
-extern bool bigeqn(intptr_t, intptr_t);
+extern intptr_t lognot_b(intptr_t);
+extern intptr_t lognot_i(intptr_t);
 
-extern bool biggreaterp(intptr_t, intptr_t);
+extern intptr_t eqn_ii(int64_t, int64_t);
+extern intptr_t eqn_ib(int64_t, uint64_t *);
+extern intptr_t eqn_bi(uint64_t *, int64_t);
+extern intptr_t eqn_bb(uint64_t *, uint64_t *);
 
-extern bool biggeq(intptr_t, intptr_t);
+extern intptr_t geq_ii(int64_t, int64_t);
+extern intptr_t geq_ib(int64_t, uint64_t *);
+extern intptr_t geq_bi(uint64_t *, int64_t);
+extern intptr_t geq_bb(uint64_t *, uint64_t *);
 
-extern bool biglessp(intptr_t, intptr_t);
+extern intptr_t greaterp_ii(int64_t, int64_t);
+extern intptr_t greaterp_ib(int64_t, uint64_t *);
+extern intptr_t greaterp_bi(uint64_t *, int64_t);
+extern intptr_t greaterp_bb(uint64_t *, uint64_t *);
 
-extern bool bigleq(intptr_t, intptr_t);
+extern intptr_t leq_ii(int64_t, int64_t);
+extern intptr_t leq_ib(int64_t, uint64_t *);
+extern intptr_t leq_bi(uint64_t *, int64_t);
+extern intptr_t leq_bb(uint64_t *, uint64_t *);
+
+extern intptr_t lessp_ii(int64_t, int64_t);
+extern intptr_t lessp_ib(int64_t, uint64_t *);
+extern intptr_t lessp_bi(uint64_t *, int64_t);
+extern intptr_t lessp_bb(uint64_t *, uint64_t *);
 
 extern char *bignum_to_string(intptr_t aa);
 extern char *bignum_to_string_hex(intptr_t aa);
