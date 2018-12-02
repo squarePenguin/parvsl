@@ -276,7 +276,7 @@ static inline void my_assert(bool ok)
 {
 // For simple use where a customised message is not required:
 //     my_assert(predicate);
-    if (!ok) { std::cout << "my_assert failure" << std::endl; my_abort(); }
+    if (!ok) my_abort("failure reported via my_assert()");
 }
 
 // At times during development it is useful to be able to send messages
@@ -362,7 +362,7 @@ extern size_t number_size(uint64_t *p);
 
 extern bool fits_into_fixnum(int64_t n);
 extern intptr_t int_to_handle(int64_t n);
-extern int64_t int_to_handle(intptr_t n);
+extern int64_t int_of_handle(intptr_t n);
 
 
 #if defined MALLOC
@@ -611,8 +611,8 @@ inline intptr_t int_to_handle(int64_t n)
 {   return (intptr_t)(2*n + 1);
 }
 
-static intptr_t MIN_FIXNUM = int_to_handle(INTPTR_MIN);
-static intptr_t MAX_FIXNUM = int_to_handle(INTPTR_MAX);
+static int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
+static int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
 
 inline bool fits_into_fixnum(int64_t a)
 {   return a>=MIN_FIXNUM && a<=MAX_FIXNUM;
@@ -645,26 +645,32 @@ inline void abandon_string(char *s)
 // words. I do this by arranging that each operation provides several
 // functions systematically names as op_ii, op_ib, op_bi and op_bb where
 // "op" stands for the name of the operation and the suffix indicates
-// argument types. 
+// argument types. I will defined these various functions in any case, since
+// whatever happens automatically with the Bignum type it can be useful to
+// be able to combine big and standard integers.
 //
+// The arrangements here use #define because that allows me to use token
+// pasting to generate the variant names functions that take all the
+// combinations of types of argument. If this dispatch is not wanted it can
+// be disabled by defining stored_as_fixnum() so it always returns false,
+// and then the _ii, _ib annd _bi versions of the code will never get called.
 
 #define fixnum_dispatch1(name, a1)                                         \
-    if (stored_as_fixnum(a1)) return name##_i(int_of_handle(a1));          \
-    else return name##_b(vector_of_handle(a1));
+    (stored_as_fixnum(a1) ? name##_i(int_of_handle(a1)) :                  \
+     name##_b(vector_of_handle(a1)))
 
-#define fixnum_dispatch2n(name, a1, n)                             \
-    if (stored_as_fixnum(a1)) return name##_i(int_of_handle(a1, n));       \
-    else return name##_b(vector_of_handle(a1, n));
+#define fixnum_dispatch2n(name, a1, n)                                     \
+    (stored_as_fixnum(a1) ? name##_i(int_of_handle(a1, n)) :               \
+     name##_b(vector_of_handle(a1, n)))
 
 #define fixnum_dispatch2(name, a1, a2)                                     \
-    if (stored_as_fixnum(a1))                                              \
-        if (stored_as_fixnum(a2))                                          \
-            return name##_ii(int_of_handle(a1), int_of_handle(a2));        \
-        else return name##_ib(int_of_handle(a1), vector_of_handle(a2)); \
-    else                                                                   \
-        if (stored_as_fixnum(a2))                                          \
-            return name##_bi(vector_of_handle(a1), int_of_handle(a2));     \
-        else return name##_bb(vector_of_handle(a1), vector_of_handle(a2));
+    (stored_as_fixnum(a1) ?                                                \
+        (stored_as_fixnum(a2) ?                                            \
+            name##_ii(int_of_handle(a1), int_of_handle(a2)) :              \
+            name##_ib(int_of_handle(a1), vector_of_handle(a2))) :          \
+        (stored_as_fixnum(a2) ?                                            \
+            name##_bi(vector_of_handle(a1), int_of_handle(a2)) :           \
+            name##_bb(vector_of_handle(a1), vector_of_handle(a2))))
 
 intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = ((uint32_t *)(&p[-1]))[1];
@@ -705,6 +711,10 @@ inline uint64_t *reserve(size_t n)
     fringe += (n + 1);
     my_assert(fringe <= MEMORY_SIZE);
 }
+
+
+
+
 
 // Lisp Objects will be represeted using intptr_t with the low 3 bits
 // used as a tag. Every object in memory will be 8-byte aligned, so this
@@ -759,10 +769,13 @@ static inline size_t object_length(intptr_t header)
 // a rather broader context than just this code (in particular it will need
 // to support floating point, complex and rational numbers as well as just
 // small and large integers) so here I make the basic arithmetic support
-// JUST the bignum case.
+// JUST the bignum case. By making stored_as_fixnum() return false I avoid
+// the code here doing any dispatch, but by having the proper definition of
+// fits_into_fixnum() I arrange that I generate fixnums as output when that
+// is possible.
 
 inline bool stored_as_fixnum(intptr_t a)
-{    return ((int)a & tagBITS) == tagFIXNUM;
+{   return false;
 }
 
 inline int64_t int_of_handle(intptr_t a)
@@ -773,18 +786,11 @@ inline intptr_t int_to_handle(int64_t n)
 {   return tagFIXNUM + 8*(uintptr_t)n;
 }
 
-#define fixnum_dispatch1(name, a1)
-    return name##_b(vector_of_handle(a1))
+static int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
+static int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
 
-#define fixnum_dispatch2(name, a1, a2)
-    return name##_bb(vector_of_handle(a1), vector_of_handle(a2))
-
-static inline intptr_t pack_fixnum(int64_t n)
-{   return tagFIXNUM + 8*(uintptr_t)n;
-}
-
-static intline int64_t unpack_fixnum(intptr_t a)
-{   return ((int64_t)(a & ~tagBITS))/8;
+inline bool fits_into_fixnum(int64_t a)
+{   return a>=MIN_FIXNUM && a<=MAX_FIXNUM;
 }
 
 
@@ -795,8 +801,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     if (final_n == 1)
     {   fringe =- (n+1);
         int64_t v = (int64_t)p[0];
-        if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
-            return pack_fixnum(v);
+        if (fits_into_fixnum(v)) return pack_fixnum(v);
     }
     memory_used -= (n - final_n);
     bignum_header(p) = pack_header(typeBIGNUM, n*sizeof(uint64_t));
@@ -860,26 +865,54 @@ extern intptr_t uniform_signed(size_t n);
 extern intptr_t uniform_upto(intptr_t a);
 extern intptr_t random_upto_bits(size_t bits);
 
-extern intptr_t bigadd(intptr_t, intptr_t);
-extern intptr_t bigadd_small(intptr_t, uint64_t);
-extern intptr_t bigsubtract(intptr_t, intptr_t);
-extern intptr_t bigmultiply(intptr_t, intptr_t);
+extern intptr_t plus_ii(int64_t, int64_t);
+extern intptr_t plus_ib(int64_t, uint64_t *);
+extern intptr_t plus_bi(uint64_t *, int64_t);
+extern intptr_t plus_bb(uint64_t *, uint64_t *);
+
+extern intptr_t bigplus_small(intptr_t, uint64_t);
+
+extern intptr_t difference_ii(int64_t, int64_t);
+extern intptr_t difference_ib(int64_t, uint64_t *);
+extern intptr_t difference_bi(uint64_t *, int64_t);
+extern intptr_t difference_bb(uint64_t *, uint64_t *);
+
+extern intptr_t times_ii(int64_t, int64_t);
+extern intptr_t times_ib(int64_t, uint64_t *);
+extern intptr_t times_bi(uint64_t *, int64_t);
+extern intptr_t times_bb(uint64_t *, uint64_t *);
+
 extern intptr_t bigsquare(intptr_t);
+
 extern intptr_t bigpow (intptr_t, int64_t);
 extern intptr_t bigpow(intptr_t, int32_t);
+
 extern intptr_t bigquotient(intptr_t, intptr_t);
+
 extern intptr_t bigremainder(intptr_t, intptr_t);
+
 extern intptr_t bignegate(intptr_t);
+
 extern intptr_t biglogand(intptr_t, intptr_t);
+
 extern intptr_t biglogor(intptr_t, intptr_t);
+
 extern intptr_t biglogxor(intptr_t, intptr_t);
+
 extern intptr_t bigleftshift(intptr_t, int);
+
 extern intptr_t bigrightshift(intptr_t, int);
+
 extern intptr_t biglognot(intptr_t);
+
 extern bool bigeqn(intptr_t, intptr_t);
+
 extern bool biggreaterp(intptr_t, intptr_t);
+
 extern bool biggeq(intptr_t, intptr_t);
+
 extern bool biglessp(intptr_t, intptr_t);
+
 extern bool bigleq(intptr_t, intptr_t);
 
 extern char *bignum_to_string(intptr_t aa);
@@ -975,15 +1008,15 @@ public:
     }
 
     inline Bignum operator +(const Bignum &x) const
-    {   return Bignum(true, bigadd(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(plus, val, x.val));
     }
 
     inline Bignum operator -(const Bignum &x) const
-    {   return Bignum(true, bigsubtract(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(difference, val, x.val));
     }
 
     inline Bignum operator *(const Bignum &x) const
-    {   return Bignum(true, bigmultiply(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(times, val, x.val));
     }
 
     inline Bignum operator /(const Bignum &x) const
@@ -1043,19 +1076,19 @@ public:
     }
 
     inline void operator +=(const Bignum &x)
-    {   intptr_t r = bigadd(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(plus, val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator -=(const Bignum &x)
-    {   intptr_t r = bigsubtract(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(difference, val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator *=(const Bignum &x)
-    {   intptr_t r = bigmultiply(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(times, val, x.val);
         abandon(val);
         val = r;
     }
@@ -1103,14 +1136,14 @@ public:
     }
 
     inline Bignum operator ++()
-    {   intptr_t r = bigadd_small(val, 1);
+    {   intptr_t r = bigplus_small(val, 1);
         abandon(val);
         val = r;
         return *this;
     }
 
     inline Bignum operator ++(int)
-    {   intptr_t r = bigadd_small(val, 1);
+    {   intptr_t r = bigplus_small(val, 1);
 // I assign explicitly to oldval.val because trying to use a constructor
 // of Bignum or assigning to one would so things more complicated than I want!
         Bignum oldval;
@@ -1120,14 +1153,14 @@ public:
     }
 
     inline Bignum operator --()
-    {   intptr_t r = bigadd_small(val, -1);
+    {   intptr_t r = bigplus_small(val, -1);
         abandon(val);
         val = r;
         return *this;
     }
 
     inline Bignum operator --(int)
-    {   intptr_t r = bigadd_small(val, -1);
+    {   intptr_t r = bigplus_small(val, -1);
         Bignum oldval;
         oldval.val = val;
         val = r;
@@ -1768,11 +1801,6 @@ void free_string(char *p)
 // Strings are returned to the user as freshly malloced memory holding a
 // native-style C++ string with a terminating NUL character at the end.
 
-typedef struct _Cons
-{   intptr_t car;
-    intptr_t cdr;
-} Cons;
-
 size_t string_size(char *a)
 {   return strlen(a);
 }
@@ -2254,15 +2282,34 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 }
 
 char *bignum_to_string(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    return bignum_to_string(a, number_size(a));
+{   uint64_t *a, v[1];
+    size_t lena;
+    if (stored_as_fixnum(aa))
+    {   v[0] = int_of_handle(aa);
+        a = v;
+        lena = 1;
+    }
+    else
+    {   a = vector_of_handle(aa);
+        lena = number_size(a);
+    }
+    return bignum_to_string(a, lena);
 }
 
 // As well as converting to decimal I can do hex, octal or binary!
 
 char *bignum_to_string_hex(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t n = number_size(a);
+{   uint64_t *a, v[1];
+    size_t n;
+    if (stored_as_fixnum(aa))
+    {   v[0] = int_of_handle(aa);
+        a = v;
+        n = 1;
+    }
+    else
+    {   a = vector_of_handle(aa);
+        n = number_size(a);
+    }
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
     {   char *r = reserve_string(1);
@@ -2311,8 +2358,17 @@ char *bignum_to_string_hex(intptr_t aa)
 }
 
 char *bignum_to_string_octal(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t n = number_size(a);
+{   uint64_t *a, v[1];
+    size_t n;
+    if (stored_as_fixnum(aa))
+    {   v[0] = int_of_handle(aa);
+        a = v;
+        n = 1;
+    }
+    else
+    {   a = vector_of_handle(aa);
+        n = number_size(a);
+    }
     size_t width = (64*n + 2)/3; // raw number of octal digits needed.
     uint64_t top = a[n-1];
     bool sign = negative(top);
@@ -2341,8 +2397,17 @@ char *bignum_to_string_octal(intptr_t aa)
 }
 
 char *bignum_to_string_binary(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t n = number_size(a);
+{   uint64_t *a, v[1];
+    size_t n;
+    if (stored_as_fixnum(aa))
+    {   v[0] = int_of_handle(aa);
+        a = v;
+        n = 1;
+    }
+    else
+    {   a = vector_of_handle(aa);
+        n = number_size(a);
+    }
 // Making the value zero a special case simplifies things later on!
     if (n == 1 && a[0] == 0)
     {   char *r = reserve_string(1);
@@ -2752,7 +2817,7 @@ intptr_t bigrightshift(intptr_t aa, int n)
 
 // Add when the length of a is greater than that of b.
 
-static inline void ordered_bigadd(const uint64_t *a, size_t lena,
+static inline void ordered_bigplus(const uint64_t *a, size_t lena,
                                   const uint64_t *b, size_t lenb,
                                   uint64_t *r, size_t &lenr)
 {   my_assert(lena >= lenb);
@@ -2783,43 +2848,71 @@ static inline void ordered_bigadd(const uint64_t *a, size_t lena,
 
 // Add a small number to a bignum
 
-void bigadd_small(const uint64_t *a, size_t lena,
+void bigplus_small(const uint64_t *a, size_t lena,
                   int64_t n,
                   uint64_t *r, size_t &lenr)
 {   uint64_t w[1];
     w[0] = (uint64_t)n;
-    ordered_bigadd(a, lena, w, 1, r, lenr);
+    ordered_bigplus(a, lena, w, 1, r, lenr);
 }
 
 // When I do a general addition I will not know which input is longer.
 
-void bigadd(const uint64_t *a, size_t lena,
+void bigplus(const uint64_t *a, size_t lena,
             const uint64_t *b, size_t lenb,
             uint64_t *r, size_t &lenr)
-{   if (lena >= lenb) return ordered_bigadd(a, lena, b, lenb, r, lenr);
-    else return ordered_bigadd(b, lenb, a, lena, r, lenr);
+{   if (lena >= lenb) return ordered_bigplus(a, lena, b, lenb, r, lenr);
+    else return ordered_bigplus(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t bigadd(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t plus_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na+1;
     else n = nb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigadd(a, na, b, nb, p, final_n);
+    bigplus(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
-intptr_t bigadd_small(intptr_t aa, int64_t b)
+intptr_t plus_ii(int64_t a, int64_t b)
+{   uint64_t aa[1], bb[1];
+    aa[0] = a;
+    bb[0] = b;
+    uint64_t *r = reserve(2);
+    size_t final_n;
+    bigplus(aa, 1, bb, 1, r, final_n);
+    return confirm_size(r, 2, final_n);
+}
+
+intptr_t plus_ib(int64_t a, uint64_t *b)
+{   uint64_t aa[1];
+    aa[0] = a;
+    size_t lenb = number_size(b);
+    uint64_t *r = reserve(lenb+1);
+    size_t final_n;
+    bigplus(aa, 1, b, lenb, r, final_n);
+    return confirm_size(r, lenb+1, final_n);
+}
+
+intptr_t plus_bi(uint64_t *a, int64_t b)
+{   size_t lena = number_size(a);
+    uint64_t bb[1];
+    bb[0] = b;
+    uint64_t *r = reserve(lena+1);
+    size_t final_n;
+    bigplus(a, lena, bb, 1, r, final_n);
+    return confirm_size(r, lena+1, final_n);
+}
+
+intptr_t bigplus_small(intptr_t aa, int64_t b)
 {   uint64_t *a = vector_of_handle(aa);
     size_t na = number_size(a);
     uint64_t *p = reserve(na+1);
     size_t final_n;
-    bigadd_small(a, na, b, p, final_n);
+    bigplus_small(a, na, b, p, final_n);
     return confirm_size(p, na+1, final_n);
 }
 
@@ -2908,10 +3001,8 @@ void bigsubtract(const uint64_t *a, size_t lena,
     else return ordered_bigrevsubtract(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t bigsubtract(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t difference_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na+1;
@@ -2922,18 +3013,77 @@ intptr_t bigsubtract(intptr_t aa, intptr_t bb)
     return confirm_size(p, n, final_n);
 }
 
-intptr_t bigrevsubtract(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t difference_ii(int64_t a, int64_t b)
+{   uint64_t aa[1], bb[1];
+    aa[0] = a;
+    bb[0] = b;
+    uint64_t *r = reserve(2);
+    size_t final_n;
+    bigsubtract(aa, 1, bb, 1, r, final_n);
+    return confirm_size(r, 2, final_n);
+}
+
+intptr_t difference_ib(int64_t a, uint64_t *b)
+{   uint64_t aa[1];
+    aa[0] = a;
+    size_t lenb = number_size(b);
+    uint64_t *r = reserve(lenb+1);
+    size_t final_n;
+    bigsubtract(aa, 1, b, lenb, r, final_n);
+    return confirm_size(r, lenb+1, final_n);
+}
+
+intptr_t difference_bi(uint64_t *a, int64_t b)
+{   size_t lena = number_size(a);
+    uint64_t bb[1];
+    bb[0] = b;
+    uint64_t *r = reserve(lena+1);
+    size_t final_n;
+    bigsubtract(a, lena, bb, 1, r, final_n);
+    return confirm_size(r, lena+1, final_n);
+}
+
+
+intptr_t revdifference_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
-    if (a >= b) n = na+1;
+    if (na >= nb) n = na+1;
     else n = nb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
     bigsubtract(b, nb, a, na, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+intptr_t revdifference_ii(int64_t a, int64_t b)
+{   uint64_t aa[1], bb[1];
+    aa[0] = a;
+    bb[0] = b;
+    uint64_t *r = reserve(2);
+    size_t final_n;
+    bigsubtract(bb, 1, aa, 1, r, final_n);
+    return confirm_size(r, 2, final_n);
+}
+
+intptr_t revdifference_ib(int64_t a, uint64_t *b)
+{   uint64_t aa[1];
+    aa[0] = a;
+    size_t lenb = number_size(b);
+    uint64_t *r = reserve(lenb+1);
+    size_t final_n;
+    bigsubtract(b, lenb, aa, 1, r, final_n);
+    return confirm_size(r, lenb+1, final_n);
+}
+
+intptr_t revdifference_bi(uint64_t *a, int64_t b)
+{   size_t lena = number_size(a);
+    uint64_t bb[1];
+    bb[0] = b;
+    uint64_t *r = reserve(lena+1);
+    size_t final_n;
+    bigsubtract(bb, 1, a, lena, r, final_n);
+    return confirm_size(r, lena+1, final_n);
 }
 
 //=========================================================================
@@ -2990,16 +3140,44 @@ void bigmultiply(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-intptr_t bigmultiply(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t times_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n = na+nb;
     uint64_t *p = reserve(n);
     size_t final_n;
     bigmultiply(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+intptr_t times_ii(int64_t a, int64_t b)
+{   uint64_t aa[1], bb[1];
+    aa[0] = a;
+    bb[0] = b;
+    uint64_t *r = reserve(2);
+    size_t final_n;
+    bigmultiply(aa, 1, bb, 1, r, final_n);
+    return confirm_size(r, 2, final_n);
+}
+
+intptr_t times_ib(int64_t a, uint64_t *b)
+{   uint64_t aa[1];
+    aa[0] = a;
+    size_t lenb = number_size(b);
+    uint64_t *r = reserve(lenb+1);
+    size_t final_n;
+    bigmultiply(aa, 1, b, lenb, r, final_n);
+    return confirm_size(r, lenb+1, final_n);
+}
+
+intptr_t times_bi(uint64_t *a, int64_t b)
+{   size_t lena = number_size(a);
+    uint64_t bb[1];
+    bb[0] = b;
+    uint64_t *r = reserve(lena+1);
+    size_t final_n;
+    bigmultiply(a, lena, bb, 1, r, final_n);
+    return confirm_size(r, lena+1, final_n);
 }
 
 // For big multi-digit numbers squaring can be done almost twice as fast
@@ -3752,6 +3930,15 @@ int main(int argc, char *argv[])
     reseed(seed);
 
     Bignum a, b, c, c1, c2, c3, c4;
+
+    a = "10000000000000000000000000";
+    std::cout << "a = " << a << std::endl;
+    std::cout << "a*a = " << a*a << std::endl;
+    std::cout << "a*100 = " << a*Bignum(100) << std::endl;
+    std::cout << "100*a = " << Bignum(100)*a << std::endl;
+    std::cout << "100*100 = " << Bignum(100)*Bignum(100) << std::endl;
+
+    return 0;
 
     int maxbits;
     int ntries;
