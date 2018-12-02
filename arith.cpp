@@ -2877,14 +2877,26 @@ intptr_t plus_bb(uint64_t *a, uint64_t *b)
     return confirm_size(p, n, final_n);
 }
 
+// At present I implement the op_ii, opt_ib and opt_bi operations
+// by converting the integer argument to a 1-word bignum and dropping into
+// the general bignum code. This will generally be a long way from the
+// most efficient implementation, so at a later stage I will want to hone
+// the code to make it better! Well I do that for plus_ii() in part to
+// convince myself that it is worthwhile.
+
 intptr_t plus_ii(int64_t a, int64_t b)
-{   uint64_t aa[1], bb[1];
-    aa[0] = a;
-    bb[0] = b;
-    uint64_t *r = reserve(2);
-    size_t final_n;
-    bigplus(aa, 1, bb, 1, r, final_n);
-    return confirm_size(r, 2, final_n);
+{
+// The two integer arguments will in fact each have been derived from a
+// tagged representation, and a consequence of that is that I can add
+// them and be certain I will not get arithmetic overflow. However the
+// resulting value may no longer be representable as a fixnum.
+    int64_t c = a + b;
+    if (fits_into_fixnum(c)) return int_to_handle(c);
+// Now because there had not been overflow I know that the bignum will
+// only need one word.
+    uint64_t *r = reserve(1);
+    r[0] = c;
+    return confirm_size(r, 1, 1);
 }
 
 intptr_t plus_ib(int64_t a, uint64_t *b)
