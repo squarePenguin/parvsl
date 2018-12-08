@@ -5440,7 +5440,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 // string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
@@ -5472,7 +5472,7 @@ LispObject Lfilep(LispObject lits, LispObject x)
         return error1("bad arg for filep", x);
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
