@@ -7580,7 +7580,7 @@ int main(int argc, char *argv[])
 //        filename   read from that file rather than from the standard input.
         if (strcmp(argv[i], "-z") == 0) coldstart = 1;
         else if (strncmp(argv[i], "-i", 2) == 0)
-        {   if (argv[i][2]==0) strcpy(imagename, argv[i]+2);
+        {   if (argv[i][2]!=0) strcpy(imagename, argv[i]+2);
             else if (i<argc-1) strcpy(imagename, argv[++i]);
         }
         else if (argv[i][0] != '-') inputfilename = argv[i], interactive = 0;
