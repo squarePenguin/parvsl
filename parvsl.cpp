@@ -1618,9 +1618,9 @@ int rdch()
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s = el_gets(el_struct, &n);
+                if (s == NULL) return EOF;
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
-                if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
                 strncpy(input_line, s, n);
                 input_line[INPUT_LINE_SIZE-1] = 0;
@@ -1659,11 +1659,23 @@ void internalprint(LispObject x)
             }
             while (isCONS(x))
             {   i = printflags;
+// With the software bignum scheme this is messy! a data structure of the
+// for (~bignum d1 d2 ...) must be interpreted as a number not a list. But
+// then one gets the case (a b !~bignum x y) and that maybe needs to render
+// as (a b . NUMBER).
                 if (qcar(x) == bignum &&
                     (pn = call1("~big2str", qcdr(x))) != NULLATOM &&
                     pn != nil)
                 {   printflags = printPLAIN;
+                    if (sep == ' ')
+                    {   checkspace(3);
+                        wrch(' '); wrch('.'); wrch(' ');
+                    }
                     internalprint(pn);
+                    if (sep == ' ')
+                    {   checkspace(1);
+                        wrch(')');
+                    }
                     printflags = i;
                     return;
                 }
@@ -2245,17 +2257,13 @@ LispObject interpreted1(LispObject b, LispObject a1)
         return error1("Not enough arguments provided", bvl);
     }
     bvl = r;
-    // save1 = qvalue(bvl);
-
     par::Shallow_bind bind_bvl(bvl, a1);
-    // qvalue(bvl) = a1;
     r = nil;
     while (isCONS(b))
     {   r = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    // qvalue(bvl) = save1;
     return r;
 }
 
@@ -2276,16 +2284,12 @@ LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
 
     par::Shallow_bind bind_bvl(bvl, a1);
     par::Shallow_bind bind_v2(v2, a2);
-    // swap(a1, qvalue(bvl));
-    // swap(a2, qvalue(v2));
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    // qvalue(v2) = a2;
-    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2306,9 +2310,6 @@ LispObject interpreted3(LispObject b, LispObject a1,
     bvl = qcar(bvl);
     v2 = qcar(v2);
     v3 = qcar(v3);
-    // swap(a1, qvalue(bvl));
-    // swap(a2, qvalue(v2));
-    // swap(a3, qvalue(v3));
     par::Shallow_bind bind_bvl(bvl, a1);
     par::Shallow_bind bind_v2(v2, a2);
     par::Shallow_bind bind_v3(v3, a3);
@@ -2318,9 +2319,6 @@ LispObject interpreted3(LispObject b, LispObject a1,
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    // qvalue(v3) = a3;
-    // qvalue(v2) = a2;
-    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2343,10 +2341,6 @@ LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
     v2 = qcar(v2);
     v3 = qcar(v3);
     v4 = qcar(v4);
-    // swap(a1, qvalue(bvl));
-    // swap(a2, qvalue(v2));
-    // swap(a3, qvalue(v3));
-    // swap(a4, qvalue(v4));
     par::Shallow_bind bind_bvl(bvl, a1);
     par::Shallow_bind bind_v2(v2, a2);
     par::Shallow_bind bind_v3(v3, a3);
@@ -2357,10 +2351,6 @@ LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    // qvalue(v4) = a4;
-    // qvalue(v3) = a3;
-    // qvalue(v2) = a2;
-    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2429,10 +2419,6 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
         a = qcdr(a);
     }
     nreverse(v5up);
-    // qvalue(v4) = a4;
-    // qvalue(v3) = a3;
-    // qvalue(v2) = a2;
-    // qvalue(bvl) = a1;
     return w;
 }
 
@@ -2457,11 +2443,29 @@ LispObject evlis(LispObject x)
     return p;
 }
 
+// This function exists just so I can set a breakpoint on it!
+void breakpoint()
+{
+}
+
 LispObject eval(LispObject x)
 {
 #ifdef TRACEALL
     if (isCONS(x))
-    {  printf("eval: "); print(qcar(x)); // Eek! @@@@
+    {  LispObject ff = qcar(x);
+       printf("eval: "); print(ff); // Eek! @@@@
+       if (isSYMBOL(ff) &&
+           (strncmp(qstring(qpname(ff)), "leq", 3)==0 ||
+            strncmp(qstring(qpname(ff)), "widestring", 10)==0 ||
+            strncmp(qstring(qpname(ff)), "~sizecheck", 10)==0 ||
+            strncmp(qstring(qpname(ff)), "prin2*", 6)==0))
+       {  printf("!!: "); print(x);
+          for (LispObject a=qcdr(x); !isSYMBOL(a); a=qcdr(a))
+          {  LispObject aa = eval(qcar(a));
+             printf("arg: "); print(aa);
+          }
+          breakpoint();
+       }
     }
 #endif
 // The intent of fname is that when running VSL under a debugger it can
@@ -2492,6 +2496,10 @@ LispObject eval(LispObject x)
     }
     if (isSYMBOL(x))
     {   LispObject v = par::symval(x);
+#ifdef TRACEALL
+//printf("value of symbol "); fflush(stdout); print(x);
+//printf("... is "); fflush(stdout); print(v); fflush(stdout);
+#endif
         if (v == undefined) {
             return error1("undefined variable", x);
         }
@@ -2821,10 +2829,7 @@ LispObject interpretspecform(LispObject lits, LispObject x)
     lits = qcdr(lits);
     if (!isCONS(v) || !isSYMBOL(v = qcar(v))) return nil;
     par::Shallow_bind(v, x);
-    // v_value = qvalue(v);
-    // qvalue(v) = x;
     lits = Lprogn(nil, lits);
-    // qvalue(v) = v_value;
     return lits;
 }
 
@@ -3203,8 +3208,10 @@ LispObject Lvector_5up(LispObject lits, LispObject a1, LispObject a2,
 inline
 void global_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) == 0) {
-        // If it was not global already, move value back from thread_local storage
+        // If it was not global already, move value back from
+        // thread_local storage
         qvalue(s) = par::get_symbol(qfixnum(qvalue(s)));
+        if (qvalue(s) == undefined) qvalue(s) = nil;
         qflags(s) &= ~flagFLUID; // disable fluid
         qflags(s) |= flagGLOBAL;
     }
@@ -3212,14 +3219,15 @@ void global_symbol(LispObject s) {
 
 inline
 void fluid_symbol(LispObject s) {
-    // If it was global, move the value to thread_local storage adn store the location.
+    // If it was global, move the value to thread_local storage
+    // and store the location.
     if (qflags(s) & flagGLOBAL) {
         int loc = par::allocate_symbol();
         par::get_symbol(loc) = qvalue(s);
         qvalue(s) = packfixnum(loc);
-        
         qflags(s) &= ~flagGLOBAL; // disable global
     }
+    else if (par::symval(s) == undefined) par::symval(s) = nil;
 
     qflags(s) |= flagFLUID;
 }
@@ -5440,7 +5448,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 // string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
@@ -5472,7 +5480,7 @@ LispObject Lfilep(LispObject lits, LispObject x)
         return error1("bad arg for filep", x);
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
@@ -5632,7 +5640,7 @@ LispObject Lerror_2(LispObject lits, LispObject x, LispObject y)
 }
 
 // This flag lets me make every error noisy. For desparate debugging
-static bool debugFlag = false;
+static bool debugFlag = true;
 
 LispObject Lerrorset_3(LispObject lits, LispObject a1,
                        LispObject a2, LispObject a3)
@@ -6033,7 +6041,8 @@ void setup()
 // way to do things. I am going to assume that nothing can fail within this
 // setup code, so I can omit all checks for error conditions.
 
-// TODO VB: for now global values can be accessed as before,but might want to unify
+// TODO VB: for now global values can be accessed as before, but
+// might want to unify
     int i;
     undefined = lookup("~indefinite-value~", 18, 3);
     qflags(undefined) |= flagGLOBAL;
@@ -7562,6 +7571,7 @@ int main(int argc, char *argv[])
 #else // __WIN32__
     snprintf(imagename, sizeof(imagename), "%s.img", argv[0]);
 #endif // __WIN32__
+    printf("default imagename = <%s>\n", imagename);
     for (int i=1; i<argc; i++)
     {
 // I have some VERY simple command-line options here.
@@ -7569,9 +7579,13 @@ int main(int argc, char *argv[])
 //        -ifilename use that as image file
 //        filename   read from that file rather than from the standard input.
         if (strcmp(argv[i], "-z") == 0) coldstart = 1;
-        else if (strncmp(argv[i], "-i", 2) == 0) strcpy(imagename, argv[i]+2);
+        else if (strncmp(argv[i], "-i", 2) == 0)
+        {   if (argv[i][2]==0) strcpy(imagename, argv[i]+2);
+            else if (i<argc-1) strcpy(imagename, argv[++i]);
+        }
         else if (argv[i][0] != '-') inputfilename = argv[i], interactive = 0;
     }
+    printf("imagename = <%s>\n", imagename);
     printf("VSL version %d.%.3d\n", IVERSION, FVERSION); fflush(stdout);
     linepos = 0;
     for (size_t i=0; i<MAX_LISPFILES; i++) lispfiles[i] = 0;
@@ -7596,7 +7610,8 @@ int main(int argc, char *argv[])
         {   gzFile f = gzopen(imagename, "rb");
             int i, errcode;
             if (f == NULL)
-            {   printf("Error: unable to open image for reading\n");
+            {   printf("Error: unable to open image (%s) for reading\n",
+                       imagename);
                 my_exit(EXIT_FAILURE);
             }
             if ((i = warm_start(f, &errcode)) != 0)
@@ -7632,6 +7647,23 @@ int main(int argc, char *argv[])
             }
         }
         fflush(stdout);
+// I am fixing things so that "-Tname" on the command line arranges to trace
+// function "name".
+        for (int i=1; i<argc; i++)
+        {   if (argv[i][0] == '-' && argv[i][1] == 'T')
+            {   const char *d1 = &argv[i][2];
+                LispObject d3 = lookup(d1, strlen(d1), 1);
+                qflags(d3) |= flagTRACED;
+            }
+// -Dname displays the value and definition of a symbol
+            else if (argv[i][0] == '-' && argv[i][1] == 'D')
+            {   const char *d1 = &argv[i][2];
+                LispObject d3 = lookup(d1, strlen(d1), 1);
+                printf("Symbol "); prin(d3);
+                printf(" Value cell = "); prin(qvalue(d3));
+                printf(" Lits = "); print(qlits(d3));
+            }
+        }
         curchar = '\n'; symtype = '?'; cursym = nil;
         if (boffop == 0) // Use standard restart function from image.
         {   if (restartfn == nil) readevalprint(0);
@@ -7674,4 +7706,3 @@ int main(int argc, char *argv[])
 }
 
 // end of main source file.
-

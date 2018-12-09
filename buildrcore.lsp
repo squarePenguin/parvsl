@@ -610,11 +610,11 @@ rds(xxx := open("$reduce/packages/support/build.red", 'input));
 
 (load!-package!-sources rend_file 'support)
 
-%(load!-package!-sources 'poly 'poly)
-%(load!-package!-sources 'alg 'alg)
-%(load!-package!-sources 'arith 'arith)  %  Needed by roots, specfn*, (psl).
-%(load!-package!-sources 'entry 'support)
-%(load!-package!-sources 'remake 'support)
+(load!-package!-sources 'poly 'poly)
+(load!-package!-sources 'alg 'alg)
+(load!-package!-sources 'arith 'arith)  %  Needed by roots, specfn*, (psl).
+(load!-package!-sources 'entry 'support)
+(load!-package!-sources 'remake 'support)
 
 (preserve 'begin "Rcore" nil)
 (stop 0)

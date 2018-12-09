@@ -30,6 +30,11 @@ parvsl:    parvsl.cpp common.hpp thread_data.hpp
 		parvsl.cpp $(LIBS) -o parvsl \
 		2>&1 | tee parvsl.log
 
+parvsl1:    parvsl.cpp common.hpp thread_data.hpp
+	g++ -fno-diagnostics-color -pthread $(CFLAGS) \
+		-DTRACEALL=1 parvsl.cpp $(LIBS) -o parvsl \
+		2>&1 | tee parvsl.log
+
 fastparvsl:    parvsl.cpp common.hpp thread_data.hpp
 	g++ -fno-diagnostics-color -pthread $(FASTCFLAGS) \
 		parvsl.cpp $(LIBS) -o fastparvsl \
