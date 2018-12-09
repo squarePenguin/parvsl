@@ -333,7 +333,9 @@ LispObject *C_stackbase;
 #define lower      bases[24]
 #define dfprint    bases[25]
 #define bignum     bases[26]
-#define BASES_SIZE       (MAX_LISPFILES+27)
+#define fluid      bases[27]
+#define global     bases[28]
+#define BASES_SIZE       (MAX_LISPFILES+29)
 
 #define filecursym (&bases[27])
 
@@ -1827,11 +1829,23 @@ void internalprint(LispObject x)
             }
             while (isCONS(x))
             {   i = printflags;
+// With the software bignum scheme this is messy! a data structure of the
+// for (~bignum d1 d2 ...) must be interpreted as a number not a list. But
+// then one gets the case (a b !~bignum x y) and that maybe needs to render
+// as (a b . NUMBER).
                 if (qcar(x) == bignum &&
                     (pn = call1("~big2str", qcdr(x))) != NULLATOM &&
                     pn != nil)
                 {   printflags = printPLAIN;
+                    if (sep == ' ')
+                    {   checkspace(3);
+                        wrch(' '); wrch('.'); wrch(' ');
+                    }
                     internalprint(pn);
+                    if (sep == ' ')
+                    {   checkspace(1);
+                        wrch(')');
+                    }
                     printflags = i;
                     return;
                 }
@@ -3776,6 +3790,50 @@ LispObject Lremprop(LispObject lits, LispObject x, LispObject y)
             return r;
         }
         p = *(prev = &qcdr(p));
+    }
+    return nil;
+}
+
+LispObject Lfluid(LispObject lits, LispObject x)
+{   while (isCONS(x))
+    {   LispObject v = qcar(x);
+        x = qcdr(x);
+        if (!isSYMBOL(v)) continue;
+        Lremprop(lits, v, global);
+        Lput(lits, v, fluid, lisptrue);
+        if (qvalue(v) == undefined) qvalue(v) = nil;
+    }
+    return nil;
+}
+
+LispObject Lglobal(LispObject lits, LispObject x)
+{   while (isCONS(x))
+    {   LispObject v = qcar(x);
+        x = qcdr(x);
+        if (!isSYMBOL(v)) continue;
+        Lremprop(lits, v, fluid);
+        Lput(lits, v, global, lisptrue);
+        if (qvalue(v) == undefined) qvalue(v) = nil;
+    }
+    return nil;
+}
+
+LispObject Lunfluid(LispObject lits, LispObject x)
+{   while (isCONS(x))
+    {   LispObject v = qcar(x);
+        x = qcdr(x);
+        if (!isSYMBOL(v)) continue;
+        Lremprop(lits, v, fluid);
+    }
+    return nil;
+}
+
+LispObject Lunglobal(LispObject lits, LispObject x)
+{   while (isCONS(x))
+    {   LispObject v = qcar(x);
+        x = qcdr(x);
+        if (!isSYMBOL(v)) continue;
+        Lremprop(lits, v, global);
     }
     return nil;
 }
@@ -5822,11 +5880,13 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("filep",             Lfilep),            \
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
+    SETUP_TABLE_SELECT("fluid",             Lfluid),            \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
     SETUP_TABLE_SELECT("fp-subnorm",        Lfp_subnorm),       \
     SETUP_TABLE_SELECT("fp-signbit",        Lfp_signbit),       \
+    SETUP_TABLE_SELECT("global",            Lglobal),           \
     SETUP_TABLE_SELECT("iadd1",             Ladd1),             \
     SETUP_TABLE_SELECT("iceiling",          Lceiling),          \
     SETUP_TABLE_SELECT("ifix",              Lfix),              \
@@ -5870,6 +5930,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("stringp",           Lstringp),          \
     SETUP_TABLE_SELECT("symbolp",           Lsymbolp),          \
     SETUP_TABLE_SELECT("trace",             Ltrace),            \
+    SETUP_TABLE_SELECT("unfluid",           Lunfluid),          \
+    SETUP_TABLE_SELECT("unglobal",          Lunglobal),         \
     SETUP_TABLE_SELECT("untrace",           Luntrace),          \
     SETUP_TABLE_SELECT("upbv",              Lupbv),             \
     SETUP_TABLE_SELECT("vectorp",           Lvectorp),          \
@@ -6112,11 +6174,18 @@ void setup()
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
     qvalue(lisptrue) = lisptrue;
+    fluid = lookup("fluid", 5, 3);
+    global = lookup("global", 6, 3);
+    Lput(nil, nil, global, lisptrue);
+    Lput(nil, lisptrue, global, lisptrue);
+    Lput(nil, undefined, global, lisptrue);
     qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
     qflags(echo) |= flagFLUID;
+    Lput(nil, echo, fluid, lisptrue);
     {   LispObject nn;
         qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
         qflags(nn) |= flagFLUID;
+        Lput(nil, nn, fluid, lisptrue);
     }
     qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
@@ -6124,12 +6193,14 @@ void setup()
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
     qflags(lispsystem) |= flagGLOBAL;
+    Lput(nil, lispsystem, global, lisptrue);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
     qflags(eofsym) |= flagGLOBAL;
+    Lput(nil, eofsym, global, lisptrue);
     qvalue(eofsym) = eofsym;
     lambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
@@ -6142,11 +6213,14 @@ void setup()
     pipe = lookup("pipe", 4, 3);
     qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
     qflags(dfprint) |= flagFLUID;
+    Lput(nil, dfprint, fluid, lisptrue);
     bignum = lookup("~bignum", 7, 3);
     qvalue(raise = lookup("*raise", 6, 3)) = nil;
     qvalue(lower = lookup("*lower", 6, 3)) = lisptrue;
     qflags(raise) |= flagFLUID;
     qflags(lower) |= flagFLUID;
+    Lput(nil, raise, fluid, lisptrue);
+    Lput(nil, lower, fluid, lisptrue);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
@@ -7585,7 +7659,10 @@ int main(int argc, char *argv[])
 //        -ifilename use that as image file
 //        filename   read from that file rather than from the standard input.
         if (strcmp(argv[i], "-z") == 0) coldstart = 1;
-        else if (strncmp(argv[i], "-i", 2) == 0) strcpy(imagename, argv[i]+2);
+        else if (strncmp(argv[i], "-i", 2) == 0)
+        {   if (argv[i][2] != 0) strcpy(imagename, argv[i]+2);
+            else if (i<argc-1) strcpy(imagename, argv[++i]);
+        }
         else if (argv[i][0] != '-') inputfilename = argv[i], interactive = 0;
     }
     printf("VSL version %d.%.3d\n", IVERSION, FVERSION); fflush(stdout);
@@ -7648,6 +7725,23 @@ int main(int argc, char *argv[])
             }
         }
         fflush(stdout);
+// I am fixing things so that "-Tname" on the command line arranges to trace
+// function "name".
+        for (int i=1; i<argc; i++)
+        {   if (argv[i][0] == '-' && argv[i][1] == 'T')
+            {   const char *d1 = &argv[i][2];
+                LispObject d3 = lookup(d1, strlen(d1), 1);
+                qflags(d3) |= flagTRACED;
+            }
+// -Dname displays the value and definition of a symbol
+            else if (argv[i][0] == '-' && argv[i][1] == 'D')
+            {   const char *d1 = &argv[i][2];
+                LispObject d3 = lookup(d1, strlen(d1), 1);
+                printf("Symbol "); prin(d3);
+                printf(" Value cell = "); prin(qvalue(d3));
+                printf(" Lits = "); print(qlits(d3));
+            }
+        }
         curchar = '\n'; symtype = '?'; cursym = nil;
         if (boffop == 0) // Use standard restart function from image.
         {   if (restartfn == nil) readevalprint(0);

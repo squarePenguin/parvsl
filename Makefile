@@ -1,6 +1,6 @@
 # Makefile for vsl
 
-CFLAGS = -O0 -g -Wall
+CFLAGS = -Og -g -Wall
 FASTCFLAGS = -O3 -Wall
 
 ifeq ($(shell uname),Darwin)
@@ -104,6 +104,20 @@ parrcore:	parvsl
 	time ./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildrcore.lsp | tee parrcore.log
+
+fastrcore:	fastvsl
+	mkdir -p fastrcore.img.modules
+	rm -f fastrcore.img.modules/* fastrcore.img inline-defs.dat
+	time ./fastvsl -z -ifastrcore.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildrcore.lsp | tee fastrcore.log
+
+fastparrcore:	fastparvsl
+	mkdir -p fastparrcore.img.modules
+	rm -f fastparrcore.img.modules/* fastparrcore.img inline-defs.dat
+	time ./fastparvsl -z -ifastparrcore.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildrcore.lsp | tee fastparrcore.log
 
 step2:	vsl
 	cp rcore.img step2.img

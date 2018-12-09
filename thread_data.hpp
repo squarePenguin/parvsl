@@ -13,13 +13,15 @@
 #include <thread>
 #include <unordered_map>
 
+extern LispObject print(LispObject);
+
 namespace par {
 // Segments are a way of splitting the memory into further chunks
 // such that every thread is only writing to a chunk at a time.
 
 class Thread_data {
 public:
-    // CR VB: Should this be defined in therms of LispObject?
+    // CR VB: Should this be defined in terms of LispObject?
     static constexpr int SEGMENT_SIZE = 65536; // 64KB per segment
     // VB: use these as the segment we can write on.
     uintptr_t segment_fringe = -1;

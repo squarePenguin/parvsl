@@ -660,8 +660,8 @@ inline void abandon_string(char *s)
      name##_b(vector_of_handle(a1)))
 
 #define fixnum_dispatch2n(name, a1, n)                                     \
-    (stored_as_fixnum(a1) ? name##_i(int_of_handle(a1, n)) :               \
-     name##_b(vector_of_handle(a1, n)))
+    (stored_as_fixnum(a1) ? name##_i(int_of_handle(a1), n) :               \
+     name##_b(vector_of_handle(a1), n))
 
 #define fixnum_dispatch2(name, a1, a2)                                     \
     (stored_as_fixnum(a1) ?                                                \
@@ -882,38 +882,80 @@ extern intptr_t times_ib(int64_t, uint64_t *);
 extern intptr_t times_bi(uint64_t *, int64_t);
 extern intptr_t times_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigsquare(intptr_t);
+extern intptr_t square_b(uint64_t *);
+extern intptr_t square_i(intptr_t);
 
-extern intptr_t bigpow (intptr_t, int64_t);
-extern intptr_t bigpow(intptr_t, int32_t);
+extern intptr_t pow_b(uint64_t *, int64_t);
+extern intptr_t pow_b(intptr_t, int32_t);
+extern intptr_t pow_i(uint64_t *, int64_t);
+extern intptr_t pow_i(intptr_t, int32_t);
 
-extern intptr_t bigquotient(intptr_t, intptr_t);
+extern intptr_t quotient_ii(int64_t, int64_t);
+extern intptr_t quotient_ib(int64_t, uint64_t *);
+extern intptr_t quotient_bi(uint64_t *, int64_t);
+extern intptr_t quotient_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigremainder(intptr_t, intptr_t);
+extern intptr_t remainder_ii(int64_t, int64_t);
+extern intptr_t remainder_ib(int64_t, uint64_t *);
+extern intptr_t remainder_bi(uint64_t *, int64_t);
+extern intptr_t remainder_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bignegate(intptr_t);
+extern intptr_t divide_ii(int64_t, int64_t);
+extern intptr_t divide_ib(int64_t, uint64_t *);
+extern intptr_t divide_bi(uint64_t *, int64_t);
+extern intptr_t divide_bb(uint64_t *, uint64_t *);
 
-extern intptr_t biglogand(intptr_t, intptr_t);
+extern intptr_t minus_b(uint64_t *);
+extern intptr_t minus_i(intptr_t);
 
-extern intptr_t biglogor(intptr_t, intptr_t);
+extern intptr_t logand_ii(int64_t, int64_t);
+extern intptr_t logand_ib(int64_t, uint64_t *);
+extern intptr_t logand_bi(uint64_t *, int64_t);
+extern intptr_t logand_bb(uint64_t *, uint64_t *);
 
-extern intptr_t biglogxor(intptr_t, intptr_t);
+extern intptr_t logor_ii(int64_t, int64_t);
+extern intptr_t logor_ib(int64_t, uint64_t *);
+extern intptr_t logor_bi(uint64_t *, int64_t);
+extern intptr_t logor_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigleftshift(intptr_t, int);
+extern intptr_t logxor_ii(int64_t, int64_t);
+extern intptr_t logxor_ib(int64_t, uint64_t *);
+extern intptr_t logxor_bi(uint64_t *, int64_t);
+extern intptr_t logxor_bb(uint64_t *, uint64_t *);
 
-extern intptr_t bigrightshift(intptr_t, int);
+extern intptr_t leftshift_b(uint64_t *, int);
+extern intptr_t leftshift_i(intptr_t, int);
 
-extern intptr_t biglognot(intptr_t);
+extern intptr_t rightshift_b(uint64_t *, int);
+extern intptr_t rightshift_i(intptr_t, int);
 
-extern bool bigeqn(intptr_t, intptr_t);
+extern intptr_t lognot_b(uint64_t *);
+extern intptr_t lognot_i(intptr_t);
 
-extern bool biggreaterp(intptr_t, intptr_t);
+extern intptr_t eqn_ii(int64_t, int64_t);
+extern intptr_t eqn_ib(int64_t, uint64_t *);
+extern intptr_t eqn_bi(uint64_t *, int64_t);
+extern intptr_t eqn_bb(uint64_t *, uint64_t *);
 
-extern bool biggeq(intptr_t, intptr_t);
+extern intptr_t geq_ii(int64_t, int64_t);
+extern intptr_t geq_ib(int64_t, uint64_t *);
+extern intptr_t geq_bi(uint64_t *, int64_t);
+extern intptr_t geq_bb(uint64_t *, uint64_t *);
 
-extern bool biglessp(intptr_t, intptr_t);
+extern intptr_t greaterp_ii(int64_t, int64_t);
+extern intptr_t greaterp_ib(int64_t, uint64_t *);
+extern intptr_t greaterp_bi(uint64_t *, int64_t);
+extern intptr_t greaterp_bb(uint64_t *, uint64_t *);
 
-extern bool bigleq(intptr_t, intptr_t);
+extern intptr_t leq_ii(int64_t, int64_t);
+extern intptr_t leq_ib(int64_t, uint64_t *);
+extern intptr_t leq_bi(uint64_t *, int64_t);
+extern intptr_t leq_bb(uint64_t *, uint64_t *);
+
+extern intptr_t lessp_ii(int64_t, int64_t);
+extern intptr_t lessp_ib(int64_t, uint64_t *);
+extern intptr_t lessp_bi(uint64_t *, int64_t);
+extern intptr_t lessp_bb(uint64_t *, uint64_t *);
 
 extern char *bignum_to_string(intptr_t aa);
 extern char *bignum_to_string_hex(intptr_t aa);
@@ -1020,59 +1062,59 @@ public:
     }
 
     inline Bignum operator /(const Bignum &x) const
-    {   return Bignum(true, bigquotient(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(quotient, val, x.val));
     }
 
     inline Bignum operator %(const Bignum &x) const
-    {   return Bignum(true, bigremainder(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(remainder, val, x.val));
     }
 
     inline Bignum operator -() const
-    {   return Bignum(true, bignegate(val));
+    {   return Bignum(true, fixnum_dispatch1(minus, val));
     }
 
     inline Bignum operator &(const Bignum &x) const
-    {   return Bignum(true, biglogand(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(logand, val, x.val));
     }
 
     inline Bignum operator |(const Bignum &x) const
-    {   return Bignum(true, biglogor(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(logor, val, x.val));
     }
 
     inline Bignum operator ^(const Bignum &x) const
-    {   return Bignum(true, biglogxor(val, x.val));
+    {   return Bignum(true, fixnum_dispatch2(logxor, val, x.val));
     }
 
     inline Bignum operator <<(int n) const
-    {   return Bignum(true, bigleftshift(val, n));
+    {   return Bignum(true, fixnum_dispatch2n(leftshift, val, n));
     }
 
     inline Bignum operator >>(int n) const
-    {   return Bignum(true, bigrightshift(val, n));
+    {   return Bignum(true, fixnum_dispatch2n(rightshift, val, n));
     }
 
     inline Bignum operator ~() const
-    {   return Bignum(true, biglognot(val));
+    {   return Bignum(true, fixnum_dispatch1(lognot, val));
     }
 
     inline bool operator ==(const Bignum &x) const
-    {   return bigeqn(val, x.val);
+    {   return fixnum_dispatch2(eqn, val, x.val);
     }
 
     inline bool operator >(const Bignum &x) const
-    {   return biggreaterp(val, x.val);
+    {   return fixnum_dispatch2(greaterp, val, x.val);
     }
 
     inline bool operator >=(const Bignum &x) const
-    {   return biggeq(val, x.val);
+    {   return fixnum_dispatch2(geq, val, x.val);
     }
 
     inline bool operator <(const Bignum &x) const
-    {   return biglessp(val, x.val);
+    {   return fixnum_dispatch2(lessp, val, x.val);
     }
 
     inline bool operator <=(const Bignum &x) const
-    {   return bigleq(val, x.val);
+    {   return fixnum_dispatch2(leq, val, x.val);
     }
 
     inline void operator +=(const Bignum &x)
@@ -1094,43 +1136,43 @@ public:
     }
 
     inline void operator /=(const Bignum &x)
-    {   intptr_t r = bigquotient(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(quotient, val, x.val);
         abandon(val);
         val = r;
     }
 
     inline void operator %=(const Bignum &x)
-    {   intptr_t r = bigremainder(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(remainder, val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator &=(const Bignum &x)
-    {   intptr_t r = biglogand(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(logand, val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator |=(const Bignum &x)
-    {   intptr_t r = biglogor(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(logor, val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator ^=(const Bignum &x)
-    {   intptr_t r = biglogxor(val, x.val);
+    {   intptr_t r = fixnum_dispatch2(logxor, val, x.val);
         abandon(val);
         val = r;
     } 
 
     inline void operator <<=(int n)
-    {   intptr_t r = bigleftshift(val, n);
+    {   intptr_t r = fixnum_dispatch2n(leftshift, val, n);
         abandon(val);
         val = r;
     }
 
     inline void operator >>=(int n)
-    {   intptr_t r = bigrightshift(val, n);
+    {   intptr_t r = fixnum_dispatch2n(rightshift, val, n);
         abandon(val);
         val = r;
     }
@@ -1215,11 +1257,14 @@ Bignum random_upto_bits_bignum(size_t n)
 }
 
 Bignum square(const Bignum &x)
-{   return Bignum(true, bigsquare(x.val));
+{   return Bignum(true, fixnum_dispatch1(square, x.val));
 }
 
 Bignum pow(const Bignum &x, int64_t n)
-{   return Bignum(true, bigpow(x.val, n));
+{   if (n == 0) return int_to_bignum(1);
+    else if (n == 1) return Bignum(true, copy_if_no_garbage_collector(x.val));
+    else if (n == 2) return square(x);
+    else return Bignum(true, fixnum_dispatch2n(pow, x.val, n));
 }
 
 Bignum pow(const Bignum &x, int32_t n)
@@ -2034,7 +2079,8 @@ static inline void int_to_bignum(int64_t n, uint64_t *r)
 }
 
 intptr_t int_to_bignum(int64_t n)
-{   uint64_t *r = reserve(1);
+{   if (fits_into_fixnum(n)) return int_to_handle(n);
+    uint64_t *r = reserve(1);
     int_to_bignum(n, r);
     return confirm_size(r, 1, 1);
 }
@@ -2594,13 +2640,23 @@ static void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-intptr_t bignegate(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t n = number_size(a);
+intptr_t minus_b(uint64_t *a)
+{   size_t n = number_size(a);
     uint64_t *p = reserve(n+1);
     size_t final_n;
     bignegate(a, n, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+// The following can only be called via fixnum_dispatch1(), and in that
+// case the argument has to have started off as a fixnum. In such cases
+// the result will also be a fixnum except when negating MIN_FIXNUM. But
+// even in that case (-a) can not overflow 64-bit arithmetic because
+// the fixnum will have had at least one tag bit.
+
+intptr_t minus_i(int64_t a)
+{   if (a == MIN_FIXNUM) return unsigned_int_to_bignum(-(uint64_t)a);
+    else return int_to_handle(-a);
 }
 
 // The "bitnot" operation is simple and length can not change.
@@ -2612,13 +2668,16 @@ static void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
     lenr = lena;
 }
 
-intptr_t biglognot(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t n = number_size(a);
+intptr_t lognot_b(uint64_t *a)
+{   size_t n = number_size(a);
     uint64_t *p = reserve(n+1);
     size_t final_n;
     biglognot(a, n, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+intptr_t lognot_i(int64_t a)
+{   return int_to_handle(~a);
 }
 
 // logand
@@ -2639,10 +2698,8 @@ void biglogand(const uint64_t *a, size_t lena,
     else return ordered_biglogand(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t biglogand(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t logand_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na;
@@ -2651,6 +2708,30 @@ intptr_t biglogand(intptr_t aa, intptr_t bb)
     size_t final_n;
     biglogand(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+intptr_t logand_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    size_t nb = 1;
+    size_t n = na;
+    uint64_t *p = reserve(n);
+    size_t final_n;
+    biglogand(a, na, b, nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+intptr_t logand_ib(int64_t a, uint64_t *b)
+{   uint64_t *b = vector_of_handle(bb);
+    size_t nb = number_size(b);
+    size_t n = nb;
+    uint64_t *p = reserve(n);
+    size_t final_n;
+    biglogand(a, na, b, nb, p, final_n);
+    return confirm_size(p, n, final_n);
+}
+
+intptr_t logand_ii(int64_t a, int64_t b)
+{   return int_to_handle(a & b);
 }
 
 // logor
@@ -3251,14 +3332,33 @@ void bigsquare(const uint64_t *a, size_t lena,
     truncate_negative(r, lenr);
 }
 
-intptr_t bigsquare(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t na = number_size(a);
+intptr_t square_b(uint64_t *a)
+{   size_t na = number_size(a);
     size_t n = 2*na;
     uint64_t *p = reserve(n);
     size_t final_n;
     bigsquare(a, na, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+intptr_t square_i(int64_t a)
+{   uint64_t hi, lo;
+    multiply64(a, a, hi, lo);
+    if (a < 0) hi -= 2u*(uint64_t)a;
+// Now I have a 128-bit product of the inputs
+    if ((hi == 0 && positive(lo)) ||
+        (hi == (uintptr_t)(-1) && negative(lo)))
+    {   if (fits_into_fixnum((int64_t)lo)) return int_to_handle((int64_t)lo);
+        else
+        {   uint64_t *p = reserve(1);
+            p[0] = lo;
+            return confirm_size(p, 1, 1);
+        }
+    }
+    uint64_t *p = reserve(2);
+    p[0] = lo;
+    p[1] = hi;
+    return confirm_size(p, 2, 2);
 }
 
 // This raises a bignum to a positive integer power. If the power is n then
@@ -3305,33 +3405,28 @@ void bigpow(const uint64_t *a, size_t lena, uint64_t n,
 // with my_assert() statements rather than any comfortable scheme for reporting
 // the trouble.
 
-intptr_t bigpow(intptr_t aa, int64_t n)
-{
-//   a^0 == 1, including the case 0^0 == 1
-    if (n == 0)
-    {   uint64_t *r = reserve(0);
-        uint64_t *a = vector_of_handle(aa);
-        size_t lena = number_size(a);
-        r[0] = (lena==1 && (int64_t)a[0]==0) ? 0 : 1;
-        return confirm_size(r, 1, 1);
-    }
-//   a^1 == a
-    else if (n == 1) return copy_if_no_garbage_collector(aa);
-//   a^2 == square(a)
-    else if (n == 2) return bigsquare(aa);
-    uint64_t *a = vector_of_handle(aa);
-    size_t lena = number_size(a);
+// The code that dispatches into here should have filtered cases such that
+// the exponent n is not 0, 1 or 2 here.
+
+intptr_t pow_b(uint64_t a, int64_t n)
+{   size_t lena = number_size(a);
 //  1^(-n) == 1,
 //  (-1)^(-n) == 1 if n is even or -1 if n is odd.
 //  a^(-n) == 0 when a is not -1, 0 or 1.
     if (n < 0)
-    {   uint64_t *r = reserve(0);
-        uint64_t *a = vector_of_handle(aa);
-        size_t lena = number_size(a);
-        r[0] = (lena==1 && (int64_t)a[0]==1) ? 1 :
-               (lena==1 && (int64_t)a[0]==-1) ? (n%1==0 ? 1 : -1) : 0;
-        return confirm_size(r, 1, 1);
+    {   int z = 0;
+        if (lena == 0)
+        {   if ((int64_t)a[0]==1) z = 1;
+            else if ((int64_t)a[0]==-1) z = (n%1==0 ? 1 : -1);
+            else my_assert(a[0] != 0u);
+        }
+// 0^(-n) is an error
+// 1^(-n) = 1
+// (-1)^(-n) = +1 or -1 depending on whether n is odd or even
+// x^(-n) = 0 otherwise.
+        return int_to_bignum(z);
     }
+// 6^n = 0
     size_t bitsa = bignum_bits(a, lena);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
@@ -3346,6 +3441,39 @@ intptr_t bigpow(intptr_t aa, int64_t n)
     uint64_t *v = reserve(lenr);
     uint64_t *w = reserve(lenr);
     bigpow(a, lena, (uint64_t)n, v, w, r, lenr);
+    abandon(w);
+    abandon(v);
+    return confirm_size(r, olenr, lenr);
+}
+
+// Aagain the cases n = 0, 1 and 2 have been filtered out
+
+intptr_t bigpow_i(int64_t a, int64_t n)
+{   if (n < 0)
+    {   int z = 0;
+        if (a == 1) z = 1;
+        else if a == -1) z = (n%1==0 ? 1 : 0);
+        else my_assert(a != 0);
+        return int_to_bignum(z);
+    }
+    if (a == 0) return int_to_bignum(0);
+    uint64_t absa = (a < 0 ? -(uint64_t)a : a)
+    size_t bitsa = 64 - nlz(absa);
+    uint64_t hi, bitsr;
+    multiply64(n, bitsa, hi, bitsr);
+    my_assert(hi == 0); // Check that size is at least somewhat sane!
+    uint64_t lenr1 = 1 + bitsr/64;
+    size_t lenr = (size_t)lenr1;
+// if size_t was more narrow than 64-bits I could lose information in
+// truncating from uint64_t to size_t.
+    my_assert(lenr == lenr1);
+    uint64_t olenr = lenr;
+    uint64_t *r = reserve(lenr);
+    uint64_t *v = reserve(lenr);
+    uint64_t *w = reserve(lenr);
+    uint64_t aa[1];
+    aa[0] = a;
+    bigpow(aa, 1, (uint64_t)n, v, w, r, lenr);
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
