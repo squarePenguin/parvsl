@@ -2368,7 +2368,7 @@ LispObject nreverse(LispObject a)
 LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
                           LispObject a3, LispObject a4, LispObject a5up)
 {
-    LispObject bvl, v2, v3, v4, v5up, w, v, a;
+    LispObject bvl=nil, v2=nil, v3=nil, v4=nil, v5up=nil, w, v, a;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
     if (bvl == nil ||
@@ -2388,10 +2388,6 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
            (n>0 ? "Not enough arguments provided" :
                   "Too many arguments provided"), bvl);
     }
-    // swap(a1, qvalue(bvl));
-    // swap(a2, qvalue(v2));
-    // swap(a3, qvalue(v3));
-    // swap(a4, qvalue(v4));
     par::Shallow_bind bind_bvl(bvl, a1);
     par::Shallow_bind bind_v2(v2, a2);
     par::Shallow_bind bind_v3(v3, a3);
@@ -6046,21 +6042,26 @@ void setup()
     int i;
     undefined = lookup("~indefinite-value~", 18, 3);
     qflags(undefined) |= flagGLOBAL;
+    global_symbol(undefined);
     qvalue(undefined) = undefined;
     nil = lookup("nil", 3, 3);
     qflags(nil) |= flagGLOBAL;
+    global_symbol(nil);
     qvalue(nil) = nil;
 
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
+    global_symbol(lisptrue);
     qvalue(lisptrue) = lisptrue;
     echo = lookup("*echo", 5, 3);
     qflags(echo) |= flagFLUID;
+    fluid_symbol(echo);
     par::symval(echo) = interactive ? nil : lisptrue;
 
     {   
         LispObject nn = lookup("*nocompile", 10, 3);
         qflags(nn) |= flagFLUID;
+        fluid_symbol(nn);
         par::symval(nn) = lisptrue;
     }
 
@@ -6070,12 +6071,14 @@ void setup()
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
     qflags(lispsystem) |= flagGLOBAL;
+    global_symbol(lispsystem);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
     qflags(eofsym) |= flagGLOBAL;
+    global_symbol(eofsym);
     qvalue(eofsym) = eofsym;
     lambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
@@ -6088,6 +6091,7 @@ void setup()
     pipe = lookup("pipe", 4, 3);
     dfprint = lookup("dfprint*", 8, 3);
     qflags(dfprint) |= flagFLUID;
+    fluid_symbol(dfprint);
     par::symval(dfprint) = nil;
 
     bignum = lookup("~bignum", 7, 3);
@@ -6097,6 +6101,8 @@ void setup()
     par::symval(lower) = lisptrue;
     qflags(raise) |= flagFLUID;
     qflags(lower) |= flagFLUID;
+    fluid_symbol(raise);
+    fluid_symbol(lower);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)

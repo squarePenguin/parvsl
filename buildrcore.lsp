@@ -1,3 +1,11 @@
+% buildrcore.lsp
+
+% This builds a version of Reduce that has the "most important" modules
+% included so that a useful range of tests can be performed. It can also
+% serve as a base upon which futher parts of the code can be build for
+% more advanced testing.
+
+
 % "buildreduce.lsp"                        Copyright (C) Codemist 2016-2018
 %
 % Build a CSL REDUCE.
@@ -599,20 +607,25 @@ rds(xxx := open("$reduce/packages/support/build.red", 'input));
 (close xxx)
 
 (load!-package!-sources prolog_file 'support)
-
 (load!-package!-sources 'revision 'support)
 
-(cond (!*backtrace (setq !*echo t)))
+(setq !*echo t)
 
 (load!-package!-sources 'rlisp 'rlisp)
-
 (load!-package!-sources 'smacros 'support)
-
 (load!-package!-sources rend_file 'support)
-
 (load!-package!-sources 'poly 'poly)
+(load!-package!-sources 'polydiv 'poly)
 (load!-package!-sources 'alg 'alg)
-(load!-package!-sources 'arith 'arith)  %  Needed by roots, specfn*, (psl).
+(load!-package!-sources 'arith 'arith)
+(load!-package!-sources 'mathpr 'mathpr)
+(load!-package!-sources 'ezgcd 'factor)
+(load!-package!-sources 'factor 'factor)
+(load!-package!-sources 'hephys 'hephys)
+(load!-package!-sources 'int 'int)
+(load!-package!-sources 'matrix 'matrix)
+(load!-package!-sources 'solve 'solve)
+
 (load!-package!-sources 'entry 'support)
 (load!-package!-sources 'remake 'support)
 

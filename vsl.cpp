@@ -6187,7 +6187,6 @@ void setup()
         qflags(nn) |= flagFLUID;
         Lput(nil, nn, fluid, lisptrue);
     }
-    Lput(nil, dfprint, fluid, lisptrue);
     qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
                   list2star(lookup("embedded", 8, 1),
