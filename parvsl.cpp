@@ -3201,7 +3201,6 @@ LispObject Lvector_5up(LispObject lits, LispObject a1, LispObject a2,
     return r;
 }
 
-inline
 void global_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) == 0) {
         // If it was not global already, move value back from
@@ -3213,7 +3212,15 @@ void global_symbol(LispObject s) {
     }
 }
 
-inline
+void unglobal_symbol(LispObject s) {
+    if ((qflags(s) & flagGLOBAL) != 0) {
+        int loc = par::allocate_symbol();
+        par::get_symbol(loc) = qvalue(s);
+        qvalue(s) = packfixnum(loc);
+        qflags(s) &= ~flagGLOBAL;
+    }
+}
+
 void fluid_symbol(LispObject s) {
     // If it was global, move the value to thread_local storage
     // and store the location.
@@ -3228,34 +3235,47 @@ void fluid_symbol(LispObject s) {
     qflags(s) |= flagFLUID;
 }
 
-LispObject Lglobal(LispObject lits, LispObject x) {
+void unfluid_symbol(LispObject s) {
+    qflags(s) &= ~flagFLUID;
+}
+
+LispObject chflag(LispObject x, void (*f)(LispObject)) {
     while (isCONS(x)) {
         LispObject a = qcar(x);
         
         if (!isSYMBOL(a)) {
-            return error1("global of non-symbol", a);
+            return error1("cannot change flag of non-symbol", a);
         }
 
-        global_symbol(a);
+       f(a);
         
         x = qcdr(x);
     }
     return nil;
 }
 
-LispObject Lfluid(LispObject lits, LispObject x) {
-    while (isCONS(x)) {
-        LispObject a = qcar(x);
-        
-        if (!isSYMBOL(a)) {
-            return error1("fluid of non-symbol", a);
-        }
+LispObject Lglobal(LispObject lits, LispObject x) {
+    return chflag(x, global_symbol);
+}
 
-        fluid_symbol(a);
-        
-        x = qcdr(x);
-    }
-    return nil;
+LispObject Lfluid(LispObject lits, LispObject x) {
+    return chflag(x, fluid_symbol);
+}
+
+LispObject Lunglobal(LispObject lits, LispObject x) {
+    return chflag(x, unglobal_symbol);
+}
+
+LispObject Lunfluid(LispObject lits, LispObject x) {
+    return chflag(x, unfluid_symbol);
+}
+
+LispObject Lglobalp(LispObject lits, LispObject x) {
+    return ((qflags(x) & flagGLOBAL) == 0) ? nil : lisptrue;
+}
+
+LispObject Lfluidp(LispObject lits, LispObject x) {
+    return ((qflags(x) & flagFLUID) == 0) ? nil : lisptrue;
 }
 
 LispObject Lcar(LispObject lits, LispObject x)
@@ -5754,6 +5774,7 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
     SETUP_TABLE_SELECT("fluid",             Lfluid),            \
+    SETUP_TABLE_SELECT("fluidp",            Lfluidp),            \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
@@ -5774,6 +5795,7 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("global",            Lglobal),           \
+    SETUP_TABLE_SELECT("globalp",           Lglobalp),           \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
@@ -5803,6 +5825,8 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("stringp",           Lstringp),          \
     SETUP_TABLE_SELECT("symbolp",           Lsymbolp),          \
     SETUP_TABLE_SELECT("trace",             Ltrace),            \
+    SETUP_TABLE_SELECT("unfluid",           Lunfluid),          \
+    SETUP_TABLE_SELECT("unglobal",          Lunglobal),         \
     SETUP_TABLE_SELECT("untrace",           Luntrace),          \
     SETUP_TABLE_SELECT("upbv",              Lupbv),             \
     SETUP_TABLE_SELECT("vectorp",           Lvectorp),          \

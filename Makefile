@@ -32,11 +32,6 @@ parvsl:    parvsl.cpp common.hpp thread_data.hpp
 
 fastparvsl:    parvsl.cpp common.hpp thread_data.hpp
 	g++ -fno-diagnostics-color -pthread $(FASTCFLAGS) \
-		parvsl.cpp $(LIBS) -o parvsl \
-		2>&1 | tee fastparvsl.log
-
-fastparvsl:    parvsl.cpp common.hpp thread_data.hpp
-	g++ -fno-diagnostics-color -pthread $(FASTCFLAGS) \
 		parvsl.cpp $(LIBS) -o fastparvsl \
 		2>&1 | tee fastparvsl.log
 
@@ -47,10 +42,10 @@ fastvsl.img:	fastvsl library.lsp vsl.lsp
 	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
 parvsl.img:	parvsl library.lsp vsl.lsp
-	time ./parvsl -z library.lsp | tee parvsl.img.log
+	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
 
 fastparvsl.img:	fastparvsl library.lsp vsl.lsp
-	time ./fastparvsl -z library.lsp | tee fastparvsl.img.log
+		time ./fastparvsl -z parlibrary.lsp | tee fastparvsl.img.log
 
 reduce:	vsl
 	mkdir -p reduce.img.modules

@@ -1153,29 +1153,24 @@ top (cond ((atom a) (return (reversip r))))
 (de small!-modular!-quotient (a b)
    (error "small-modular-quotient not implemented yet" (cons a b)))
 
-% % "fluid" and "global" are concepts that mainly belong with
-% % a compiler, but versions are provided here even if they
-% % are not terribly useful.
-%
-% (de ensure_defined (v)
-%    (when (not (boundp v))
-%          (eval (list 'setq v nil))))
-%
-% (de fluid (x)
-%    (remflag x 'global)
-%    (flag x 'fluid)
-%    (dolist (v x) (ensure_defined v)))
-%
-% (de global (x)
-%    (remflag x 'fluid)
-%    (flag x 'global)
-%    (dolist (v x) (ensure_defined v)))
-%
-% (de unfluid (x)
-%    (remflag x 'fluid))
-%
-% (de unglobal (x)
-%    (remflag x 'global))
+% "fluid" and "global" are concepts that mainly belong with
+% a compiler, but versions are provided here even if they
+% are not terribly useful.
+(de ensure_defined (v)
+   (when (not (boundp v))
+         (eval (list 'setq v nil))))
+(de fluid (x)
+   (remflag x 'global)
+   (flag x 'fluid)
+   (dolist (v x) (ensure_defined v)))
+(de global (x)
+   (remflag x 'fluid)
+   (flag x 'global)
+   (dolist (v x) (ensure_defined v)))
+(de unfluid (x)
+   (remflag x 'fluid))
+(de unglobal (x)
+   (remflag x 'global))
 
 (de fluidp (x) (flagp x 'fluid))
 
