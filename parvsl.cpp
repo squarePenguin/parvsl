@@ -3242,14 +3242,9 @@ void unfluid_symbol(LispObject s) {
 LispObject chflag(LispObject x, void (*f)(LispObject)) {
     while (isCONS(x)) {
         LispObject a = qcar(x);
-        
-        if (!isSYMBOL(a)) {
-            return error1("cannot change flag of non-symbol", a);
-        }
-
-       f(a);
-        
         x = qcdr(x);
+        if (!isSYMBOL(a)) continue;
+        f(a);
     }
     return nil;
 }
