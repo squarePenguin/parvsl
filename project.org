@@ -93,3 +93,28 @@ use fixnum?
 
 
 implement harness to bisect
+
+
+* Performance
+
+#+BEGIN_QUOTE
+However even when I build using optimization level -O3 the naive tests I have tried show parfastvsl to be slower than fastvsl by about a factor of 10, which seems utterly astonishing to me. When I had seen the slowdown on the "-O0 -g" version I had expected it to be down to you using more inline functions and the non-optimised compilation of those having huge overheads, but there is clearly more than that, and it deserves a bit of investigation and comment. You do not need any of Reduce to observe that - try
+   ./parvsl
+   (dotimes (i 100000))
+   (time)
+or some such.
+
+
+Hmm time to profile with "-pg"?? Or to wonder exactly what overheads std::vector imposes, eg by using gdb to step through instruction by instruction .
+
+Hmmm if I make vsl and then edit csl.cpp just to put thread_local ahead of a few of the variable declarations then under cygwin it slows down quite badly, and that is vsl not parvsl. I have not checked on Linux and not thought about ways to avoid the extra cost. But that can turn into another page of writeup for you!!!! 
+#+END_QUOTE
+
+I have tried running the optimised parvsl with ~make fastparvsl~, ~make fastparrcore~ etc and did not get those results.
+SO far I have the following results:
+
+Building rcore: same time around 1m30s-1m40s for both vsl and parvsl
+BUilding reduce: ~8m50s on vsl vs ~10m10s on parvsl
+The dotimes test: ~2000 for vsl vs ~4000 for parvsl
+Running the alg test ~./test1.sh alg~: 0.22s on both
+So far it is a bit slower but nothing crazy like 10x. I'll look into this further.

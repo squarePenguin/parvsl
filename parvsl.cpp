@@ -261,8 +261,7 @@ void hexdump()
 {
     uintptr_t i;
     uintptr_t j, k;
-    return;
-//@@
+    return; //@@
     for (i=0; i<nblocks; i++)
     {   block_header *b = (block_header *)blocks_by_age[i];
         printf("Block %" PRIdPTR "\n", i);
@@ -430,7 +429,6 @@ void allocateheap()
     for (i=0; i<nblocks; i++)
     {   uintptr_t bi = blocks[i];
         block_header *b = (block_header *)bi;
-printf("allocateheap: b[%" PRIdPTR "] = %#" PRIxPTR "\n", i, bi);
         b->hbase = b->h1base = ALIGN8(bi + sizeof(block_header));
         b->h1top = b->h2base = b->h1base + 64*b->halfbitmapsize;
         b->h2top = b->htop = b->h2base + 64*b->halfbitmapsize;
@@ -439,8 +437,6 @@ printf("allocateheap: b[%" PRIdPTR "] = %#" PRIxPTR "\n", i, bi);
         b->h1fp = b->hfp = (uint32_t *)((uintptr_t)b->hstarts + 2*b->halfbitmapsize);
         b->h2fp = (uint32_t *)((uintptr_t)b->hfp + b->halfbitmapsize);
         b->pinned = (uint32_t *)((uintptr_t)b->hfp + 2*b->halfbitmapsize);
-printf("allocateheap: b=h1[%" PRIdPTR "] = %#" PRIxPTR "\n", i, b->h1base);
-printf("allocateheap: b=h2[%" PRIdPTR "] = %#" PRIxPTR "\n", i, b->h2base);
         clearheapstarts(b);
         clearheapfp(b);
     }
@@ -1618,9 +1614,10 @@ int rdch()
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s = el_gets(el_struct, &n);
-                if (s == NULL) return EOF;
+
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
+                if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
                 strncpy(input_line, s, n);
                 input_line[INPUT_LINE_SIZE-1] = 0;
