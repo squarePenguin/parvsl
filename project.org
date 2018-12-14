@@ -57,6 +57,8 @@ However, if the user can modify these flags, then how do I get control over them
 *** TODO Keep fluids in a global store, to load them on new threads
 **** Might help that we should always join all threads before closing so only the start thread matters
 **** However need to scan all symbols and put values back
+**** But placeholder value on every thread(is undefined ok?)
+
 
 
 ** Dealing with multiple stacks

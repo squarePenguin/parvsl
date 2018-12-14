@@ -95,26 +95,8 @@ int start_thread(std::function<void(void)> f) {
 
 static std::atomic_int num_symbols(0);
 
-thread_local static std::vector<LispObject> local_symbols;
-// thread_local static 
-
-// inline 
-// void set_symbol(int loc, LispObject val) {
-//     if (num_symbols > local_symbols.size()) {
-//         local_symbols.resize(num_symbols, undefined);
-//     }
-//     assert(loc < local_symbols.size());
-//     local_symbols[loc] = val;
-// }
-
-// inline
-// LispObject get_symbol(int loc) {
-//     if (num_symbols > local_symbols.size()) {
-//         local_symbols.resize(num_symbols, undefined);
-//     }
-//     assert(loc < local_symbols.size());
-//     return local_symbols[loc];
-// }
+thread_local static std::vector<LispObject> fluid_locals;
+static std::vector<LispObject> fluid_globals; // the global values
 
 static std::mutex alloc_symbol_mutex;
 
@@ -126,63 +108,83 @@ int allocate_symbol() {
     std::unique_lock<std::mutex> lock(alloc_symbol_mutex);
     int loc = num_symbols;
     num_symbols += 1;
+    fluid_globals.push_back(undefined);
     return loc;
 }
 
-LispObject& get_symbol(int loc) {
-    if (num_symbols > (int)local_symbols.size()) {
-        local_symbols.resize(num_symbols, undefined);
+inline bool is_global(LispObject x) {
+    return ((qflags(x) & flagGLOBAL) != 0);
+}
+
+inline bool is_fluid(LispObject x) {
+    return ((qflags(x) & flagFLUID) != 0);
+}
+
+/**
+* [local_symbol] gets the thread local symbol.
+* may return undefined
+*/
+LispObject& local_symbol(int loc) {
+    if (num_symbols > (int)fluid_locals.size()) {
+        fluid_locals.resize(num_symbols, undefined);
     }
-    // std::cerr << loc << ' ' << num_symbols << ' ' << local_symbols.size() << std::endl;
-    // assert(loc < (int)local_symbols.size());
-    if (loc >= (int)local_symbols.size()) {
+
+    if (loc >= (int)fluid_locals.size()) {
         std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
         throw std::logic_error("bad thread_local index");
     }
-    return local_symbols[loc];
+
+    return fluid_locals[loc];
 }
 
+/**
+* [symval] returns the real current value of the symbol on the current thread.
+* It handles, globals, fluid globals, fluid locals and locals.
+* should be used to get the true symbol.
+*/
 LispObject& symval(LispObject s) {
     assert(isSYMBOL(s));
-    if ((qflags(s) & flagGLOBAL) != 0) {
+    if (is_global(s)) {
         return qvalue(s);
-    } else {
-        return get_symbol(qfixnum(qvalue(s)));
     }
+
+    int loc = qfixnum(qvalue(s));
+    LispObject& res = local_symbol(loc);
+
+    // std::cerr << "loc=" << loc << std::endl;
+
+    // Here I assume undefined is a sort of "reserved value", meaning it can only exist
+    // when the object is not shallow_bound. This helps me distinguish between fluids that
+    // are actually global and those that have been bound.
+    if (is_fluid(s) && res == undefined) {
+        // std::cerr << "fluid global" << std::endl;
+        return fluid_globals[loc];
+    }
+    // THis is either local or locally bound fluid
+    // std::cerr << "local" << std::endl;
+    return res;
 }
 
-inline
-void set_value(LispObject x, LispObject val) {
-    if ((qflags(x) & flagGLOBAL) != 0) {
-        qvalue(x) = val;
-    } else {
-        int loc = qfixnum(qvalue(x));
-        get_symbol(loc) = val;
-    }
-}
-
-inline
-LispObject& get_value(LispObject x) {
-    if ((qflags(x) & flagGLOBAL) != 0) {
-        return qvalue(x);
-    } else {
-        int loc = qfixnum(qvalue(x));
-        return get_symbol(loc);
-    }
-}
-
+/**
+* [Shallow_bind] is a RAII class to rebind a variable.
+* It will throw an exception when trying to rebind globals
+*/
 class Shallow_bind {
 private:
-    LispObject loc;
+    int loc;
     LispObject save;
 public:
-    Shallow_bind(LispObject x, LispObject tval) : loc(x) {
-        save = tval;
-        std::swap(symval(loc), save);
+    Shallow_bind(LispObject x, LispObject tval) {
+        assert(!is_global(x));
+
+        loc = qfixnum(qvalue(x));
+        LispObject& sv = local_symbol(loc);
+        save = sv;
+        sv = tval;
     }
 
     ~Shallow_bind() {
-        symval(loc) = save;
+        local_symbol(loc) = save;
     }
 };
 

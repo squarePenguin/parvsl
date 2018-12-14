@@ -3202,7 +3202,8 @@ void global_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) == 0) {
         // If it was not global already, move value back from
         // thread_local storage
-        qvalue(s) = par::get_symbol(qfixnum(qvalue(s)));
+        // qvalue(s) = par::local_symbol(qfixnum(qvalue(s)));
+        qvalue(s) = par::symval(s);
         if (qvalue(s) == undefined) qvalue(s) = nil;
         qflags(s) &= ~flagFLUID; // disable fluid
         qflags(s) |= flagGLOBAL;
@@ -3212,9 +3213,11 @@ void global_symbol(LispObject s) {
 void unglobal_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) != 0) {
         int loc = par::allocate_symbol();
-        par::get_symbol(loc) = qvalue(s);
+        LispObject val = qvalue(s);
+        // par::local_symbol(loc) = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL;
+        par::symval(s) = val;
     }
 }
 
@@ -3223,17 +3226,23 @@ void fluid_symbol(LispObject s) {
     // and store the location.
     if (qflags(s) & flagGLOBAL) {
         int loc = par::allocate_symbol();
-        par::get_symbol(loc) = qvalue(s);
+        // par::local_symbol(loc) = qvalue(s);
+        LispObject val = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL; // disable global
+
+        par::symval(s) = val;
+    } else if (par::symval(s) == undefined) {
+        par::symval(s) = nil;
     }
-    else if (par::symval(s) == undefined) par::symval(s) = nil;
 
     qflags(s) |= flagFLUID;
 }
 
 void unfluid_symbol(LispObject s) {
+    LispObject val = par::symval(s);
     qflags(s) &= ~flagFLUID;
+    par::symval(s) = val;
 }
 
 LispObject chflag(LispObject x, void (*f)(LispObject)) {
@@ -6057,45 +6066,40 @@ void setup()
 // might want to unify
     int i;
     undefined = lookup("~indefinite-value~", 18, 3);
-    qflags(undefined) |= flagGLOBAL;
     global_symbol(undefined);
-    qvalue(undefined) = undefined;
+    par::symval(undefined) = undefined;
     nil = lookup("nil", 3, 3);
-    qflags(nil) |= flagGLOBAL;
     global_symbol(nil);
-    qvalue(nil) = nil;
+    par::symval(nil) = nil;
 
     lisptrue = lookup("t", 1, 3);
-    qflags(lisptrue) |= flagGLOBAL;
     global_symbol(lisptrue);
-    qvalue(lisptrue) = lisptrue;
+    par::symval(lisptrue) = lisptrue;
+
     echo = lookup("*echo", 5, 3);
-    qflags(echo) |= flagFLUID;
     fluid_symbol(echo);
     par::symval(echo) = interactive ? nil : lisptrue;
 
     {   
         LispObject nn = lookup("*nocompile", 10, 3);
-        qflags(nn) |= flagFLUID;
         fluid_symbol(nn);
         par::symval(nn) = lisptrue;
     }
 
-    qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
+    lispsystem = lookup("lispsystem*", 11, 1);
+    global_symbol(lispsystem);
+    par::symval(lispsystem) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
                   list2star(lookup("embedded", 8, 1),
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
-    qflags(lispsystem) |= flagGLOBAL;
-    global_symbol(lispsystem);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
-    qflags(eofsym) |= flagGLOBAL;
     global_symbol(eofsym);
-    qvalue(eofsym) = eofsym;
+    par::symval(eofsym) = eofsym;
     lambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
     subr = lookup("subr", 4, 3);
@@ -6106,19 +6110,16 @@ void setup()
     output = lookup("output", 6, 3);
     pipe = lookup("pipe", 4, 3);
     dfprint = lookup("dfprint*", 8, 3);
-    qflags(dfprint) |= flagFLUID;
     fluid_symbol(dfprint);
     par::symval(dfprint) = nil;
 
     bignum = lookup("~bignum", 7, 3);
     raise = lookup("*raise", 6, 3);
     lower = lookup("*lower", 6, 3);
-    par::symval(raise) = nil;
-    par::symval(lower) = lisptrue;
-    qflags(raise) |= flagFLUID;
-    qflags(lower) |= flagFLUID;
     fluid_symbol(raise);
     fluid_symbol(lower);
+    par::symval(raise) = nil;
+    par::symval(lower) = lisptrue;
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
@@ -6613,8 +6614,9 @@ int warm_start_1(gzFile f, int *errcode)
                         if ((qflags(w) & flagGLOBAL) == 0) {
                             // reallocate on thread_local storage
                             int loc = par::allocate_symbol();
-                            par::get_symbol(loc) = qvalue(w);
+                            LispObject val = qvalue(w);
                             qvalue(w) = packfixnum(loc);
+                            par::symval(w) = val;
                         }
                     }
                     if (fr1+2*sizeof(LispObject) < lim1)
@@ -6654,8 +6656,9 @@ int warm_start_1(gzFile f, int *errcode)
                             if ((qflags(w) & flagGLOBAL) == 0) {
                                 // reallocate on thread_local storage
                                 int loc = par::allocate_symbol();
-                                par::get_symbol(loc) = qvalue(w);
+                                LispObject val = qvalue(w);
                                 qvalue(w) = packfixnum(loc);
+                                par::symval(w) = val;
                             }
                         }
                         if (fr1+2*sizeof(LispObject) >= newblock)
@@ -6962,7 +6965,7 @@ void write_image(gzFile f)
             if (x != undefined && isSYMBOL(x) && (qflags(x) & flagGLOBAL) == 0) {
                 // If it wasn't a global symbol, the value is thread_local;
                 int loc = qfixnum(qvalue(x));
-                qvalue(x) = par::get_symbol(loc);
+                qvalue(x) = par::local_symbol(loc);
             }
         }
     }
