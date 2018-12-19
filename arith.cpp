@@ -883,6 +883,7 @@ extern intptr_t uniform_positive(size_t n);
 extern intptr_t uniform_signed(size_t n);
 extern intptr_t uniform_upto(intptr_t a);
 extern intptr_t random_upto_bits(size_t bits);
+extern intptr_t fudge_distribution(intptr_t, int);
 
 extern intptr_t plus_ii(int64_t, int64_t);
 extern intptr_t plus_ib(int64_t, uint64_t *);
@@ -1269,6 +1270,10 @@ Bignum uniform_signed_bignum(size_t n)
 
 Bignum uniform_upto_bignum(Bignum a)
 {   return Bignum(true, uniform_upto(a.val));
+}
+
+Bignum fudge_distribution_bignum(Bignum a, int n)
+{   return Bignum(true, fudge_distribution(a.val, n));
 }
 
 Bignum random_upto_bits_bignum(size_t n)
@@ -2036,12 +2041,112 @@ void uniform_upto(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 }
 
 intptr_t uniform_upto(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t lena = number_size(a);
+{   uint64_t *a;
+    size_t lena;
+    uint64_t w[2];
+    if (stored_as_fixnum(aa))
+    {   w[1] = (uint64_t)int_of_handle(aa);
+        lena = 1;
+        a = &w[1];
+    }
+    else
+    {   a = vector_of_handle(aa);
+        lena = number_size(a);
+    }
     uint64_t *r = reserve(lena);
     size_t lenr;
     uniform_upto(a, lena, r, lenr);
     return confirm_size(r, lena, lenr);
+}
+
+static inline void truncate_positive(const uint64_t *r, size_t &n)
+{   while (r[n-1]==0 && n>1 && positive(r[n-2])) n--;
+}
+
+static inline void truncate_negative(const uint64_t *r, size_t &n)
+{   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
+}
+
+// The following is a rather strange function. It looks at the 4 bit number n.
+// It then processes its input a in accordance with the following table, where
+// A is the (positive) input value and X is A rounded down to the nearest
+// power of 2 less than it (ie keeping just the top bit of A):
+//
+//    0   X-1                     8   -(X-1)    
+//    1   X                       9   -X        
+//    2   X+1                    10   -(X+1)    
+//    3   A                      11   -A        
+//    4   A                      12   -A
+//    5   A                      13   -A
+//    6   A                      14   -A
+//    7   A                      15   -A
+
+// The idea behind this is that the input A will be a random value from a
+// reasonably smooth distribution, and n will be a random 4 bit value. The
+// output will still be random, but now half the time it will be negative.
+// And a significant proportion of the time it will be a power of 2 (or one
+// either side of being a power of 2). This last is something I want because
+// with an internal representation that is based on 2s complement values
+// close to powers of 2 can easily be "edge cases" that deserve extra attention
+// during testing.
+
+void fudge_distribution(const uint64_t *a, size_t lena,
+                        uint64_t *r, size_t &lenr, int n)
+{   lenr = lena;
+    switch (n&7)
+    {
+    case 0:
+    case 1:
+    case 2:
+        for (size_t i=0; i<lena+1; i++) r[i] = 0;
+        if (a[lena-1] == 0)
+        {   if (lena>1) r[lena-2] = ((uint64_t)1)<<63;
+        }
+        else r[lena-1] = ((uint64_t)1) << (63-nlz(a[lena-1]));
+        if ((n&7) == 0) // decrement it
+        {   if (lena!=1 || a[0]!=0) // avoid decrementing zero.
+            {   uint64_t *p = r;
+                while (*p == 0) *p++ = (uint64_t)(-1);
+                (*p)--;
+            }
+        }
+        else if ((n&7) == 2) // increment it
+        {   uint64_t *p = r;
+            while (*p == (uint64_t)(-1)) *p++ = 0;
+            (*p)++;
+        }
+        break;
+    default:
+        for (size_t i=0; i<lena; i++) r[i] = a[i];
+        break;
+    }
+    if ((n&8) != 0)
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena+1; i++)
+        {   carry = add_with_carry(~r[i], carry, r[i]);
+        }
+        truncate_negative(r, lenr);
+    }
+    else truncate_positive(r, lenr);
+}
+
+intptr_t fudge_distribution(intptr_t aa, int n)
+{   uint64_t *a;
+    size_t lena;
+    uint64_t w[2];
+    if (stored_as_fixnum(aa))
+    {   w[1] = (uint64_t)int_of_handle(aa);
+        lena = 1;
+        a = &w[1];
+    }
+    else
+    {   a = vector_of_handle(aa);
+        lena = number_size(a);
+    }
+    uint64_t *r = reserve(lena+1);
+    size_t lenr;
+    fudge_distribution(a, lena, r, lenr, n);
+    return confirm_size(r, lena+1, lenr);
 }
 
 // Generate a value in the range 0 .. 2^bits-1 using a distribution such
@@ -2122,14 +2227,6 @@ intptr_t unsigned_int_to_bignum(uint64_t n)
 }
 
 static const uint64_t ten19 = UINT64_C(10000000000000000000);
-
-static inline void truncate_positive(const uint64_t *r, size_t &n)
-{   while (r[n-1]==0 && n>1 && positive(r[n-2])) n--;
-}
-
-static inline void truncate_negative(const uint64_t *r, size_t &n)
-{   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
-}
 
 intptr_t string_to_bignum(const char *s)
 {   bool sign = false;
@@ -4251,25 +4348,35 @@ int main(int argc, char *argv[])
 #ifdef TEST_PLUS_AND_TIMES
 // To try to check that + and - and * behave on the Bignum type I
 // generate random numbers a and b and then compute first (a+b)*(a-b)
-// and then a*a*b*b. If these match I feel happy - while if I find a case
-// where the two values differ I have uncovered a bug.
-// I will try numbers of up to 640 bits and 4 million test cases.
+// and then a*a-b*b. If these match I feel happy - while if I find a case
+// where the two values differ I have uncovered a bug. I will try both
+// positive and negative inputs, and I will also bias my random testing
+// to include more numbers of the form 2^n, 2^n-1 and 2^n+1 than would
+// arise with most neat probability distributions for the numbers.
 
     maxbits = 2500;
-    maxbits = 150;
-    ntries = 10000000;
+    ntries = 100000;
     int bad = 0;
+
+    for (int i=0; i<10; i++)
+    {   a = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 0xf);
+        std::cout << a << " " << std::hex << a << std::dec << std::endl;
+    }
 
     for (int i=0; i<ntries; i++)
     {   a = random_upto_bits_bignum(maxbits);
         b = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 0xf);
+        b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
 //      std::cout << "a = " << a << std::endl;
 //      std::cout << "b = " << b << std::endl;
         c1 = (a + b)*(a - b);
         c2 = a*a - b*b;
         c3 = square(a) - square(b);
-        c4 = square(-a) - square(-b);
-        if (c1 == c2 && c2 == c3 && c3 == c4) continue;
+        if (c1 == c2 && c2 == c3) continue;
         std::cout << "Try " << i << std::endl;
         std::cout << "a  = " << a << std::endl;
         std::cout << "b  = " << b << std::endl;
@@ -4294,7 +4401,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST_DIVISION
     maxbits = 2500;
-    ntries = 10000000;
+    ntries = 100000;
 
     std::cout << "Start of division testing" << std::endl;
 
@@ -4334,6 +4441,7 @@ int main(int argc, char *argv[])
 
 #endif
 
+    std::cout << "About to exit" << std::endl;
     return 0;    
 }
 
