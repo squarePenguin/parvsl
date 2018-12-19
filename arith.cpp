@@ -390,13 +390,15 @@ realloc_t *realloc_function = realloc;
 free_t    *free_function   = free;
 
 inline uint64_t *reserve(size_t n)
-{   uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
+{   my_assert(n>0 && n<1000000); // Temporary upper limit on size
+    uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
     my_assert(r != NULL);
     return &r[1];
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   p = (uint64_t *)
+{   my_assert(final>0 && n>=final);
+    p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     my_assert(p != NULL);
     p[0] = final_n;
@@ -406,7 +408,8 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 // In this model confirm_size_x() is just the same as confirm_size().
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   confirm_size(p, n, final);
+{   my_assert(final>0 && n>=final);
+    confirm_size(p, n, final);
 }
 
 inline void abandon(uint64_t *p)
@@ -426,7 +429,8 @@ inline char *reserve_string(size_t n)
 // be a good bargain.
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   r[final] = 0;
+{   my_assert(final>0 && (n+9)>final);
+    r[final] = 0;
     return r;
 }
 
@@ -446,7 +450,8 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   return p[-1];
+{   my_assert(p[-1]!=0 && p[-1]<1000000);
+    return p[-1];
 }
 
 // When I use Bignums that are allocated using malloc() and operated on
@@ -523,6 +528,7 @@ public:
 // function will compile this into a single machine code instruction.
     static uint64_t *allocate(size_t n)
     {   int bits = log_next_power_of_2(n);
+        my_assert(n<=(((size_t)1)<<bits));
         uint64_t *r = freechain_table[bits];
         if (r == NULL)
         {   r = new uint64_t[((size_t)1)<<bits];
@@ -554,13 +560,15 @@ public:
 static freechains fc;
 
 inline uint64_t *reserve(size_t n)
-{   return &(fc.allocate(n+1))[1];
+{   my_assert(n>0 && n<1000000);
+    return &(fc.allocate(n+1))[1];
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   if (final == 1 && fits_into_fixnum((int64_t)p[0]))
+{   my_assert(final>0 && n>=final);
+    if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
-        fc.abandon(p);
+        fc.abandon(&p[-1]);
         return r;
     }
 // I compare the final size with the capacity and if it is a LOT smaller
@@ -572,15 +580,16 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     if (capacity > 4*final)
     {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
         memcpy(w, &p[-1], (final+1)*sizeof(uint64_t));
-        fc.abandon(p);
-        p = w;
+        fc.abandon(&p[-1]);
+        p = &w[1];
     }
     ((uint32_t *)(&p[-1]))[1] = final;
     return vector_to_handle(p);
 }
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   return confirm_size(p, n, final);
+{   my_assert(final>0 && n>=final);
+    return confirm_size(p, n, final);
 }
 
 inline intptr_t vector_to_handle(uint64_t *p)
@@ -592,7 +601,9 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   return ((uint32_t *)(&p[-1]))[1];
+{   size_t r = ((uint32_t *)(&p[-1]))[1];
+    my_assert(r>0 && r<1000000);
+    return ((uint32_t *)(&p[-1]))[1];
 }
 
 inline bool stored_as_fixnum(intptr_t a)
@@ -621,11 +632,14 @@ inline bool fits_into_fixnum(int64_t a)
 }
 
 inline void abandon(uint64_t *p)
-{   fc.abandon(p);
+{   fc.abandon(&p[-1]);
 }
 
 inline void abandon(intptr_t p)
-{   if (!stored_as_fixnum(p) && p!=0) fc.abandon(vector_of_handle(p));
+{   if (!stored_as_fixnum(p) && p!=0)
+    {   uint64_t *pp = vector_of_handle(p);
+        fc.abandon(&pp[-1]);
+    }
 }
 
 inline char *reserve_string(size_t n)
@@ -633,7 +647,8 @@ inline char *reserve_string(size_t n)
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   p[final] = 0;
+{   my_assert(final>0 && (n+9)>final);
+    p[final] = 0;
     return p;
 }
 
@@ -710,7 +725,8 @@ static uint64_t memory[MEMORY_SIZE];
 static size_t fringe = 0;
 
 inline uint64_t *reserve(size_t n)
-{   uint64_t *r = &memory[fringe+1];
+{   my_assert(n>0 && n<1000000);
+    uint64_t *r = &memory[fringe+1];
     fringe += (n + 1);
     my_assert(fringe <= MEMORY_SIZE);
 }
@@ -798,7 +814,7 @@ inline bool fits_into_fixnum(int64_t a)
 
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{
+{   my_assert(final>0 && n>final);
 // If bignum result ends up such that it could be represented as a
 // fixnum I will detect this here.
     if (final_n == 1)
@@ -812,7 +828,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 }
 
 inline uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final)
-{
+{   my_assert(final>0 && n>final);
 }
 
 inline void abandon(intptr_t *p)
@@ -821,11 +837,11 @@ inline void abandon(intptr_t *p)
 
 
 inline char *reserve_string(size_t n)
-{
+{   my_assert(n>0 && n<1000000);
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{
+{   my_assert(final>0 && n>final);
 }
 
 intline void abandon_string(char *s)
@@ -1692,8 +1708,10 @@ static inline int read_u3(const uint64_t *v, size_t n, size_t i)
 // This version has NOT BEEN TESTED YET and is really a place-holder for
 // when I try to use the code within my Lisp system!
 
-size_t number_size(uint64_t * a)
-{   return veclength(qheader(a))/sizeof(uint64_t);
+size_t number_size(uint64_t *a)
+{   size_t r = veclength(qheader(a))/sizeof(uint64_t);
+    my_assert(r>0 && r<1000000);
+    return veclength(qheader(a))/sizeof(uint64_t);
 }
 
 // Here strings DO NOT have a terminating nul character - their end is
@@ -2658,7 +2676,7 @@ intptr_t minus_b(uint64_t *a)
     uint64_t *p = reserve(n+1);
     size_t final_n;
     bignegate(a, n, p, final_n);
-    return confirm_size(p, n, final_n);
+    return confirm_size(p, n+1, final_n);
 }
 
 // The following can only be called via fixnum_dispatch1(), and in that
@@ -2686,7 +2704,7 @@ intptr_t lognot_b(uint64_t *a)
     uint64_t *p = reserve(n+1);
     size_t final_n;
     biglognot(a, n, p, final_n);
-    return confirm_size(p, n, final_n);
+    return confirm_size(p, n+1, final_n);
 }
 
 intptr_t lognot_i(int64_t a)
@@ -4245,8 +4263,8 @@ int main(int argc, char *argv[])
     for (int i=0; i<ntries; i++)
     {   a = random_upto_bits_bignum(maxbits);
         b = random_upto_bits_bignum(maxbits);
-        std::cout << "a = " << a << std::endl;
-        std::cout << "b = " << b << std::endl;
+//      std::cout << "a = " << a << std::endl;
+//      std::cout << "b = " << b << std::endl;
         c1 = (a + b)*(a - b);
         c2 = a*a - b*b;
         c3 = square(a) - square(b);
