@@ -501,6 +501,12 @@ intptr_t copy_if_no_garbage_collector(intptr_t pp)
 static unsigned int log_next_power_of_2(size_t n);
 
 static uint64_t *freechain_table[64];
+static int count = 0, count1 = 0;
+
+// The intent is that for most purposes freechains.allocate() and
+// freechains.abandon() behave rather like malloc, save that they REQUIRE
+// the user of the memory that is returned to avoid overwriting the first
+// 32 bits of the block.
 
 class freechains
 {
@@ -515,6 +521,10 @@ public:
     ~freechains()
     {   for (size_t i=0; i<64; i++)
         {   uint64_t *f = freechain_table[i];
+// Report how many entries there are in the freechain.
+            size_t n;
+            for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[0]) n++;
+            std::cout << i << ": " << n << std::endl;
             while (f != NULL)
             {   uint64_t w = f[0];
                 delete f;
@@ -540,14 +550,18 @@ public:
 // memory as a 32-bit value that is how I will read it later on, and the
 // messy notation here does not correspond to complicated computation.
         ((uint32_t *)r)[0] = bits;
+        if (count1++ < 10) std::cout << "A" << n << " " << bits << " " <<
+            std::hex << r[0] << std::dec << " " << r << std::endl;
         return r;
     }
 // When I abandon a memory block I will push it onto a relevant free chain.
     static void abandon(uint64_t *p)
-    {   p = &p[-1];
-        int bits = ((uint32_t *)p)[0];
+    {   int bits = ((uint32_t *)p)[0];
+        my_assert(bits>0 && bits<48);
 // Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
 // risking loss of information.
+        if (count++ < 10) std::cout << "free " << p << " size " << bits <<
+           std::hex << " " << p[0] << std::dec << std::endl;
         p[0] = (uint64_t)freechain_table[bits];
         freechain_table[bits] = p;
     }
@@ -579,7 +593,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     size_t capacity = ((size_t)1)<<bits;
     if (capacity > 4*final)
     {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
-        memcpy(w, &p[-1], (final+1)*sizeof(uint64_t));
+        memcpy(&w[1], p, final*sizeof(uint64_t));
         fc.abandon(&p[-1]);
         p = &w[1];
     }
@@ -4330,20 +4344,35 @@ int main(int argc, char *argv[])
     reseed(seed);
 
     Bignum a, b, c, c1, c2, c3, c4;
+    int maxbits, ntries;
+
+//#define TEST_SOME_BASICS 1
 
 #ifdef TEST_SOME_BASICS
     a = "10000000000000000000000000";
     std::cout << "a = " << a << std::endl;
     std::cout << "a*a = " << a*a << std::endl;
-    std::cout << "a*100 = " << a*Bignum(100) << std::endl;
+   std::cout << "a*100 = " << a*Bignum(100) << std::endl;
     std::cout << "100*a = " << Bignum(100)*a << std::endl;
     std::cout << "100*100 = " << Bignum(100)*Bignum(100) << std::endl;
 #endif
 
-    int maxbits;
-    int ntries;
+//#define TEST_RANDOM 1
 
-#define TEST_PLUS_AND_TIMES
+#ifdef TEST_RANDOM
+    maxbits = 160;
+    ntries = 10;
+
+    for (int i=0; i<ntries; i++)
+    {   a = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        b = fudge_distribution_bignum(a, (int)r & 0xf);
+        std::cout << a << " " << b << " " << std::hex << b << std::dec << std::endl;
+    }
+#endif // TEST_RANDOM
+
+
+#define TEST_PLUS_AND_TIMES 1
 
 #ifdef TEST_PLUS_AND_TIMES
 // To try to check that + and - and * behave on the Bignum type I
@@ -4358,24 +4387,25 @@ int main(int argc, char *argv[])
     ntries = 100000;
     int bad = 0;
 
-    for (int i=0; i<10; i++)
-    {   a = random_upto_bits_bignum(maxbits);
-        uint64_t r = mersenne_twister();
-        a = fudge_distribution_bignum(a, (int)r & 0xf);
-        std::cout << a << " " << std::hex << a << std::dec << std::endl;
-    }
-
     for (int i=0; i<ntries; i++)
     {   a = random_upto_bits_bignum(maxbits);
         b = random_upto_bits_bignum(maxbits);
+std::cout << std::endl << std::hex << "a: " << a << std::endl;
+std::cout << "b: " << b << std::endl;
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 0xf);
+std::cout << "a: " << a << std::endl;
         b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
-//      std::cout << "a = " << a << std::endl;
-//      std::cout << "b = " << b << std::endl;
+std::cout << "b: " << b << std::endl;
+std::cout << "a+b: " << a+b << std::endl;
+std::cout << "a-b: " << a-b << std::endl;
         c1 = (a + b)*(a - b);
+std::cout << "c1 computed" << std::endl;
+std::cout << "c1: " << c1 << std::endl;
         c2 = a*a - b*b;
+std::cout << "c2: " << c2 << std::endl;
         c3 = square(a) - square(b);
+std::cout << "c3: " << c3 << std::endl;
         if (c1 == c2 && c2 == c3) continue;
         std::cout << "Try " << i << std::endl;
         std::cout << "a  = " << a << std::endl;
