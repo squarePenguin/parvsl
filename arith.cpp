@@ -82,7 +82,7 @@
 // and finalized using confirm_size_string(), with both of those indicating
 // sizes in bytes. Note that when you reserve or confirm string size the length
 // quoted is the number of characters that will be present excluding any
-// header or termination markers - reserve_tring() will allow for the needs
+// header or termination markers - reserve_string() will allow for the needs
 // of suchlike.
 //
 // A higher level packaging represents numbers using a class Bignum. This
@@ -242,6 +242,7 @@
 #include <iomanip>
 #include <thread>
 #include <ctime>
+#include <chrono>
 
 // A scheme "my_assert" lets me write in my own code to print the
 // diagnostics.
@@ -285,7 +286,7 @@ static inline void my_assert(bool ok)
 
 static FILE *logfile = NULL;
 
-// Making this "inline" results in no warning messages if it is not
+// Making this "inline" avoids warning messages if it is not
 // used. So even though this may somewhat waste space when it is used,
 // I like this option.
 
@@ -389,13 +390,15 @@ realloc_t *realloc_function = realloc;
 free_t    *free_function   = free;
 
 inline uint64_t *reserve(size_t n)
-{   uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
+{   my_assert(n>0 && n<1000000); // Temporary upper limit on size
+    uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
     my_assert(r != NULL);
     return &r[1];
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   p = (uint64_t *)
+{   my_assert(final>0 && n>=final);
+    p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
     my_assert(p != NULL);
     p[0] = final_n;
@@ -405,7 +408,8 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 // In this model confirm_size_x() is just the same as confirm_size().
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   confirm_size(p, n, final);
+{   my_assert(final>0 && n>=final);
+    confirm_size(p, n, final);
 }
 
 inline void abandon(uint64_t *p)
@@ -413,7 +417,7 @@ inline void abandon(uint64_t *p)
 }
 
 inline char *reserve_string(size_t n)
-{   char *r = (char *)(*malloc_function)(n+1);
+{   char *r = (char *)(*malloc_function)(n+9);
     my_assert(r != NULL);
     return r;
 }
@@ -425,7 +429,8 @@ inline char *reserve_string(size_t n)
 // be a good bargain.
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   r[final] = 0;
+{   my_assert(final>0 && (n+9)>final);
+    r[final] = 0;
     return r;
 }
 
@@ -445,7 +450,8 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   return p[-1];
+{   my_assert(p[-1]!=0 && p[-1]<1000000);
+    return p[-1];
 }
 
 // When I use Bignums that are allocated using malloc() and operated on
@@ -471,7 +477,8 @@ intptr_t copy_if_no_garbage_collector(uint64_t *p)
 }
 
 intptr_t copy_if_no_garbage_collector(intptr_t pp)
-{   uint64_t *p = vector_of_handle(pp);
+{   if (stored_as_fixnum(pp)) return pp;
+    uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
     uint64_t *r = reserve(n);
     std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
@@ -521,6 +528,7 @@ public:
 // function will compile this into a single machine code instruction.
     static uint64_t *allocate(size_t n)
     {   int bits = log_next_power_of_2(n);
+        my_assert(n<=(((size_t)1)<<bits));
         uint64_t *r = freechain_table[bits];
         if (r == NULL)
         {   r = new uint64_t[((size_t)1)<<bits];
@@ -552,13 +560,15 @@ public:
 static freechains fc;
 
 inline uint64_t *reserve(size_t n)
-{   return &(fc.allocate(n+1))[1];
+{   my_assert(n>0 && n<1000000);
+    return &(fc.allocate(n+1))[1];
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   if (final == 1 && fits_into_fixnum((int64_t)p[0]))
+{   my_assert(final>0 && n>=final);
+    if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
-        fc.abandon(p);
+        fc.abandon(&p[-1]);
         return r;
     }
 // I compare the final size with the capacity and if it is a LOT smaller
@@ -570,15 +580,16 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     if (capacity > 4*final)
     {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
         memcpy(w, &p[-1], (final+1)*sizeof(uint64_t));
-        fc.abandon(p);
-        p = w;
+        fc.abandon(&p[-1]);
+        p = &w[1];
     }
     ((uint32_t *)(&p[-1]))[1] = final;
     return vector_to_handle(p);
 }
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   return confirm_size(p, n, final);
+{   my_assert(final>0 && n>=final);
+    return confirm_size(p, n, final);
 }
 
 inline intptr_t vector_to_handle(uint64_t *p)
@@ -590,7 +601,9 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   return ((uint32_t *)(&p[-1]))[1];
+{   size_t r = ((uint32_t *)(&p[-1]))[1];
+    my_assert(r>0 && r<1000000);
+    return ((uint32_t *)(&p[-1]))[1];
 }
 
 inline bool stored_as_fixnum(intptr_t a)
@@ -619,19 +632,23 @@ inline bool fits_into_fixnum(int64_t a)
 }
 
 inline void abandon(uint64_t *p)
-{   fc.abandon(p);
+{   fc.abandon(&p[-1]);
 }
 
 inline void abandon(intptr_t p)
-{   if (!stored_as_fixnum(p) && p!=0) fc.abandon(vector_of_handle(p));
+{   if (!stored_as_fixnum(p) && p!=0)
+    {   uint64_t *pp = vector_of_handle(p);
+        fc.abandon(&pp[-1]);
+    }
 }
 
 inline char *reserve_string(size_t n)
-{    return new char[n+1];
+{    return new char[n+9];
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   p[final] = 0;
+{   my_assert(final>0 && (n+9)>final);
+    p[final] = 0;
     return p;
 }
 
@@ -680,7 +697,8 @@ intptr_t always_copy_bignum(uint64_t *p)
 }
 
 intptr_t copy_if_no_garbage_collector(intptr_t pp)
-{   uint64_t *p = vector_of_handle(pp);
+{   if (stored_as_fixnum(pp)) return pp;
+    uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
     uint64_t *r = reserve(n);
     std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
@@ -707,7 +725,8 @@ static uint64_t memory[MEMORY_SIZE];
 static size_t fringe = 0;
 
 inline uint64_t *reserve(size_t n)
-{   uint64_t *r = &memory[fringe+1];
+{   my_assert(n>0 && n<1000000);
+    uint64_t *r = &memory[fringe+1];
     fringe += (n + 1);
     my_assert(fringe <= MEMORY_SIZE);
 }
@@ -795,7 +814,7 @@ inline bool fits_into_fixnum(int64_t a)
 
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{
+{   my_assert(final>0 && n>final);
 // If bignum result ends up such that it could be represented as a
 // fixnum I will detect this here.
     if (final_n == 1)
@@ -809,7 +828,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 }
 
 inline uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final)
-{
+{   my_assert(final>0 && n>final);
 }
 
 inline void abandon(intptr_t *p)
@@ -818,11 +837,11 @@ inline void abandon(intptr_t *p)
 
 
 inline char *reserve_string(size_t n)
-{
+{   my_assert(n>0 && n<1000000);
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{
+{   my_assert(final>0 && n>final);
 }
 
 intline void abandon_string(char *s)
@@ -864,6 +883,7 @@ extern intptr_t uniform_positive(size_t n);
 extern intptr_t uniform_signed(size_t n);
 extern intptr_t uniform_upto(intptr_t a);
 extern intptr_t random_upto_bits(size_t bits);
+extern intptr_t fudge_distribution(intptr_t, int);
 
 extern intptr_t plus_ii(int64_t, int64_t);
 extern intptr_t plus_ib(int64_t, uint64_t *);
@@ -883,12 +903,12 @@ extern intptr_t times_bi(uint64_t *, int64_t);
 extern intptr_t times_bb(uint64_t *, uint64_t *);
 
 extern intptr_t square_b(uint64_t *);
-extern intptr_t square_i(intptr_t);
+extern intptr_t square_i(int64_t);
 
 extern intptr_t pow_b(uint64_t *, int64_t);
-extern intptr_t pow_b(intptr_t, int32_t);
-extern intptr_t pow_i(uint64_t *, int64_t);
-extern intptr_t pow_i(intptr_t, int32_t);
+extern intptr_t pow_i(uint64_t *, int32_t);
+extern intptr_t pow_b(int64_t, int64_t);
+extern intptr_t pow_i(int64_t, int32_t);
 
 extern intptr_t quotient_ii(int64_t, int64_t);
 extern intptr_t quotient_ib(int64_t, uint64_t *);
@@ -906,7 +926,7 @@ extern intptr_t divide_bi(uint64_t *, int64_t);
 extern intptr_t divide_bb(uint64_t *, uint64_t *);
 
 extern intptr_t minus_b(uint64_t *);
-extern intptr_t minus_i(intptr_t);
+extern intptr_t minus_i(int64_t);
 
 extern intptr_t logand_ii(int64_t, int64_t);
 extern intptr_t logand_ib(int64_t, uint64_t *);
@@ -924,38 +944,38 @@ extern intptr_t logxor_bi(uint64_t *, int64_t);
 extern intptr_t logxor_bb(uint64_t *, uint64_t *);
 
 extern intptr_t leftshift_b(uint64_t *, int);
-extern intptr_t leftshift_i(intptr_t, int);
+extern intptr_t leftshift_i(int64_t, int);
 
 extern intptr_t rightshift_b(uint64_t *, int);
-extern intptr_t rightshift_i(intptr_t, int);
+extern intptr_t rightshift_i(int64_t, int);
 
 extern intptr_t lognot_b(uint64_t *);
-extern intptr_t lognot_i(intptr_t);
+extern intptr_t lognot_i(int64_t);
 
-extern intptr_t eqn_ii(int64_t, int64_t);
-extern intptr_t eqn_ib(int64_t, uint64_t *);
-extern intptr_t eqn_bi(uint64_t *, int64_t);
-extern intptr_t eqn_bb(uint64_t *, uint64_t *);
+extern bool eqn_ii(int64_t, int64_t);
+extern bool eqn_ib(int64_t, uint64_t *);
+extern bool eqn_bi(uint64_t *, int64_t);
+extern bool eqn_bb(uint64_t *, uint64_t *);
 
-extern intptr_t geq_ii(int64_t, int64_t);
-extern intptr_t geq_ib(int64_t, uint64_t *);
-extern intptr_t geq_bi(uint64_t *, int64_t);
-extern intptr_t geq_bb(uint64_t *, uint64_t *);
+extern bool geq_ii(int64_t, int64_t);
+extern bool geq_ib(int64_t, uint64_t *);
+extern bool geq_bi(uint64_t *, int64_t);
+extern bool geq_bb(uint64_t *, uint64_t *);
 
-extern intptr_t greaterp_ii(int64_t, int64_t);
-extern intptr_t greaterp_ib(int64_t, uint64_t *);
-extern intptr_t greaterp_bi(uint64_t *, int64_t);
-extern intptr_t greaterp_bb(uint64_t *, uint64_t *);
+extern bool greaterp_ii(int64_t, int64_t);
+extern bool greaterp_ib(int64_t, uint64_t *);
+extern bool greaterp_bi(uint64_t *, int64_t);
+extern bool greaterp_bb(uint64_t *, uint64_t *);
 
-extern intptr_t leq_ii(int64_t, int64_t);
-extern intptr_t leq_ib(int64_t, uint64_t *);
-extern intptr_t leq_bi(uint64_t *, int64_t);
-extern intptr_t leq_bb(uint64_t *, uint64_t *);
+extern bool leq_ii(int64_t, int64_t);
+extern bool leq_ib(int64_t, uint64_t *);
+extern bool leq_bi(uint64_t *, int64_t);
+extern bool leq_bb(uint64_t *, uint64_t *);
 
-extern intptr_t lessp_ii(int64_t, int64_t);
-extern intptr_t lessp_ib(int64_t, uint64_t *);
-extern intptr_t lessp_bi(uint64_t *, int64_t);
-extern intptr_t lessp_bb(uint64_t *, uint64_t *);
+extern bool lessp_ii(int64_t, int64_t);
+extern bool lessp_ib(int64_t, uint64_t *);
+extern bool lessp_bi(uint64_t *, int64_t);
+extern bool lessp_bb(uint64_t *, uint64_t *);
 
 extern char *bignum_to_string(intptr_t aa);
 extern char *bignum_to_string_hex(intptr_t aa);
@@ -1250,6 +1270,10 @@ Bignum uniform_signed_bignum(size_t n)
 
 Bignum uniform_upto_bignum(Bignum a)
 {   return Bignum(true, uniform_upto(a.val));
+}
+
+Bignum fudge_distribution_bignum(Bignum a, int n)
+{   return Bignum(true, fudge_distribution(a.val, n));
 }
 
 Bignum random_upto_bits_bignum(size_t n)
@@ -1689,8 +1713,10 @@ static inline int read_u3(const uint64_t *v, size_t n, size_t i)
 // This version has NOT BEEN TESTED YET and is really a place-holder for
 // when I try to use the code within my Lisp system!
 
-size_t number_size(uint64_t * a)
-{   return veclength(qheader(a))/sizeof(uint64_t);
+size_t number_size(uint64_t *a)
+{   size_t r = veclength(qheader(a))/sizeof(uint64_t);
+    my_assert(r>0 && r<1000000);
+    return veclength(qheader(a))/sizeof(uint64_t);
 }
 
 // Here strings DO NOT have a terminating nul character - their end is
@@ -1886,21 +1912,19 @@ size_t string_size(char *a)
 //
 
 static std::random_device basic_randomness;
-static unsigned int seed_component_1 = basic_randomness();
-static unsigned int seed_component_2 = basic_randomness();
-static unsigned int seed_component_3 = basic_randomness();
+static uint64_t seed_component_1 = (uint64_t)basic_randomness();
+static uint64_t seed_component_2 = (uint64_t)basic_randomness();
+static uint64_t seed_component_3 = (uint64_t)basic_randomness();
 
 // Observe the thread_local status here.
-static thread_local std::seed_seq random_seed
-{   (unsigned int)
-        std::hash<std::thread::id>()(std::this_thread::get_id()),
+static thread_local std::seed_seq random_seed{
+    (uint64_t)(std::hash<std::thread::id>()(std::this_thread::get_id())),
     seed_component_1,
     seed_component_2,
     seed_component_3,
-    (unsigned int)time(NULL),
-    (unsigned int)
-        std::chrono::high_resolution_clock::now().time_since_epoch().count()
-};
+    (uint64_t)time(NULL),
+    (uint64_t)
+      (std::chrono::high_resolution_clock::now().time_since_epoch().count())};
 
 static thread_local std::mt19937_64 mersenne_twister(random_seed);
 // mersenne_twister() now generates 64-bit unsigned integers.
@@ -2017,12 +2041,112 @@ void uniform_upto(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 }
 
 intptr_t uniform_upto(intptr_t aa)
-{   uint64_t *a = vector_of_handle(aa);
-    size_t lena = number_size(a);
+{   uint64_t *a;
+    size_t lena;
+    uint64_t w[2];
+    if (stored_as_fixnum(aa))
+    {   w[1] = (uint64_t)int_of_handle(aa);
+        lena = 1;
+        a = &w[1];
+    }
+    else
+    {   a = vector_of_handle(aa);
+        lena = number_size(a);
+    }
     uint64_t *r = reserve(lena);
     size_t lenr;
     uniform_upto(a, lena, r, lenr);
     return confirm_size(r, lena, lenr);
+}
+
+static inline void truncate_positive(const uint64_t *r, size_t &n)
+{   while (r[n-1]==0 && n>1 && positive(r[n-2])) n--;
+}
+
+static inline void truncate_negative(const uint64_t *r, size_t &n)
+{   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
+}
+
+// The following is a rather strange function. It looks at the 4 bit number n.
+// It then processes its input a in accordance with the following table, where
+// A is the (positive) input value and X is A rounded down to the nearest
+// power of 2 less than it (ie keeping just the top bit of A):
+//
+//    0   X-1                     8   -(X-1)    
+//    1   X                       9   -X        
+//    2   X+1                    10   -(X+1)    
+//    3   A                      11   -A        
+//    4   A                      12   -A
+//    5   A                      13   -A
+//    6   A                      14   -A
+//    7   A                      15   -A
+
+// The idea behind this is that the input A will be a random value from a
+// reasonably smooth distribution, and n will be a random 4 bit value. The
+// output will still be random, but now half the time it will be negative.
+// And a significant proportion of the time it will be a power of 2 (or one
+// either side of being a power of 2). This last is something I want because
+// with an internal representation that is based on 2s complement values
+// close to powers of 2 can easily be "edge cases" that deserve extra attention
+// during testing.
+
+void fudge_distribution(const uint64_t *a, size_t lena,
+                        uint64_t *r, size_t &lenr, int n)
+{   lenr = lena;
+    switch (n&7)
+    {
+    case 0:
+    case 1:
+    case 2:
+        for (size_t i=0; i<lena+1; i++) r[i] = 0;
+        if (a[lena-1] == 0)
+        {   if (lena>1) r[lena-2] = ((uint64_t)1)<<63;
+        }
+        else r[lena-1] = ((uint64_t)1) << (63-nlz(a[lena-1]));
+        if ((n&7) == 0) // decrement it
+        {   if (lena!=1 || a[0]!=0) // avoid decrementing zero.
+            {   uint64_t *p = r;
+                while (*p == 0) *p++ = (uint64_t)(-1);
+                (*p)--;
+            }
+        }
+        else if ((n&7) == 2) // increment it
+        {   uint64_t *p = r;
+            while (*p == (uint64_t)(-1)) *p++ = 0;
+            (*p)++;
+        }
+        break;
+    default:
+        for (size_t i=0; i<lena; i++) r[i] = a[i];
+        break;
+    }
+    if ((n&8) != 0)
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena+1; i++)
+        {   carry = add_with_carry(~r[i], carry, r[i]);
+        }
+        truncate_negative(r, lenr);
+    }
+    else truncate_positive(r, lenr);
+}
+
+intptr_t fudge_distribution(intptr_t aa, int n)
+{   uint64_t *a;
+    size_t lena;
+    uint64_t w[2];
+    if (stored_as_fixnum(aa))
+    {   w[1] = (uint64_t)int_of_handle(aa);
+        lena = 1;
+        a = &w[1];
+    }
+    else
+    {   a = vector_of_handle(aa);
+        lena = number_size(a);
+    }
+    uint64_t *r = reserve(lena+1);
+    size_t lenr;
+    fudge_distribution(a, lena, r, lenr, n);
+    return confirm_size(r, lena+1, lenr);
 }
 
 // Generate a value in the range 0 .. 2^bits-1 using a distribution such
@@ -2103,14 +2227,6 @@ intptr_t unsigned_int_to_bignum(uint64_t n)
 }
 
 static const uint64_t ten19 = UINT64_C(10000000000000000000);
-
-static inline void truncate_positive(const uint64_t *r, size_t &n)
-{   while (r[n-1]==0 && n>1 && positive(r[n-2])) n--;
-}
-
-static inline void truncate_negative(const uint64_t *r, size_t &n)
-{   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
-}
 
 intptr_t string_to_bignum(const char *s)
 {   bool sign = false;
@@ -2514,12 +2630,24 @@ bool bigeqn(const uint64_t *a, size_t lena,
     return std::memcmp(a, b, lena*sizeof(uint64_t)) == 0;   
 }
 
-bool bigeqn(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+bool eqn_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     return bigeqn(a, na, b, nb);
+}
+
+bool eqn_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    return na==1 && (int64_t)a[0]==b;
+}
+
+bool eqn_ib(int64_t a, uint64_t *b)
+{   size_t nb = number_size(b);
+    return nb==1 && a==(int64_t)b[0];
+}
+
+bool eqn_ii(int64_t a, int64_t b)
+{   return (a == b);
 }
 
 // greaterp
@@ -2645,7 +2773,7 @@ intptr_t minus_b(uint64_t *a)
     uint64_t *p = reserve(n+1);
     size_t final_n;
     bignegate(a, n, p, final_n);
-    return confirm_size(p, n, final_n);
+    return confirm_size(p, n+1, final_n);
 }
 
 // The following can only be called via fixnum_dispatch1(), and in that
@@ -2673,7 +2801,7 @@ intptr_t lognot_b(uint64_t *a)
     uint64_t *p = reserve(n+1);
     size_t final_n;
     biglognot(a, n, p, final_n);
-    return confirm_size(p, n, final_n);
+    return confirm_size(p, n+1, final_n);
 }
 
 intptr_t lognot_i(int64_t a)
@@ -2710,24 +2838,25 @@ intptr_t logand_bb(uint64_t *a, uint64_t *b)
     return confirm_size(p, n, final_n);
 }
 
+// The next two are not optimised - a case of (logand bignum positive-fixnum)
+// is guaranteed to end up a fixnum spo can be done more slickly.
+
 intptr_t logand_bi(uint64_t *a, int64_t b)
 {   size_t na = number_size(a);
-    size_t nb = 1;
-    size_t n = na;
-    uint64_t *p = reserve(n);
+    uint64_t *p = reserve(na);
     size_t final_n;
-    biglogand(a, na, b, nb, p, final_n);
-    return confirm_size(p, n, final_n);
+    uint64_t bb[1] = {(uint64_t)b};
+    biglogand(a, na, bb, 1, p, final_n);
+    return confirm_size(p, na, final_n);
 }
 
 intptr_t logand_ib(int64_t a, uint64_t *b)
-{   uint64_t *b = vector_of_handle(bb);
-    size_t nb = number_size(b);
-    size_t n = nb;
-    uint64_t *p = reserve(n);
+{   size_t nb = number_size(b);
+    uint64_t *p = reserve(nb);
     size_t final_n;
-    biglogand(a, na, b, nb, p, final_n);
-    return confirm_size(p, n, final_n);
+    uint64_t aa[1] = {(uint64_t)a};
+    biglogand(aa, 1, b, nb, p, final_n);
+    return confirm_size(p, nb, final_n);
 }
 
 intptr_t logand_ii(int64_t a, int64_t b)
@@ -2752,10 +2881,8 @@ void biglogor(const uint64_t *a, size_t lena,
     else return ordered_biglogor(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t biglogor(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t logor_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na;
@@ -2764,6 +2891,28 @@ intptr_t biglogor(intptr_t aa, intptr_t bb)
     size_t final_n;
     biglogor(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
+}
+
+intptr_t logor_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    uint64_t *p = reserve(na);
+    size_t final_n;
+    uint64_t bb[1] = {(uint64_t)b};
+    biglogor(a, na, bb, 1, p, final_n);
+    return confirm_size(p, na, final_n);
+}
+
+intptr_t logor_ib(int64_t a, uint64_t *b)
+{   size_t nb = number_size(b);
+    uint64_t *p = reserve(nb);
+    size_t final_n;
+    uint64_t aa[1] = {(uint64_t)a};
+    biglogor(aa, 1, b, nb, p, final_n);
+    return confirm_size(p, nb, final_n);
+}
+
+intptr_t logor_ii(int64_t a, int64_t b)
+{   return int_to_handle(a | b);
 }
 
 // logxor
@@ -2791,10 +2940,8 @@ void biglogxor(const uint64_t *a, size_t lena,
     else return ordered_biglogxor(b, lenb, a, lena, r, lenr);
 }
 
-intptr_t biglogxor(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t logxor_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     size_t n;
     if (na >= nb) n = na;
@@ -2804,6 +2951,29 @@ intptr_t biglogxor(intptr_t aa, intptr_t bb)
     biglogxor(a, na, b, nb, p, final_n);
     return confirm_size(p, n, final_n);
 }
+
+intptr_t logxor_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    uint64_t *p = reserve(na);
+    size_t final_n;
+    uint64_t bb[1] = {(uint64_t)b};
+    biglogxor(a, na, bb, 1, p, final_n);
+    return confirm_size(p, na, final_n);
+}
+
+intptr_t logxor_ib(int64_t a, uint64_t *b)
+{   size_t nb = number_size(b);
+    uint64_t *p = reserve(nb);
+    size_t final_n;
+    uint64_t aa[1] = {(uint64_t)a};
+    biglogxor(aa, 1, b, nb, p, final_n);
+    return confirm_size(p, nb, final_n);
+}
+
+intptr_t logxor_ii(int64_t a, int64_t b)
+{   return int_to_handle(a ^ b);
+}
+
 
 extern void bigrightshift(const uint64_t *a, size_t lena,
                           int n,
@@ -3408,7 +3578,7 @@ void bigpow(const uint64_t *a, size_t lena, uint64_t n,
 // The code that dispatches into here should have filtered cases such that
 // the exponent n is not 0, 1 or 2 here.
 
-intptr_t pow_b(uint64_t a, int64_t n)
+intptr_t pow_b(uint64_t *a, int64_t n)
 {   size_t lena = number_size(a);
 //  1^(-n) == 1,
 //  (-1)^(-n) == 1 if n is even or -1 if n is odd.
@@ -3446,18 +3616,22 @@ intptr_t pow_b(uint64_t a, int64_t n)
     return confirm_size(r, olenr, lenr);
 }
 
-// Aagain the cases n = 0, 1 and 2 have been filtered out
+intptr_t pow_b(uint64_t *a, int32_t n)
+{   return pow_b(a, (int64_t)n);
+}
 
-intptr_t bigpow_i(int64_t a, int64_t n)
+// Again the cases n = 0, 1 and 2 have been filtered out
+
+intptr_t pow_i(int64_t a, int64_t n)
 {   if (n < 0)
     {   int z = 0;
         if (a == 1) z = 1;
-        else if a == -1) z = (n%1==0 ? 1 : 0);
+        else if (a == -1) z = (n%1==0 ? 1 : 0);
         else my_assert(a != 0);
         return int_to_bignum(z);
     }
     if (a == 0) return int_to_bignum(0);
-    uint64_t absa = (a < 0 ? -(uint64_t)a : a)
+    uint64_t absa = (a < 0 ? -(uint64_t)a : a);
     size_t bitsa = 64 - nlz(absa);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
@@ -3477,6 +3651,10 @@ intptr_t bigpow_i(int64_t a, int64_t n)
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
+}
+
+intptr_t pow_i(int64_t a, int32_t n)
+{   return pow_i(a, (int64_t)n);
 }
 
 //=========================================================================
@@ -3964,10 +4142,8 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
     else truncate_positive(a, lena);
 }
 
-intptr_t bigquotient(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t quotient_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
@@ -3977,10 +4153,36 @@ intptr_t bigquotient(intptr_t aa, intptr_t bb)
     return confirm_size(q, olenq, lenq);
 }
 
-intptr_t bigremainder(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t quotient_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    uint64_t *q, *r;
+    size_t olenq, olenr, lenq, lenr;
+    uint64_t bb[1] = {(uint64_t)b};
+    division(a, na, bb, 1,
+             true, q, olenq, lenq,
+             false, r, olenr, lenr);
+    return confirm_size(q, olenq, lenq);
+}
+
+// A fixnum divided by a bignum ought always to yield 0, except that
+// maybe -0x8000000000000000} / {0,0x8000000000000000) => -1
+
+intptr_t quotient_ib(int64_t a, uint64_t *b)
+{   if (a==INT64_MIN &&
+        number_size(b)==1 &&
+        b[0]==(uint64_t)INT64_MIN) return int_to_handle(-1);
+    return int_to_handle(0); 
+}
+
+// unpleasantly -0x8000000000000000 / -1 => a bignum
+
+intptr_t quotient_ii(int64_t a, int64_t b)
+{   if (b==-1 && a == INT64_MIN) return unsigned_int_to_bignum((uint64_t)a);
+    else return int_to_handle(a / b);
+}
+
+intptr_t remainder_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
@@ -3990,6 +4192,30 @@ intptr_t bigremainder(intptr_t aa, intptr_t bb)
     return confirm_size(r, olenr, lenr);
 }
 
+intptr_t remainder_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    uint64_t *q, *r;
+    size_t olenq, olenr, lenq, lenr;
+    uint64_t bb[1] = {(uint64_t)b};
+    division(a, na, bb, 1,
+             false, q, olenq, lenq,
+             true, r, olenr, lenr);
+    return confirm_size(r, olenr, lenr);
+}
+
+intptr_t remainder_ib(int64_t a, uint64_t *b)
+{   if (a==INT64_MIN &&
+        number_size(b)==1 &&
+        b[0]==(uint64_t)INT64_MIN) return int_to_handle(0);
+    return int_to_handle(a); 
+}
+
+intptr_t remainder_ii(int64_t a, int64_t b)
+{   return int_to_handle(a % b);
+}
+
+
+
 #ifdef LISP
 
 // In LISP mode I provide a function that returns both quotient and
@@ -3997,10 +4223,46 @@ intptr_t bigremainder(intptr_t aa, intptr_t bb)
 // as a function that delivers the quotient as its result and saves
 // the remainder via an additional argument.
 
-intptr_t bigdivide(intptr_t aa, intptr_t bb)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t divide_bb(uint64_t *a, uint64_t *b)
+{   size_t na = number_size(a);
+    size_t nb = number_size(b);
+    uint64_t *q, *r;
+    size_t olenq, olenr, lenq, lenr;
+    division(a, na, b, nb,
+             true, q, olenq, lenq,
+             true, r, olenr, lenr);
+    intptr_t rr = confirm_size(r, olenr, lenr);
+    intptr_t qq = confirm_size_x(q, olenq, lenq);
+    return cons(qq, rr);
+}
+
+intptr_t divide_bi(uint64_t *a, int64_t b)
+{   size_t na = number_size(a);
+    uint64_t *q, *r;
+    size_t olenq, olenr, lenq, lenr;
+    uint64_t bb[1] = {(uint64_t)b};
+    division(a, na, bb, 1,
+             true, q, olenq, lenq,
+             true, r, olenr, lenr);
+    intptr_t rr = confirm_size(r, olenr, lenr);
+    intptr_t qq = confirm_size_x(q, olenq, lenq);
+    return cons(qq, rr);
+}
+
+intptr_t divide_ib(int64_t a, uint64_t *b)
+{   size_t nb = number_size(b);
+    uint64_t *q, *r;
+    size_t olenq, olenr, lenq, lenr;
+    division(a, na, b, nb,
+             true, q, olenq, lenq,
+             true, r, olenr, lenr);
+    intptr_t rr = confirm_size(r, olenr, lenr);
+    intptr_t qq = confirm_size_x(q, olenq, lenq);
+    return cons(qq, rr);
+}
+
+intptr_t divide_ii(int64_t a, int64_t b)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
@@ -4014,10 +4276,8 @@ intptr_t bigdivide(intptr_t aa, intptr_t bb)
 
 #else
 
-intptr_t bigdivide(intptr_t aa, intptr_t bb, intptr_t &rem)
-{   uint64_t *a = vector_of_handle(aa);
-    uint64_t *b = vector_of_handle(bb);
-    size_t na = number_size(a);
+intptr_t divide_bb(uint64_t *a, uint64_t *b, intptr_t &rem)
+{   size_t na = number_size(a);
     size_t nb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
@@ -4071,14 +4331,14 @@ int main(int argc, char *argv[])
 
     Bignum a, b, c, c1, c2, c3, c4;
 
+#ifdef TEST_SOME_BASICS
     a = "10000000000000000000000000";
     std::cout << "a = " << a << std::endl;
     std::cout << "a*a = " << a*a << std::endl;
     std::cout << "a*100 = " << a*Bignum(100) << std::endl;
     std::cout << "100*a = " << Bignum(100)*a << std::endl;
     std::cout << "100*100 = " << Bignum(100)*Bignum(100) << std::endl;
-
-    return 0;
+#endif
 
     int maxbits;
     int ntries;
@@ -4088,22 +4348,35 @@ int main(int argc, char *argv[])
 #ifdef TEST_PLUS_AND_TIMES
 // To try to check that + and - and * behave on the Bignum type I
 // generate random numbers a and b and then compute first (a+b)*(a-b)
-// and then a*a*b*b. If these match I feel happy - while if I find a case
-// where the two values differ I have uncovered a bug.
-// I will try numbers of up to 640 bits and 4 million test cases.
+// and then a*a-b*b. If these match I feel happy - while if I find a case
+// where the two values differ I have uncovered a bug. I will try both
+// positive and negative inputs, and I will also bias my random testing
+// to include more numbers of the form 2^n, 2^n-1 and 2^n+1 than would
+// arise with most neat probability distributions for the numbers.
 
     maxbits = 2500;
-    ntries = 10000000;
+    ntries = 100000;
     int bad = 0;
+
+    for (int i=0; i<10; i++)
+    {   a = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 0xf);
+        std::cout << a << " " << std::hex << a << std::dec << std::endl;
+    }
 
     for (int i=0; i<ntries; i++)
     {   a = random_upto_bits_bignum(maxbits);
         b = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 0xf);
+        b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
+//      std::cout << "a = " << a << std::endl;
+//      std::cout << "b = " << b << std::endl;
         c1 = (a + b)*(a - b);
         c2 = a*a - b*b;
         c3 = square(a) - square(b);
-        c4 = square(-a) - square(-b);
-        if (c1 == c2 && c2 == c3 && c3 == c4) continue;
+        if (c1 == c2 && c2 == c3) continue;
         std::cout << "Try " << i << std::endl;
         std::cout << "a  = " << a << std::endl;
         std::cout << "b  = " << b << std::endl;
@@ -4128,7 +4401,7 @@ int main(int argc, char *argv[])
 
 #ifdef TEST_DIVISION
     maxbits = 2500;
-    ntries = 10000000;
+    ntries = 100000;
 
     std::cout << "Start of division testing" << std::endl;
 
@@ -4168,6 +4441,7 @@ int main(int argc, char *argv[])
 
 #endif
 
+    std::cout << "About to exit" << std::endl;
     return 0;    
 }
 
