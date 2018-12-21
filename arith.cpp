@@ -191,11 +191,8 @@
 //   numbers needs to live at a higher level within the Lisp then just thise
 //   code.
 //   Strings are allocated using reserve_string() and finalized using
-//   confirm_size_string. They will end up as blocks of memory with
-//   the first word holding a "string header" (which includes length
-//   information. The characters of the string follow that aligned at a 4-byte
-//   boundary and without a trailing NUL. The final 8-byte doubleword of
-//   the string will be NUL padded.
+//   confirm_size_string. For Lisp purposes they will need to have a header
+//   word containing the string length.
 
 
 // I provide a default configuration, but by predefining one of the
@@ -416,8 +413,10 @@ inline void abandon(uint64_t *p)
 {   (*free_function)((void *)&p[-1]);
 }
 
+// Note that I allocate space for the string data plus a NUL terminating byte.
+
 inline char *reserve_string(size_t n)
-{   char *r = (char *)(*malloc_function)(n+9);
+{   char *r = (char *)(*malloc_function)(n+1);
     my_assert(r != NULL);
     return r;
 }
@@ -465,14 +464,14 @@ inline size_t number_size(uint64_t *p)
 intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = p[-1];
     uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
 intptr_t copy_if_no_garbage_collector(uint64_t *p)
 {   size_t n = p[-1];
     uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -481,7 +480,7 @@ intptr_t copy_if_no_garbage_collector(intptr_t pp)
     uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
     uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -657,7 +656,7 @@ inline void abandon(intptr_t p)
 }
 
 inline char *reserve_string(size_t n)
-{    return new char[n+9];
+{    return new char[n+1];
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
@@ -706,7 +705,7 @@ inline void abandon_string(char *s)
 intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = ((uint32_t *)(&p[-1]))[1];
     uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -715,7 +714,7 @@ intptr_t copy_if_no_garbage_collector(intptr_t pp)
     uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
     uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -843,6 +842,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 
 inline uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final)
 {   my_assert(final>0 && n>final);
+    my_abort("not implemented yet");
 }
 
 inline void abandon(intptr_t *p)
@@ -852,6 +852,7 @@ inline void abandon(intptr_t *p)
 
 inline char *reserve_string(size_t n)
 {   my_assert(n>0 && n<1000000);
+    my_abort("not implemented yet");
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
@@ -859,26 +860,26 @@ inline char *confirm_size_string(char *p, size_t n, size_t final)
 }
 
 intline void abandon_string(char *s)
-{
+{   my_abort("not implemented yet");
 }
 
 
 inline intptr_t vector_to_handle(uint64_t *p)
-{
+{   my_abort("not implemented yet");
 }
 
 inline uint64_t *vector_of_handle(intptr_t n)
-{
+{   my_abort("not implemented yet");
 }
 
 inline size_t number_size(uint64_t *p)
-{
+{   my_abort("not implemented yet");
 }
 
 uint64_t *always_copy_bignum(uint64_t *p)
 {   size_t n = p[-1];
     uint64_t *r = reserve(n);
-    std::memcpy(&r[-1], &p[-1], (n+1)*sizeof(uint64_t));
+    std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
@@ -2347,7 +2348,8 @@ size_t bignum_bits(const uint64_t *a, size_t lena)
 // fraction = 0.30127.. > log10(2)]. So if one the number of decimal digits
 // that can be generated will be ceil(24*617/2048). I will compute that by
 // forming a quotient that is truncated towards zero and then adding 1, and
-// in this case this yields 8 as required.
+// in this case this yields 8 as required. For negative numbers I will add 1
+// to allow for a "-" sign.
 
 static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 {
@@ -2360,7 +2362,6 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // overflow well before the full 64-bits or result, but that would only
 // arise for bignum inputs that are way beyond the memory ranges supported
 // at present by any extant hardware.
-//
     return (size_t)(1+(617*(uint64_t)r)/2048);
 } 
 
@@ -2370,16 +2371,44 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 
 char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 {
-// Making the value zero a special case simplifies things later on!
-    if (lena == 1 && a[0] == 0)
-    {   char *r = reserve_string(1);
-        strcpy(r, "0");
-        return confirm_size_string(r, 1, 1);
+// Making one-word numbers a special case simplifies things later on! It may
+// also make this case go just slightly faster.
+    if (lena == 1)
+    {   uint64_t v = a[0];
+        bool sign;
+        if (negative(v) && !as_unsigned)
+        {   sign = true;
+            v = -v;
+        }
+        else sign = false;
+        char buffer[24];
+        int len = 0;
+        while (v != 0)
+        {   buffer[len++] = '0' + v%10;
+            v = v/10;
+        }
+// Now I have the decimal digits on the number in my buffer, with the
+// least significant first and the most significant last. Insert the sign bit
+// if needed (and deal with the special case of zero).
+        if (sign) buffer[len++] = '-';
+        else if (len == 0) buffer[len++] = '0';
+        char *r = reserve_string(len);
+        for (int i=0; i<len; i++) r[i] = buffer[len-i-1];
+        return confirm_size_string(r, len, len);
     }
 // The size (m) for the block of memory that I put my result in is
 // such that it could hold the string representation of my input, and
-// I estimate that via predict_size_in_bytes().
-    uint64_t m = (7 + predict_size_in_bytes(a, lena))/8;
+// I estimate that via predict_size_in_bytes(). Well the smallest bignum
+// that will need 2 words will be {0,0x8000000000000000}, ie 2^63. That
+// will need 19 decimal digits plus space for a sign bit, so there will be
+// at least 20 bytes allocated for the printed representation of any 2-word
+// bignum, and at least 40 for a 3-word value, at least 59 for a 4-word one
+// etc. This means that the space I will allocate here for the result
+// leaves me with plenty of workspace to use while constructing the
+// output string. The case liable to be tightest will be that of the
+// smallest 2-woed bignum, so if I ensure that is OK all the rest will
+// certainly be safe.
+    uint64_t m = predict_size_in_bytes(a, lena);
 // I am going to build up (decimal) digits of the converted number by
 // repeatedly dividing by 10^19. Each time I do that the remainder I
 // amd left with is the next low 19 decimal digits of my number. Doing the
@@ -2388,16 +2417,20 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 // I will copy my input into a fresh vector. And I will force it to be
 // positive. The made-positive version might have a leading digit with
 // its top bit set - that will not worry me because I view it as unsigned.
-    char *rc = reserve_string(8*m-1);
+    char *rc = reserve_string(m);
 // I have allocated the space that will be needed for the eventual string of
 // characters. I will use that space to save numeric values along the way, so
-// here I cast so I can use that same memort as a vector of 64-bit integers.
+// here I cast so I can use that same memory as a vector of 64-bit integers.
 // I will only ever access data in the format that it was placed into memory!
+// Note that this will assume that the string data was allocated so as to
+// be aligned suitably for uint64_t values.
     uint64_t *r = (uint64_t *)rc;
     size_t i;
+// For the edge case lena==2 and m==20. I copy 2 words across. That will leave
+// 4 bytes unused.
     for (i=0; i<lena; i++) r[i] = a[i];
-    for (; i<m; i++) r[i] = 0;
-// Make it positive
+    for (; i<m/sizeof(uint64_t); i++) r[i] = 0;
+// Make the number positive
     bool sign = false;
     if (negative(r[lena-1]) && !as_unsigned)
     {   sign = true;
@@ -2409,7 +2442,13 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 // down from the top of the vector. That should JUST keep up so that I
 // never overwrite digits of the reducing part! I will stop when the
 // number I have been working with end up < 10^19.
-    size_t p = m-1; // indicates where to put next output digit
+    size_t p = m/sizeof(uint64_t)-1; // where to put next output digit
+// Each value written into the vector here will stand for 19 decimal
+// digits, and will use 8 bytes. So here the nastiest case will be when the
+// number of decimal digits to end up with is 7 mod 8 (so that I lose as
+// much space as possible) and the number is as large as possible. My
+// belief is that numbers from 10^16 upwards will lead to there being enough
+// space.
     while (lena > 1 || r[0] > ten19)
     {   uint64_t d = short_divide_ten_19(r, lena);
         r[p--] = d;
@@ -2433,6 +2472,8 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 // overhead.
     char buffer[24];
     int bp = 0;
+// The first part of the number is printed naturally so that it only
+// uses as many bytes of output as it needs.
     do
     {   buffer[bp++] = '0' + top%10;
         top = top/10;
@@ -2441,10 +2482,13 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
     {   *p1++ = buffer[--bp];
         len++;
     } while (bp != 0);
-    my_assert(len <= m*sizeof(uint64_t));
+    my_assert(len <= m);
     while (p < m)
-    {   top = r[p++];
-// Here I want to print exactly 19 decimal digits.
+    {
+// I will always pick up the number I am going to expand before writing any
+// digits into the buffer.
+        top = r[p++];
+// For subsequent chunks I want to print exactly 19 decimal digits.
         for (int i=0; i<18; i++)
         {   p1[18-i] = '0' + top%10;
             top = top/10;
@@ -2452,9 +2496,17 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
         *p1 = '0' + (int)top;
         p1 += 19;
         len += 19;
-        my_assert(len <= m*sizeof(uint64_t));
+        my_assert(len <= m);
     }
-    return confirm_size_string(rc, 8*m-1, len);
+// To convince myself that this is safe consider when I pick up the final
+// chunk. It will turn into 19 bytes of output, so where it comes from must
+// be no more than 19 bytes before the length (m) of the final string, because
+// otherwise it would have got clobbered when I unpacked the previous chunk.
+// But this final chunk is itself 8 bytes wide and there can be up to 7 bytes
+// beyond it that are there to support proper alignment - so that last chunk
+// lives within the final 15 bytes of the buffer and that is a fortiori within
+// the last 19 as required.
+    return confirm_size_string(rc, m, len);
 }
 
 char *bignum_to_string(intptr_t aa)
@@ -2504,13 +2556,13 @@ char *bignum_to_string_hex(intptr_t aa)
         }
     }
     else
-    {   while ((top>>60) == 0)
+    {   my_assert(top != 0);
+        while ((top>>60) == 0)
         {   top = top << 4;
             m--;
         }
     }
-    size_t nn = (m + 7)/8;
-    char *r = reserve_string(8*nn-1);
+    char *r = reserve_string(m);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -2530,7 +2582,7 @@ char *bignum_to_string_hex(intptr_t aa)
             *p++ = "0123456789abcdef"[d];
         }
     }   
-    return confirm_size_string(r, 8*nn-1, m);
+    return confirm_size_string(r, m, m);
 }
 
 char *bignum_to_string_octal(intptr_t aa)
@@ -2554,14 +2606,13 @@ char *bignum_to_string_octal(intptr_t aa)
     size_t nn;  // will be the number of characters used in the output
     if (sign)
     {   while (read_u3(a, n, width-1) == 7 && width > 1) width--;
-     nn = width+2;
+        nn = width+2;
     }
     else
     {   while (read_u3(a, n, width-1) == 0 && width > 1) width--;
         nn = width;
     }
-    nn = (nn + 7)/8;   // words needed for string result
-    char *r = reserve_string(8*nn-1);
+    char *r = reserve_string(nn);
     char *p = (char *)r;
     if (sign)
     {   *p++ = '~';
@@ -2569,7 +2620,7 @@ char *bignum_to_string_octal(intptr_t aa)
     }
     for (size_t i=0; i<width; i++)
         *p++ = '0' + read_u3(a, n, width-i-1);
-    return confirm_size_string(r, 8*nn-1, width);
+    return confirm_size_string(r, nn, width);
 }
 
 char *bignum_to_string_binary(intptr_t aa)
@@ -2601,13 +2652,13 @@ char *bignum_to_string_binary(intptr_t aa)
         }
     }
     else
-    {   while ((top>>63) == 0)
+    {   my_assert(top != 0);
+        while ((top>>63) == 0)
         {   top = top << 1;
             m--;
         }
     }
-    size_t nn = (m + 7)/8;
-    char *r = reserve_string(8*nn-1);
+    char *r = reserve_string(m);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -2627,7 +2678,7 @@ char *bignum_to_string_binary(intptr_t aa)
             *p++ = '0' + d;
         }
     }   
-    return confirm_size_string(r, 8*nn-1, m);
+    return confirm_size_string(r, m, m);
 }
 
 //=========================================================================
@@ -3813,7 +3864,7 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
 // either or both of quotient and remainder are required. if want_q is set
 // then this creates a new vector for q and return it via q/lenq. Similarly
 // for want_r. The inputs a and b can be bignums of any size and are allowed
-// to be positive or nagative - this sorts everything out.
+// to be positive or negative - this sorts everything out.
 
 // Divide a by b to obtain a quotient q and a remainder r. 
 
@@ -4388,15 +4439,17 @@ int main(int argc, char *argv[])
     int bad = 0;
 
     for (int i=0; i<ntries; i++)
-    {   a = random_upto_bits_bignum(maxbits);
-        b = random_upto_bits_bignum(maxbits);
+    {
+std::cout << "Start cycle " << i << std::endl;
+        a = random_upto_bits_bignum(maxbits);
 std::cout << std::endl << std::hex << "a: " << a << std::endl;
-std::cout << "b: " << b << std::endl;
+        b = random_upto_bits_bignum(maxbits);
+std::cout << "b: " << std::hex << b << std::endl;
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 0xf);
-std::cout << "a: " << a << std::endl;
+std::cout << "a: " << std::hex << a << std::endl;
         b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
-std::cout << "b: " << b << std::endl;
+std::cout << "b: " << std::hex << b << std::endl;
 std::cout << "a+b: " << a+b << std::endl;
 std::cout << "a-b: " << a-b << std::endl;
         c1 = (a + b)*(a - b);
