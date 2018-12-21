@@ -911,6 +911,22 @@ void *allocate_memory(uintptr_t n)
     return p;
 }
 
+/*
+* [par::reclaim] copies over the thread-local data for garbage collection
+*/
+void par_reclaim() {
+    for (auto x: par::thread_table) {
+        auto td = x.second;
+        for (auto& s: *td.fluid_locals) {
+            s = copy(s);
+        }
+    }
+
+    for (auto& s : par::fluid_globals) {
+        s = copy(s);
+    }
+}
+
 
 extern void ensureheap2space(uintptr_t len);
 static uintptr_t space_used = 0;
@@ -932,6 +948,7 @@ void inner_reclaim(LispObject *C_stack)
     {   block_header *b = (block_header *)blocks[i];
         clearpinned(b);
     }
+    
 // Here at the start of garbage collection heap1 contains a list (now
 // called heap2_pinchain) of all the items in heap2 that were pinned.
 // These should be the only things present in heap2, and the list is used
@@ -1029,6 +1046,9 @@ if (initial_a == 123456) printf("ook\n"); // to get it used.
     for (o=0; o<BASES_SIZE; o++) bases[o] = copy(bases[o]);
     for (o=0; o<OBHASH_SIZE; o++)
         obhash[o] = copy(obhash[o]);
+
+    par_reclaim();
+
 // Items that are pinned and are in heap1 may have the pinning pointer as
 // the only reference to them. Ones in heap2 may lie beyond where fringe2
 // will reach to. So I need to take special action to do copycontent on
@@ -3232,17 +3252,23 @@ void fluid_symbol(LispObject s) {
         qflags(s) &= ~flagGLOBAL; // disable global
 
         par::symval(s) = val;
-    } else if (par::symval(s) == undefined) {
-        par::symval(s) = nil;
-    }
+    } 
 
     qflags(s) |= flagFLUID;
+
+    if (par::symval(s) == undefined) {
+        par::symval(s) = nil;
+    }
 }
 
 void unfluid_symbol(LispObject s) {
     LispObject val = par::symval(s);
     qflags(s) &= ~flagFLUID;
     par::symval(s) = val;
+
+    if (par::symval(s) == undefined) {
+        par::symval(s) = nil;
+    }
 }
 
 LispObject chflag(LispObject x, void (*f)(LispObject)) {
@@ -6611,12 +6637,17 @@ int warm_start_1(gzFile f, int *errcode)
                         // during warm_start, all values are still stored globally
                         // we first relocate them then copy to thread_local
                         // TODO VB: separate function
-                        if ((qflags(w) & flagGLOBAL) == 0) {
+                        if (!is_global(w)) {
                             // reallocate on thread_local storage
                             int loc = par::allocate_symbol();
                             LispObject val = qvalue(w);
                             qvalue(w) = packfixnum(loc);
-                            par::symval(w) = val;
+                            if (is_fluid(w)) {
+                                par::symval(w) = val;
+                                par::fluid_globals[loc] = val;
+                            } else {
+                                par::local_symbol(loc) = val;
+                            }
                         }
                     }
                     if (fr1+2*sizeof(LispObject) < lim1)
@@ -6958,14 +6989,23 @@ void write_image(gzFile f)
     inner_reclaim(C_stackbase); // To compact memory.
     inner_reclaim(C_stackbase); // in the conservative case GC twice.
 
-    // VBL we want to find all symbols and move everything back from thread_local data to global
+    // VB: we want to find all symbols and move everything back from thread_local data to global
+    // THis has do be done after compaction, as we invalidate the [symval] calls.
     for (int i = 0; i < OBHASH_SIZE; i += 1) {
         for (LispObject l = obhash[i]; isCONS(l); l = qcdr(l)) {
             LispObject x = qcar(l);
-            if (x != undefined && isSYMBOL(x) && (qflags(x) & flagGLOBAL) == 0) {
+            if (isSYMBOL(x) && !is_global(x)) {
                 // If it wasn't a global symbol, the value is thread_local;
                 int loc = qfixnum(qvalue(x));
-                qvalue(x) = par::local_symbol(loc);
+
+                if (is_fluid(x)) {
+                    // VB: I'm basically assuming here that we only care about the global
+                    // value of a fluid on preserve. This further assumes preserve is called
+                    // only in the global scope.
+                    qvalue(x) = par::fluid_globals[loc];
+                } else {
+                    qvalue(x) = par::local_symbol(loc);
+                }
             }
         }
     }
@@ -7579,10 +7619,7 @@ int main(int argc, char *argv[])
     C_stackbase = (LispObject *)((intptr_t)&inputfilename &
                                     -sizeof(LispObject));
 
-    // VB: Need to handle main thread separately                                
-    par::thread_data.C_stackbase = C_stackbase;
-    par::thread_data.id = 0;
-    par::thread_table.emplace(0, par::thread_data);
+    par::init_main_thread(C_stackbase);
 
     coldstart = 0;
     interactive = 1;
