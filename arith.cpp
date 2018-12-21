@@ -80,10 +80,10 @@
 // string representation of a number, with hex, decimal, octal and binary
 // variants). Space for the string will be allocated using reserve_string()
 // and finalized using confirm_size_string(), with both of those indicating
-// sizes in bytes. Note that when you reserve or confirm string size the length
-// quoted is the number of characters that will be present excluding any
-// header or termination markers - reserve_string() will allow for the needs
-// of suchlike.
+// sizes in bytes. Note that when you reserve or confirm string size the
+// length quoted is the number of characters that will be present excluding
+// any header or termination markers - reserve_string() will allow for the
+// needs of suchlike.
 //
 // A higher level packaging represents numbers using a class Bignum. This
 // has just one field which will hold a potentially encoded version of a
@@ -2333,6 +2333,13 @@ size_t bignum_bits(const uint64_t *a, size_t lena)
     uint64_t top = a[lena-1];  // top digit.
 // The exact interpretation of "the length in bits of a negative number"
 // is something I need to think through.
+    if (negative(top))
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena; i++)
+        {   top = ~a[i] + carry;
+            carry = (top < carry ? 1 : 0);
+        }
+    }
     return 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
 }
 
@@ -2356,13 +2363,9 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // I am first going to estimate the size in BITS and then I will
 // see how that maps onto bytes.
     size_t r = bignum_bits(a, lena);
-    if (negative(a[lena-1])) r += 8; // allow space for a "-" sign.
-// I need to do the calculation in uint64_t to avoid overflow at
-// sized that would embarass me. Well even with that there would be
-// overflow well before the full 64-bits or result, but that would only
-// arise for bignum inputs that are way beyond the memory ranges supported
-// at present by any extant hardware.
-    return (size_t)(1+(617*(uint64_t)r)/2048);
+    r = 1 + (size_t)((617*(uint64_t)r)/2048);
+    if (negative(a[lena-1])) r += 2; // allow space for a "-" sign.
+    return r;
 } 
 
 // The "as_unsigned" option here is not for general use - it is JUST for
@@ -2371,6 +2374,7 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 
 char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 {
+    display("bignum_to_string", a, lena);
 // Making one-word numbers a special case simplifies things later on! It may
 // also make this case go just slightly faster.
     if (lena == 1)
@@ -2482,8 +2486,8 @@ char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
     {   *p1++ = buffer[--bp];
         len++;
     } while (bp != 0);
-    my_assert(len <= m);
-    while (p < m)
+    my_assert(len + 19*(m/sizeof(uint64_t)-p)<= m);
+    while (p < m/sizeof(uint64_t))
     {
 // I will always pick up the number I am going to expand before writing any
 // digits into the buffer.
@@ -2556,7 +2560,10 @@ char *bignum_to_string_hex(intptr_t aa)
         }
     }
     else
-    {   my_assert(top != 0);
+    {   while (top == 0)
+        {   n--;
+            top = a[n-1];
+        }
         while ((top>>60) == 0)
         {   top = top << 4;
             m--;
@@ -4435,12 +4442,13 @@ int main(int argc, char *argv[])
 // arise with most neat probability distributions for the numbers.
 
     maxbits = 2500;
+    maxbits = 90;
     ntries = 100000;
     int bad = 0;
 
-    for (int i=0; i<ntries; i++)
+    for (int i=1; i<=ntries; i++)
     {
-std::cout << "Start cycle " << i << std::endl;
+std::cout << std::endl << std::endl << std::dec << "Start cycle " << i << std::endl;
         a = random_upto_bits_bignum(maxbits);
 std::cout << std::endl << std::hex << "a: " << a << std::endl;
         b = random_upto_bits_bignum(maxbits);
