@@ -173,7 +173,9 @@ private:
     LispObject save;
 public:
     Shallow_bind(LispObject x, LispObject tval) {
-        assert(!is_global(x));
+        if (is_global(x)) {
+            error1("shallow bind global", x);
+        }
 
         loc = qfixnum(qvalue(x));
         LispObject& sv = local_symbol(loc);
