@@ -500,7 +500,7 @@ intptr_t copy_if_no_garbage_collector(intptr_t pp)
 static unsigned int log_next_power_of_2(size_t n);
 
 static uint64_t *freechain_table[64];
-static int count = 0, count1 = 0;
+//static int count = 0, count1 = 0;
 
 // The intent is that for most purposes freechains.allocate() and
 // freechains.abandon() behave rather like malloc, save that they REQUIRE
@@ -521,9 +521,11 @@ public:
     {   for (size_t i=0; i<64; i++)
         {   uint64_t *f = freechain_table[i];
 // Report how many entries there are in the freechain.
-            size_t n;
+            size_t n = 0;
             for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[0]) n++;
-            std::cout << i << ": " << n << std::endl;
+            if (n != 0)
+                std::cout << "Freechain " << i << " length: "
+                          << n << std::endl;
             while (f != NULL)
             {   uint64_t w = f[0];
                 delete f;
@@ -549,8 +551,8 @@ public:
 // memory as a 32-bit value that is how I will read it later on, and the
 // messy notation here does not correspond to complicated computation.
         ((uint32_t *)r)[0] = bits;
-        if (count1++ < 10) std::cout << "A" << n << " " << bits << " " <<
-            std::hex << r[0] << std::dec << " " << r << std::endl;
+//      if (count1++ < 10) std::cout << "A" << n << " " << bits << " " <<
+//          std::hex << r[0] << std::dec << " " << r << std::endl;
         return r;
     }
 // When I abandon a memory block I will push it onto a relevant free chain.
@@ -559,8 +561,8 @@ public:
         my_assert(bits>0 && bits<48);
 // Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
 // risking loss of information.
-        if (count++ < 10) std::cout << "free " << p << " size " << bits <<
-           std::hex << " " << p[0] << std::dec << std::endl;
+//      if (count++ < 10) std::cout << "free " << p << " size " << bits <<
+//         std::hex << " " << p[0] << std::dec << std::endl;
         p[0] = (uint64_t)freechain_table[bits];
         freechain_table[bits] = p;
     }
@@ -4410,7 +4412,7 @@ int main(int argc, char *argv[])
     a = "10000000000000000000000000";
     std::cout << "a = " << a << std::endl;
     std::cout << "a*a = " << a*a << std::endl;
-   std::cout << "a*100 = " << a*Bignum(100) << std::endl;
+    std::cout << "a*100 = " << a*Bignum(100) << std::endl;
     std::cout << "100*a = " << Bignum(100)*a << std::endl;
     std::cout << "100*100 = " << Bignum(100)*Bignum(100) << std::endl;
 #endif
@@ -4441,32 +4443,31 @@ int main(int argc, char *argv[])
 // to include more numbers of the form 2^n, 2^n-1 and 2^n+1 than would
 // arise with most neat probability distributions for the numbers.
 
-    maxbits = 2500;
-    maxbits = 90;
-    ntries = 100000;
+    maxbits = 400;
+    ntries = 2000000;
     int bad = 0;
 
     for (int i=1; i<=ntries; i++)
     {
-std::cout << std::endl << std::endl << std::dec << "Start cycle " << i << std::endl;
+//std::cout << std::endl << std::endl << std::dec << "Start cycle " << i << std::endl;
         a = random_upto_bits_bignum(maxbits);
-std::cout << std::endl << std::hex << "a: " << a << std::endl;
+//std::cout << std::endl << std::hex << "a: " << a << std::endl;
         b = random_upto_bits_bignum(maxbits);
-std::cout << "b: " << std::hex << b << std::endl;
+//std::cout << "b: " << std::hex << b << std::endl;
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 0xf);
-std::cout << "a: " << std::hex << a << std::endl;
+//std::cout << "a: " << std::hex << a << std::endl;
         b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
-std::cout << "b: " << std::hex << b << std::endl;
-std::cout << "a+b: " << a+b << std::endl;
-std::cout << "a-b: " << a-b << std::endl;
+//std::cout << "b: " << std::hex << b << std::endl;
+//std::cout << "a+b: " << a+b << std::endl;
+//std::cout << "a-b: " << a-b << std::endl;
         c1 = (a + b)*(a - b);
-std::cout << "c1 computed" << std::endl;
-std::cout << "c1: " << c1 << std::endl;
+//std::cout << "c1 computed" << std::endl;
+//std::cout << "c1: " << c1 << std::endl;
         c2 = a*a - b*b;
-std::cout << "c2: " << c2 << std::endl;
+//std::cout << "c2: " << c2 << std::endl;
         c3 = square(a) - square(b);
-std::cout << "c3: " << c3 << std::endl;
+//std::cout << "c3: " << c3 << std::endl;
         if (c1 == c2 && c2 == c3) continue;
         std::cout << "Try " << i << std::endl;
         std::cout << "a  = " << a << std::endl;
@@ -4491,8 +4492,8 @@ std::cout << "c3: " << c3 << std::endl;
 #define TEST_DIVISION 1
 
 #ifdef TEST_DIVISION
-    maxbits = 2500;
-    ntries = 100000;
+    maxbits = 400;
+    ntries = 2000000;
 
     std::cout << "Start of division testing" << std::endl;
 
