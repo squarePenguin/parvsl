@@ -9,6 +9,9 @@
 % instate temporary versions of "plus2" and "times2" that will
 % make it possible to read this file.
 
+(fluid '(plus2 times2 minus blank tab !$eol!$ dollar lpar rpar))
+(fluid '(!~radix !~bigplus2carry !~bigplus2 plus2))
+
 (de plus2 (u v) (iplus u v))
 
 (de times2 (u v) (itimes u v))

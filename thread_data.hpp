@@ -29,6 +29,8 @@ public:
     int id;
     LispObject *C_stackbase;
     LispObject *C_stackhead = nullptr;
+
+    std::vector<LispObject> *fluid_locals;
     
     /**
      * Whether the thread is in a safe state for GC.
@@ -60,6 +62,11 @@ thread_local Thread_data thread_data;
 std::unordered_map<int, Thread_data&> thread_table;
 thread_local int thread_index = -1;
 
+static std::atomic_int num_symbols(0);
+
+thread_local std::vector<LispObject> fluid_locals;
+std::vector<LispObject> fluid_globals; // the global values
+
 /**
  * Force all threads to go in GC mode
  * Reset the limits of each thread's segment
@@ -74,6 +81,14 @@ void reset_segments() {
 std::unordered_map<int, Thread_RAII> active_threads;
 static std::atomic_int tid(0);
 
+void init_main_thread(LispObject *C_stackbase) {
+    // VB: Need to handle main thread separately                                
+    thread_data.C_stackbase = C_stackbase;
+    thread_data.id = 0;
+    thread_data.fluid_locals = &fluid_locals;
+    thread_table.emplace(0, par::thread_data);
+}
+
 std::mutex thread_mutex;
 int start_thread(std::function<void(void)> f) {
     std::lock_guard<std::mutex> lock(thread_mutex);
@@ -83,6 +98,7 @@ int start_thread(std::function<void(void)> f) {
         int stack_var = 0;
         thread_data.C_stackbase = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
         thread_data.id = tid;
+        thread_data.fluid_locals = &fluid_locals;
 
         thread_table.emplace(tid, thread_data);
 
@@ -92,11 +108,6 @@ int start_thread(std::function<void(void)> f) {
     active_threads.emplace(tid, std::thread(twork));
     return tid;
 }
-
-static std::atomic_int num_symbols(0);
-
-thread_local static std::vector<LispObject> fluid_locals;
-static std::vector<LispObject> fluid_globals; // the global values
 
 static std::mutex alloc_symbol_mutex;
 
@@ -108,16 +119,8 @@ int allocate_symbol() {
     std::unique_lock<std::mutex> lock(alloc_symbol_mutex);
     int loc = num_symbols;
     num_symbols += 1;
-    fluid_globals.push_back(undefined);
+    fluid_globals.resize(num_symbols, undefined);
     return loc;
-}
-
-inline bool is_global(LispObject x) {
-    return ((qflags(x) & flagGLOBAL) != 0);
-}
-
-inline bool is_fluid(LispObject x) {
-    return ((qflags(x) & flagFLUID) != 0);
 }
 
 /**
@@ -150,18 +153,13 @@ LispObject& symval(LispObject s) {
 
     int loc = qfixnum(qvalue(s));
     LispObject& res = local_symbol(loc);
-
-    // std::cerr << "loc=" << loc << std::endl;
-
     // Here I assume undefined is a sort of "reserved value", meaning it can only exist
     // when the object is not shallow_bound. This helps me distinguish between fluids that
     // are actually global and those that have been bound.
     if (is_fluid(s) && res == undefined) {
-        // std::cerr << "fluid global" << std::endl;
         return fluid_globals[loc];
     }
     // THis is either local or locally bound fluid
-    // std::cerr << "local" << std::endl;
     return res;
 }
 
@@ -175,7 +173,9 @@ private:
     LispObject save;
 public:
     Shallow_bind(LispObject x, LispObject tval) {
-        assert(!is_global(x));
+        if (is_global(x)) {
+            error1("shallow bind global", x);
+        }
 
         loc = qfixnum(qvalue(x));
         LispObject& sv = local_symbol(loc);

@@ -6,7 +6,8 @@ my work on the project. It will be quite erratic and disorganised.
 
 * Progress
 
-*** TODO Write proposal
+*** DONE Write proposal
+    CLOSED: [2018-12-20 Thu 08:43]
 *** TODO write first draft
 
 
@@ -43,23 +44,47 @@ Idea: Make fluid and global builtin functions so I can have more control.
 
 However, if the user can modify these flags, then how do I get control over them?
 
+Actually, do I care about fluid local variables? Preserve should only come
+from a global scope right?
+
 *** DONE thread_local storage
      CLOSED: [2018-11-13 Tue 18:04]
 *** DONE builtin global and fluid functions
      CLOSED: [2018-11-13 Tue 18:04]
-*** TODO unglobal and unfluid
-*** TODO RAII shallow binding
-*** TODO modify interpreted and prof functions 
-*** TODO make sure index values don't trip GC
-*** TODO Make the new locations unambigous roots
+*** DONE unglobal and unfluid
+    CLOSED: [2018-12-20 Thu 08:42]
+*** DONE RAII shallow binding
+    CLOSED: [2018-12-20 Thu 08:42]
+*** DONE modify interpreted and prof functions 
+    CLOSED: [2018-12-20 Thu 08:43]
+*** DONE make sure index values don't trip GC
+    CLOSED: [2018-12-20 Thu 08:43]
+*** DONE Make the new locations unambigous roots
+    CLOSED: [2018-12-20 Thu 08:43]
 *** TODO Load symbols when starting from image
 *** TODO Save the state of the thread_local variables to the image
-*** TODO Keep fluids in a global store, to load them on new threads
+*** DONE Keep fluids in a global store, to load them on new threads
+    CLOSED: [2018-12-20 Thu 08:43]
 **** Might help that we should always join all threads before closing so only the start thread matters
 **** However need to scan all symbols and put values back
 **** But placeholder value on every thread(is undefined ok?)
 
+Need to be extra careful when reloading. How do we tell if a fluid was global or local?
+We care about local values on the main thread.
 
+Saving image and loading is problematic. Easiest is to put all the thread_local value back into
+the symbol ~qvalue~ and restore it back on loading. 
+
+If the value was already global, nothign needs to be done.
+If it was local, we put it in global storage and just restore.
+If it was fluid, need to store both its global and local values. Use a cons.
+Problem: on loading they disappear :(.
+
+Maybe try instead to store all values as cons, before last garbage collection.
+(perhaps you can't allocate after last compaction).
+
+Actually I cannot load the cons so soon. Need to fix symbols in two steps.
+FIrst we relocate value then we move them.
 
 ** Dealing with multiple stacks
 
@@ -120,3 +145,5 @@ BUilding reduce: ~8m50s on vsl vs ~10m10s on parvsl
 The dotimes test: ~2000 for vsl vs ~4000 for parvsl
 Running the alg test ~./test1.sh alg~: 0.22s on both
 So far it is a bit slower but nothing crazy like 10x. I'll look into this further.
+
+Looks like on cygwin it is much slower. THread_locals add huge overhead.

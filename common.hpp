@@ -214,4 +214,15 @@ LispObject obhash[OBHASH_SIZE];
 // ... and non-LispObject values that need to be saved as part of a
 // heap image.
 
+extern LispObject error1(const char *s, LispObject a);
+extern LispObject error0(const char *s);
+
+inline bool is_global(LispObject x) {
+    return ((qflags(x) & flagGLOBAL) != 0);
+}
+
+inline bool is_fluid(LispObject x) {
+    return ((qflags(x) & flagFLUID) != 0);
+}
+
 #endif // COMMON_HPP
