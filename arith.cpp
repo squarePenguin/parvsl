@@ -249,15 +249,17 @@
 // as I might have hoped on at least some platforms, while a break-point
 // on my_abort() does what I expect.
 
-static void my_abort(const char *msg)
+static inline void my_abort(const char *msg)
 {   std::cout << "About to abort: " << msg << std::endl;
     abort();
 }
 
-static void my_abort()
+static inline void my_abort()
 {   std::cout << "About to abort" << std::endl;
     abort();
 }
+
+const bool debug = true;
 
 template <typename F>
 static inline void my_assert(bool ok, F&& action)
@@ -267,14 +269,14 @@ static inline void my_assert(bool ok, F&& action)
 // where the "..." is an arbitrary sequence of actions to be taken
 // if the assertion fails. The action will typically be to display
 // extra information about what went wrong.
-    if (!ok) { action(); my_abort(); }
+    if (debug && !ok) { action(); my_abort(); }
 }
 
 static inline void my_assert(bool ok)
 {
 // For simple use where a customised message is not required:
 //     my_assert(predicate);
-    if (!ok) my_abort("failure reported via my_assert()");
+    if (debug && !ok) my_abort("failure reported via my_assert()");
 }
 
 // At times during development it is useful to be able to send messages
@@ -500,7 +502,6 @@ intptr_t copy_if_no_garbage_collector(intptr_t pp)
 static unsigned int log_next_power_of_2(size_t n);
 
 static uint64_t *freechain_table[64];
-//static int count = 0, count1 = 0;
 
 // The intent is that for most purposes freechains.allocate() and
 // freechains.abandon() behave rather like malloc, save that they REQUIRE
@@ -520,12 +521,14 @@ public:
     ~freechains()
     {   for (size_t i=0; i<64; i++)
         {   uint64_t *f = freechain_table[i];
+            if (debug)
 // Report how many entries there are in the freechain.
-            size_t n = 0;
-            for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[0]) n++;
-            if (n != 0)
-                std::cout << "Freechain " << i << " length: "
-                          << n << std::endl;
+            {   size_t n = 0;
+                for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[0]) n++;
+                if (n != 0)
+                    std::cout << "Freechain " << i << " length: "
+                              << n << std::endl;
+            }
             while (f != NULL)
             {   uint64_t w = f[0];
                 delete f;
@@ -551,8 +554,6 @@ public:
 // memory as a 32-bit value that is how I will read it later on, and the
 // messy notation here does not correspond to complicated computation.
         ((uint32_t *)r)[0] = bits;
-//      if (count1++ < 10) std::cout << "A" << n << " " << bits << " " <<
-//          std::hex << r[0] << std::dec << " " << r << std::endl;
         return r;
     }
 // When I abandon a memory block I will push it onto a relevant free chain.
@@ -561,8 +562,6 @@ public:
         my_assert(bits>0 && bits<48);
 // Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
 // risking loss of information.
-//      if (count++ < 10) std::cout << "free " << p << " size " << bits <<
-//         std::hex << " " << p[0] << std::dec << std::endl;
         p[0] = (uint64_t)freechain_table[bits];
         freechain_table[bits] = p;
     }
@@ -639,8 +638,12 @@ inline intptr_t int_to_handle(int64_t n)
 {   return (intptr_t)(2*n + 1);
 }
 
-static int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
-static int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
+// The following two lines are slighly delicate4 in that INTPTR_MIN and _MAX
+// may not have the low tage bits to be proper fixnums. But if I implement
+// int_of_handle so that it ignores tag bits that will be OK.
+
+static const int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
+static const int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
 
 inline bool fits_into_fixnum(int64_t a)
 {   return a>=MIN_FIXNUM && a<=MAX_FIXNUM;
@@ -706,6 +709,13 @@ inline void abandon_string(char *s)
 
 intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = ((uint32_t *)(&p[-1]))[1];
+    uint64_t *r = reserve(n);
+    std::memcpy(r, p, n*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+intptr_t copy_if_no_garbage_collector(uint64_t *p)
+{   size_t n = number_size(p);
     uint64_t *r = reserve(n);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
@@ -820,8 +830,8 @@ inline intptr_t int_to_handle(int64_t n)
 {   return tagFIXNUM + 8*(uintptr_t)n;
 }
 
-static int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
-static int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
+static const int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
+static const int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
 
 inline bool fits_into_fixnum(int64_t a)
 {   return a>=MIN_FIXNUM && a<=MAX_FIXNUM;
@@ -835,7 +845,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     if (final_n == 1)
     {   fringe =- (n+1);
         int64_t v = (int64_t)p[0];
-        if (fits_into_fixnum(v)) return pack_fixnum(v);
+        if (fits_into_fixnum(v)) return int_to_handle(v);
     }
     memory_used -= (n - final_n);
     bignum_header(p) = pack_header(typeBIGNUM, n*sizeof(uint64_t));
@@ -1023,6 +1033,8 @@ public:
     Bignum()
     {   val = 0;
     }
+// In the next constructor the boolean argument is not used at run time but
+// serves to indicate which constructure is wanted.
     Bignum(bool set_val, intptr_t v)
     {   val = v;
     }
@@ -1302,7 +1314,7 @@ Bignum square(const Bignum &x)
 }
 
 Bignum pow(const Bignum &x, int64_t n)
-{   if (n == 0) return int_to_bignum(1);
+{   if (n == 0) return Bignum(true, int_to_bignum(1));
     else if (n == 1) return Bignum(true, copy_if_no_garbage_collector(x.val));
     else if (n == 2) return square(x);
     else return Bignum(true, fixnum_dispatch2n(pow, x.val, n));
@@ -2376,7 +2388,6 @@ static size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 
 char *bignum_to_string(const uint64_t *a, size_t lena, bool as_unsigned=false)
 {
-    display("bignum_to_string", a, lena);
 // Making one-word numbers a special case simplifies things later on! It may
 // also make this case go just slightly faster.
     if (lena == 1)
@@ -2857,7 +2868,7 @@ intptr_t minus_b(uint64_t *a)
 // the fixnum will have had at least one tag bit.
 
 intptr_t minus_i(int64_t a)
-{   if (a == MIN_FIXNUM) return unsigned_int_to_bignum(-(uint64_t)a);
+{   if (a == MIN_FIXNUM) return int_to_bignum(-a);
     else return int_to_handle(-a);
 }
 
@@ -2889,8 +2900,12 @@ void ordered_biglogand(const uint64_t *a, size_t lena,
                        uint64_t *r, size_t &lenr)
 {   for (size_t i=0; i<lenb; i++)
         r[i] = a[i] & b[i];
-    if (negative(b[lenb-1])) lenr = lena;
+    if (negative(b[lenb-1]))
+    {   for (size_t i=lenb; i<lena; i++) r[i] = a[i];
+        lenr = lena;
+    }
     else lenr = lenb;
+    truncate_positive(r, lenr);
 }
 
 void biglogand(const uint64_t *a, size_t lena,
@@ -2945,7 +2960,11 @@ void ordered_biglogor(const uint64_t *a, size_t lena,
 {   for (size_t i=0; i<lenb; i++)
         r[i] = a[i] | b[i];
     if (negative(b[lenb-1])) lenr = lenb;
-    else lenr = lena;
+    else
+    {   for (size_t i=lenb; i<lena; i++) r[i] = a[i];
+        lenr = lena;
+    }
+    truncate_negative(r, lenr);
 }
 
 void biglogor(const uint64_t *a, size_t lena,
@@ -3000,6 +3019,10 @@ void ordered_biglogxor(const uint64_t *a, size_t lena,
     if (negative(b[lenb-1]))
     {   for (; i<lena; i++)
             r[i] = ~a[i];
+    }
+    else
+    {   for (; i<lena; i++)
+            r[i] = a[i];
     }
     lenr = lena;
 // The logxor operation can cause the inputs to shrink.
@@ -3071,31 +3094,43 @@ void bigleftshift(const uint64_t *a, size_t lena,
     if (bits == 0)
     {   for (size_t i=0; i<lena; i++)
            r[i+words] = a[i];
+        lenr = lena+words;
     }
     else
     {   r[words] = a[0]<<bits;
         for (size_t i=1; i<lena; i++)
            r[i+words] = (a[i]<<bits) |
                         (a[i-1]>>(64-bits));
-        r[words+lena] = a[lena-1]>>(bits-64);
+        r[words+lena] = (negative(a[lena-1]) ? ((uint64_t)(-1))<<bits : 0) |
+                        (a[lena-1]>>(64-bits));
+        lenr = lena+words+1;
     }
-    lenr = lena+words+1;
     truncate_positive(r, lenr);
     truncate_negative(r, lenr);
     
 }
 
-extern intptr_t bigrightshift(intptr_t a, int n);
+extern intptr_t rightshift_b(uint64_t *a, int n);
 
-intptr_t bigleftshift(intptr_t aa, int n)
-{   if (n == 0) return copy_if_no_garbage_collector(aa);
-    else if (n < 0) return bigrightshift(aa, -n);
-    uint64_t *a = vector_of_handle(aa);
+intptr_t leftshift_b(uint64_t *a, int n)
+{   if (n == 0) return copy_if_no_garbage_collector(a);
+    else if (n < 0) return rightshift_b(a, -n);
     size_t na = number_size(a);
     size_t nr = na + (n/64) + 1;
     uint64_t *p = reserve(nr);
     size_t final_n;
     bigleftshift(a, na, n, p, final_n);
+    return confirm_size(p, nr, final_n);
+}
+
+intptr_t leftshift_i(int64_t aa, int n)
+{   if (n == 0) return int_to_handle(aa);
+    else if (n < 0) return rightshift_i(aa, -n);
+    size_t nr = (n/64) + 2;
+    uint64_t *p = reserve(nr);
+    size_t final_n;
+    uint64_t a[1] = {(uint64_t)aa};
+    bigleftshift(a, 1, n, p, final_n);
     return confirm_size(p, nr, final_n);
 }
 
@@ -3113,31 +3148,51 @@ void bigrightshift(const uint64_t *a, size_t lena,
     }
     size_t words = n/64;
     size_t bits = n % 64;
-    if (bits == 0)
+    if (words >= lena)
+    {   r[0] = negative(a[lena-1]) ? -(uint64_t)1 : 0;
+        lenr = 1;
+    }
+    else if (bits == 0)
     {   for (size_t i=0; i<lena-words; i++)
            r[i] = a[i+words];
+        lenr = lena-words;
     }
     else
     {   for (size_t i=0; i<lena-words-1; i++)
            r[i] = (a[i+words]>>bits) |
                   (a[i+words+1]<<(64-bits));
+// Next line is does non-portable right shift on signed value.
         r[lena-words-1] = (uint64_t)((int64_t)a[lena-1]>>bits);
+        lenr = lena-words;
     }
-    lenr = lena-words;
     truncate_positive(r, lenr);
     truncate_negative(r, lenr);
 }
 
-intptr_t bigrightshift(intptr_t aa, int n)
-{   if (n == 0) return copy_if_no_garbage_collector(aa);
-    else if (n < 0) return bigleftshift(aa, -n);
-    uint64_t *a = vector_of_handle(aa);
+intptr_t rightshift_b(uint64_t *a, int n)
+{   if (n == 0) return copy_if_no_garbage_collector(a);
+    else if (n < 0) return leftshift_b(a, -n);
     size_t na = number_size(a);
-    size_t nr = na - (n/64);
+    size_t nr;
+    if (na > (size_t)n/64) nr = na - n/64;
+    else nr = 1;
     uint64_t *p = reserve(nr);
     size_t final_n;
     bigrightshift(a, na, n, p, final_n);
     return confirm_size(p, nr, final_n);
+}
+
+intptr_t rightshift_i(int64_t a, int n)
+{   if (n == 0) return int_to_handle(a);
+    else if (n < 0) return leftshift_i(a, -n);
+// Shifts of 64 and up obviously lose all the input data apart from its
+// sign, but so does a shift by 63.
+    if (n >= 63) return int_to_handle(a>=0 ? 0 : -1);
+// Because C++ does not guarantee that right shifts on signed values
+// duplicate the sign bit I perform the "shift" here using division by
+// a power of 2. Because I have n <= 62 here I will not get overflow.
+    int64_t q = ((int64_t)1)<<n; 
+    return int_to_handle((a & ~(q-1))/q);
 }
 
 // Add when the length of a is greater than that of b.
@@ -3702,10 +3757,11 @@ intptr_t pow_i(int64_t a, int64_t n)
         if (a == 1) z = 1;
         else if (a == -1) z = (n%1==0 ? 1 : 0);
         else my_assert(a != 0);
-        return int_to_bignum(z);
+        return int_to_handle(z);
     }
-    if (a == 0) return int_to_bignum(0);
-    uint64_t absa = (a < 0 ? -(uint64_t)a : a);
+    if (a == 0) return int_to_handle(0);
+    else if (a == 1) return int_to_handle(a);
+    uint64_t absa = (a < 0 ? -(uint64_t)a : (uint64_t)a);
     size_t bitsa = 64 - nlz(absa);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
@@ -3719,8 +3775,7 @@ intptr_t pow_i(int64_t a, int64_t n)
     uint64_t *r = reserve(lenr);
     uint64_t *v = reserve(lenr);
     uint64_t *w = reserve(lenr);
-    uint64_t aa[1];
-    aa[0] = a;
+    uint64_t aa[1] = {(uint64_t)a};
     bigpow(aa, 1, (uint64_t)n, v, w, r, lenr);
     abandon(w);
     abandon(v);
@@ -3949,6 +4004,9 @@ void division(const uint64_t *a, size_t lena,
 // Now the absolute value of b will be at least 2 digits of 64-bits with the
 // high digit non-zero. I need to make a copy of it because I will scale
 // it during long division.
+
+//display("a", a, lena);
+//display("b", b, lenb);
     uint64_t *bb = NULL;
     size_t lenbb = lenb;
     olenr = lenb;
@@ -4018,6 +4076,7 @@ void division(const uint64_t *a, size_t lena,
     bool a_negative = negative(a[lena-1]);
     if (a_negative) internal_negate(a, lena, r);
     else internal_copy(a, lena, r);
+//display("r", r, lena);
     unsigned_long_division(r, lenr, bb, lenbb, want_q, q, olenq, lenq);
 // While performing the long division I will have had three vectors that
 // were newly allocated. r starts off containing a copy of a but ends up
@@ -4029,13 +4088,15 @@ void division(const uint64_t *a, size_t lena,
 // remainder is smaller than the divisor and so it will be a closer fit into
 // bb than r. So copy it into there so that the allocate/abandon and
 // size confirmation code is given less extreme things to cope with.
-    my_assert(lenr<=lenbb, [&]{ });
+    my_assert(lenr<=lenbb);
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
     {   if (a_negative != b_negative)
-        {   internal_negate(q, lenq, q);
+        {   //display("q", q, lenq);
+            internal_negate(q, lenq, q);
             truncate_negative(q, lenq);
+            //display("q", q, lenq);
         }
         else truncate_positive(q, lenq);
     }
@@ -4112,15 +4173,17 @@ static inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
     my_assert(lenb >= 2);
     my_assert(b[lenb-1] != 0);
     uint64_t q0, r0;
-    divide64(r[lenr-1], r[lenr-2], b[lenb-1], q0, r0);
+    if (r[lenr-1] == b[lenb-1])
+    {   q0 = UINT64_C(0xffffffffffffffff);
+        r0 = r[lenr-2] + b[lenb-1];
+    }
+    else divide64(r[lenr-1], r[lenr-2], b[lenb-1], q0, r0);
 // At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
 // but never any worse than that.
 //
 // The tests on the next lines should detect all case where q0 was in error
 // by 2 and most when it was in error by 1.
 //
-    if (q0 == UINT64_C(0x8000000000000000)) q0--;
-    else
     {   uint64_t hi, lo;
         multiply64(q0, b[lenb-2], hi, lo);
         if (hi > r0 ||
@@ -4174,9 +4237,6 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
                                    size_t &olenq, size_t &lenq)
 {   my_assert(lenb >= 2);
     my_assert(lena >= lenb);
-//std::cout << "Start of quotrem" << std::endl;
-//display("quotrem b", b, lenb);
-//display("a", a, lena);
 // I will multiply a and b by a scale factor that gets the top digit of "b"
 // reasonably large. The value stored in "a" can become one digit longer,
 // but there is space to store that.
@@ -4187,21 +4247,16 @@ static void unsigned_long_division(uint64_t *a, size_t &lena,
     int ss = nlz(b[lenb-1]);
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
-//display("not scaled", a, lena);
     a[lena] = scale_for_division(a, lena, ss);
     lena++;
-//display("scaled", a, lena);
     my_assert(scale_for_division(b, lenb, ss) == 0);
     lenq = lena-lenb; // potential length of quotient.
-//std::cout << "lenq = " << lenq << std::endl;
     size_t m = lenq-1;
     for (;;)
     {   uint64_t qd = next_quotient_digit(a, lena, b, lenb);
 // If I am only computing the remainder I do not need to store the quotient
 // digit that I have just found.
         if (want_q) q[m] = qd;
-//std::cout << "next digit of quotient [" << m << "] = " << qd
-//          << " " << std::hex << qd << std::dec << std::endl;
         if (m == 0) break;
         m--;
     }
@@ -4242,16 +4297,15 @@ intptr_t quotient_bi(uint64_t *a, int64_t b)
 // maybe -0x8000000000000000} / {0,0x8000000000000000) => -1
 
 intptr_t quotient_ib(int64_t a, uint64_t *b)
-{   if (a==INT64_MIN &&
-        number_size(b)==1 &&
-        b[0]==(uint64_t)INT64_MIN) return int_to_handle(-1);
+{   if (number_size(b)==1 &&
+        b[0]==-(uint64_t)a) return int_to_handle(-1);
     return int_to_handle(0); 
 }
 
 // unpleasantly -0x8000000000000000 / -1 => a bignum
 
 intptr_t quotient_ii(int64_t a, int64_t b)
-{   if (b==-1 && a == INT64_MIN) return unsigned_int_to_bignum((uint64_t)a);
+{   if (b==-1 && a == MIN_FIXNUM) return int_to_bignum(-a);
     else return int_to_handle(a / b);
 }
 
@@ -4278,9 +4332,8 @@ intptr_t remainder_bi(uint64_t *a, int64_t b)
 }
 
 intptr_t remainder_ib(int64_t a, uint64_t *b)
-{   if (a==INT64_MIN &&
-        number_size(b)==1 &&
-        b[0]==(uint64_t)INT64_MIN) return int_to_handle(0);
+{   if (number_size(b)==1 &&
+        b[0]==-(uint64_t)a) return int_to_handle(0);
     return int_to_handle(a); 
 }
 
@@ -4374,7 +4427,13 @@ intptr_t divide_bb(uint64_t *a, uint64_t *b, intptr_t &rem)
 #ifdef TEST
 
 void display(const char *label, intptr_t a)
-{   uint64_t *d = vector_of_handle(a);
+{   if (stored_as_fixnum(a))
+    {   std::cout << label << " [fixnum] " << std::hex
+                  << a << std::dec << " = "
+                  << int_of_handle(a) << std::endl;
+        return;
+    }
+    uint64_t *d = vector_of_handle(a);
     size_t len = number_size(d);
     std::cout << label << " [" << (int)len << "]";
     for (size_t i=0; i<len; i++)
@@ -4403,18 +4462,18 @@ int main(int argc, char *argv[])
     std::cout << "seed = " << seed << std::endl;
     reseed(seed);
 
-    Bignum a, b, c, c1, c2, c3, c4;
     int maxbits, ntries;
 
 //#define TEST_SOME_BASICS 1
 
 #ifdef TEST_SOME_BASICS
-    a = "10000000000000000000000000";
+{   Bignum a = "10000000000000000000000000";
     std::cout << "a = " << a << std::endl;
-    std::cout << "a*a = " << a*a << std::endl;
-    std::cout << "a*100 = " << a*Bignum(100) << std::endl;
-    std::cout << "100*a = " << Bignum(100)*a << std::endl;
-    std::cout << "100*100 = " << Bignum(100)*Bignum(100) << std::endl;
+    std::cout << "a*a = " << (a*a) << std::endl;
+    std::cout << "a*100 = " << (a*Bignum(100)) << std::endl;
+    std::cout << "100*a = " << (Bignum(100)*a) << std::endl;
+    std::cout << "100*100 = " << (Bignum(100)*Bignum(100)) << std::endl;
+}
 #endif
 
 //#define TEST_RANDOM 1
@@ -4423,14 +4482,101 @@ int main(int argc, char *argv[])
     maxbits = 160;
     ntries = 10;
 
-    for (int i=0; i<ntries; i++)
-    {   a = random_upto_bits_bignum(maxbits);
+    for (int i=1; i<=ntries; i++)
+    {   Bignum a = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
-        b = fudge_distribution_bignum(a, (int)r & 0xf);
+        Bignum b = fudge_distribution_bignum(a, (int)r & 0xf);
         std::cout << a << " " << b << " " << std::hex << b << std::dec << std::endl;
     }
 #endif // TEST_RANDOM
 
+#define TEST_BITWISE 1
+
+#ifdef TEST_BITWISE
+    maxbits = 400;
+    ntries = 10000000;
+
+    std::cout << "Start of bitwise operation testing" << std::endl;
+
+    for (int i=1; i<=ntries; i++)
+    {   //std::cout << i << "  ";
+        Bignum a = random_upto_bits_bignum(maxbits);
+        Bignum b = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 0xf);
+        b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
+        Bignum c1 = ~(a & b);
+        Bignum c2 = (~a) | (~b);
+        Bignum c3 = a ^ b;
+        Bignum c4 = (a&(~b)) | (b&(~a));
+        if (c1==c2 && c3==c4) continue;
+        std::cout << "FAILED" << std::hex << std::endl;
+        std::cout << "a            " << a << std::endl;
+        std::cout << "b            " << b << std::endl;
+        std::cout << "c1 ~(a&b)    " << c1 << std::endl;
+        std::cout << "c2 ~a|~b     " << c2 << std::endl;
+        std::cout << "c3 a^b       " << c3 << std::endl;
+        Bignum nota = ~a;
+        Bignum notb = ~b;
+        std::cout << "   ~a        " << nota << std::endl;
+        std::cout << "   ~b        " << notb << std::endl;
+        display("b", b);
+        display("nota", nota);
+        std::cout << "   a&~b      " << (a&~b) << std::endl;
+        Bignum bnota = b & (~a);
+        std::cout << "   b&~a      " << bnota << std::endl;
+        display("bnota", bnota);
+        std::cout << "c4 a&~b|b&~a "  << c4 << std::endl;
+        std::cout << "Failed " << std::dec << std::endl;
+        return 1;
+    }
+
+    std::cout << "Bitwise operation tests completed" << std::endl;
+
+#endif // TEST_BITWISE
+
+#define TEST_SHIFTS 1
+
+#ifdef TEST_SHIFTS
+    maxbits = 1000;
+    ntries = 10000000;
+
+    std::cout << "Start of shift testing" << std::endl;
+
+    for (int i=1; i<=ntries; i++)
+    {   //std::cout << i << "  ";
+        Bignum a = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 0xf);
+        r = (r >> 4)%1000;
+        Bignum c1 = a << r;
+        Bignum p = pow(Bignum(2), (int)r);
+        Bignum c2 = a * p;
+        Bignum c3 = a >> r;
+        Bignum w = a & ~(p-1);
+        Bignum c4 = (a & ~(p-1))/p;
+        if (c1==c2 && c3==c4) continue;
+        std::cout << "FAILED on try " << i << std::hex << std::endl;
+        std::cout << "a            " << a << std::endl;
+        std::cout << "r            " << std::dec << r << std::hex << std::endl;
+        std::cout << "divide " << std::dec << w << std::endl;
+        display("div", w);
+        std::cout << "by " << std::dec << p << std::hex << std::endl;
+        display(" by", p);
+        std::cout << "p            " << p << std::endl;
+        std::cout << "a&~(p-1)     " << (a&~(p-1)) << std::endl;
+        std::cout << "c1 a<<r      " << c1 << std::endl;
+        std::cout << "c2 a*2^r     " << c2 << std::endl;
+        std::cout << "c3 a>>r      " << c3 << std::endl;
+        std::cout << "c4 a/2^r     " << c4 << std::endl;
+        display("c4", c4);
+        std::cout << "Failed " << std::dec << std::endl;
+        return 1;
+    }
+
+    std::cout << "Shift tests completed" << std::endl;
+
+#endif // TEST_SHIFTS
 
 #define TEST_PLUS_AND_TIMES 1
 
@@ -4443,31 +4589,20 @@ int main(int argc, char *argv[])
 // to include more numbers of the form 2^n, 2^n-1 and 2^n+1 than would
 // arise with most neat probability distributions for the numbers.
 
-    maxbits = 400;
-    ntries = 2000000;
-    int bad = 0;
+    maxbits = 600;
+    ntries = 10000000;
+
+    std::cout << "Start of Plus and Times testing" << std::endl;
 
     for (int i=1; i<=ntries; i++)
-    {
-//std::cout << std::endl << std::endl << std::dec << "Start cycle " << i << std::endl;
-        a = random_upto_bits_bignum(maxbits);
-//std::cout << std::endl << std::hex << "a: " << a << std::endl;
-        b = random_upto_bits_bignum(maxbits);
-//std::cout << "b: " << std::hex << b << std::endl;
+    {   Bignum a = random_upto_bits_bignum(maxbits);
+        Bignum b = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 0xf);
-//std::cout << "a: " << std::hex << a << std::endl;
         b = fudge_distribution_bignum(b, (int)(r>>4) & 0xf);
-//std::cout << "b: " << std::hex << b << std::endl;
-//std::cout << "a+b: " << a+b << std::endl;
-//std::cout << "a-b: " << a-b << std::endl;
-        c1 = (a + b)*(a - b);
-//std::cout << "c1 computed" << std::endl;
-//std::cout << "c1: " << c1 << std::endl;
-        c2 = a*a - b*b;
-//std::cout << "c2: " << c2 << std::endl;
-        c3 = square(a) - square(b);
-//std::cout << "c3: " << c3 << std::endl;
+        Bignum c1 = (a + b)*(a - b);
+        Bignum c2 = a*a - b*b;
+        Bignum c3 = square(a) - square(b);
         if (c1 == c2 && c2 == c3) continue;
         std::cout << "Try " << i << std::endl;
         std::cout << "a  = " << a << std::endl;
@@ -4484,20 +4619,21 @@ int main(int argc, char *argv[])
         std::cout << "square(-a)  = " << square(-a) << std::endl;
         std::cout << "square(-b)  = " << square(-b) << std::endl;
         std::cout << "Failed" << std::endl;
-        if (bad++ > 1) return 1;
+        return 1;
     }
     std::cout << "Plus and Times tests completed" << std::endl;
-#endif
+
+#endif // TEST_PLUS_AND_TIMES
 
 #define TEST_DIVISION 1
 
 #ifdef TEST_DIVISION
     maxbits = 400;
-    ntries = 2000000;
+    ntries = 10000000;
 
     std::cout << "Start of division testing" << std::endl;
 
-    for (int i=0; i<ntries; i++)
+    for (int i=1; i<=ntries; i++)
     {   //std::cout << i << "  ";
         Bignum divisor = random_upto_bits_bignum(maxbits) + 1;
         Bignum remainder = uniform_upto_bignum(divisor);
@@ -4531,7 +4667,7 @@ int main(int argc, char *argv[])
 
     std::cout << "Division tests completed" << std::endl;
 
-#endif
+#endif // TEST_DIVISION
 
     std::cout << "About to exit" << std::endl;
     return 0;    
