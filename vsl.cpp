@@ -333,7 +333,10 @@ INLINE const LispObject flagFLUID     = 0x800;
 // I will INSIAT that the definition of tagATOM s in the same compilation
 // unit as this is.
 INLINE const LispObject NULLATOM = tagATOM + 0;
-#define qheader(x) ((heapaddr((x)-tagATOM))[0])
+
+static inline LispObject &qheader(LispObject x)
+{   return (heapaddr((x)-tagATOM))[0];
+}
 
 // Fixnums and Floating point numbers are rather easy!
 
@@ -393,7 +396,7 @@ static inline bool isEQHASHX(LispObject x)
 INLINE const size_t MEM = 256;
 #endif // MEM
 
-#define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))
+INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
 // Each byte in the bitmap will allow marking for 8 entities, and each
 // entity is 8 bytes wide (both on 32 and 64-bit systems), hence each
 // bitmap uses 1/64th of the memory used by the region it maps.
@@ -415,6 +418,31 @@ INLINE const size_t OBHASH_SIZE   = 10007;
 INLINE const int MAX_LISPFILES = 30;
 
 // Some Lisp values that I will use frequently...
+// I am not quite clear that there would be any nice way to store all these
+// list-bases so that I could (a) refer to them by name and (b) scan then
+// in a nice loop when garbage collecting. Well I could set up a table that
+// contained references to each or a function that could read and write each.
+// I guess that that last idea is maybe the best option if I want to avoid
+// using the preprocessor in this manner:
+//-
+//- extern Lispobject nil, undefined, ...;
+//- LispObject nil, undefined, ... 
+//- INLINE LispObject read_base(size_t n)
+//- {   switch (n)
+//-     {
+//-     case 0:     return nil;
+//-     case 1:     return undefined;
+//-     ..
+//-     }
+//- }
+//- INLINE void set_base(size_t n, LispObject v)
+//- {   switch (n)
+//-     {
+//-     case 0:     nil = v;
+//-     case 1:     undefined = v;
+//-     ..
+//-     }
+//- }
 
 #define nil        listbases[0]
 #define undefined  listbases[1]
@@ -493,41 +521,73 @@ uintptr_t npins = 0, heap1_pads = 0, heap2_pads = 0;
 // Finding a heap segment that is referred to is done using a directly
 // coded search tree.
 
-#define search2(x, h0, h1) (x < h1 ? h0 : h1)
+static inline uintptr_t search(uintptr_t x, uintptr_t h0, uintptr_t h1)
+{   if (x < h1) return h0;
+    else return h1;
+}
 
-#define search4(x, h0, h1, h2, h3)                              \
-    (x < h2 ? search2(x, h0, h1) : search2(x, h2, h3))
+static inline uintptr_t search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3)
+{   if (x < h2) return search(x, h0, h1);
+    else return search(x, h2, h3);
+}
 
-#define search8(x, h0, h1, h2, h3, h4, h5, h6, h7)              \
-    (x < h4 ? search4(x, h0, h1, h2, h3) :                      \
-              search4(x, h4, h5, h6, h7))
+static inline uintptr_t search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7)
+{   if (x < h4) return search(x, h0, h1, h2, h3);
+    else return search(x, h4, h5, h6, h7);
+}
 
-#define search16(x, h0, h1, h2, h3, h4, h5, h6, h7,             \
-                    h8, h9, h10, h11, h12, h13, h14, h15)       \
-    (x < h8 ? search8(x, h0, h1, h2, h3, h4, h5, h6, h7) :      \
-              search8(x, h8, h9, h10, h11, h12, h13, h14, h15))
+static inline uintptr_t search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7,
+    uintptr_t h8, uintptr_t h9, uintptr_t h10, uintptr_t h11,
+    uintptr_t h12, uintptr_t h13, uintptr_t h14, uintptr_t h15)
+{   if (x < h8) return search(x, h0, h1, h2, h3, h4, h5, h6, h7);
+    else return search(x, h8, h9, h10, h11, h12, h13, h14, h15);
+}
 
 // The variants that come next do the same sort of search but return
 // results that can be specified separately from the key values.
 
-#define search2a(x, h0, h1, v0, v1) (x < h1 ? v0 : v1)
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1,
+    int v0, int v1)
+{   if (x < h1) return v0;
+    else return v1;
+}
 
-#define search4a(x, h0, h1, h2, h3, v0, v1, v2, v3)              \
-    (x < h2 ? search2a(x, h0, h1, v0, v1) : search2a(x, h2, h3, v2, v3))
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    int v0, int v1, int v2, int v3)
+{   if (x < h2) return search(x, h0, h1, v0, v1);
+    else return search(x, h2, h3, v2, v3);
+}
 
-#define search8a(x, h0, h1, h2, h3, h4, h5, h6, h7,              \
-                    v0, v1, v2, v3, v4, v5, v6, v7)              \
-    (x < h4 ? search4a(x, h0, h1, h2, h3, v0, v1, v2, v3) :      \
-              search4a(x, h4, h5, h6, h7, v4, v5, v6, v7))
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7,
+    int v0, int v1, int v2, int v3,
+    int v4, int v5, int v6, int v7)
+{   if (x < h4) return search(x, h0, h1, h2, h3, v0, v1, v2, v3);
+    else return search(x, h4, h5, h6, h7, v4, v5, v6, v7);
+}
 
-#define search16a(x, h0, h1, h2, h3, h4, h5, h6, h7,             \
-                     h8, h9, h10, h11, h12, h13, h14, h15,       \
-                     v0, v1, v2, v3, v4, v5, v6, v7,             \
-                     v8, v9, v10, v11, v12, v13, v14, v15)       \
-    (x < h8 ? search8a(x, h0, h1, h2, h3, h4, h5, h6, h7,        \
-                          v0, v1, v2, v3, v4, v5, v6, v7) :      \
-              search8a(x, h8, h9, h10, h11, h12, h13, h14, h15,  \
-                          v8, v9, v10, v11, v12, v13, v14, v15))
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7,
+    uintptr_t h8, uintptr_t h9, uintptr_t h10, uintptr_t h11,
+    uintptr_t h12, uintptr_t h13, uintptr_t h14, uintptr_t h15,
+    int v0, int v1, int v2, int v3,
+    int v4, int v5, int v6, int v7,
+    int v8, int v9, int v10, int v11,
+    int v12, int v13, int v14, int v15)
+{   if (x < h8) return search(x, h0, h1, h2, h3, h4, h5, h6, h7,
+                                 v0, v1, v2, v3, v4, v5, v6, v7);
+    else return search(x, h8, h9, h10, h11, h12, h13, h14, h15,
+                          v8, v9, v10, v11, v12, v13, v14, v15);
+}
 
 // In general I will allocate some initial heap segment and each time
 // I allocate another I will double the total memory that is in use. So
@@ -600,7 +660,7 @@ void hexdump()
 
 static inline block_header *find_block(uintptr_t x)
 {
-    uintptr_t block = search16(x,
+    uintptr_t block = search(x,
         blocks[0],  blocks[1],  blocks[2],  blocks[3],
         blocks[4],  blocks[5],  blocks[6],  blocks[7],
         blocks[8],  blocks[9],  blocks[10], blocks[11],
@@ -928,7 +988,7 @@ static inline LispObject allocatesymbol(LispObject pname)
 // This one allocates an atom that is n bytes long (plus its header
 // word) and again does not fill in ANY of the fields.
 
-static inline LispObject allocateatom(int n)
+static inline LispObject allocateatom(size_t n)
 {   LispObject r;
 // The actual amount of space allocated must include a word for the
 // header and must then be rounded up to be a multiple of 8.
@@ -943,8 +1003,7 @@ static inline LispObject allocateatom(int n)
 }
 
 static inline LispObject makestring(const char *s, int len)
-{
-    LispObject r = allocateatom(len);
+{   LispObject r = allocateatom(len);
 //  qheader(r) = tagHDR + typeSTRING + packlength(len); // already done!
     memcpy(qstring(r), s, len);
     return r;
@@ -1212,7 +1271,7 @@ int gccount = 1;
 
 // The version of this implemented at present only supports a single block
 // of memory. I really need to look things up in the nice table of memory
-// blocks that I have using search16a...
+// blocks that I have using search...
 
 static uintptr_t mem_base, mem_end;
 // static bool check_an_address(uintptr_t p)
@@ -1890,9 +1949,9 @@ static EditLine *el_struct;
 static History *el_history;
 static HistEvent el_history_event;
 
-#define INPUT_LINE_SIZE 256
+INLINE const int INPUT_LINE_SIZE = 256;
 static char input_line[INPUT_LINE_SIZE];
-static int input_ptr = 0, input_max = 0;
+static size_t input_ptr = 0, input_max = 0;
 char the_prompt[80] = "> ";
 
 
@@ -2452,19 +2511,19 @@ LispObject lookup(const char *s, size_t len, int flag)
     return w;
 }
 
-#define unwindNONE      0
-#define unwindERROR     1
-#define unwindBACKTRACE 2
-#define unwindGO        4
-#define unwindRETURN    8
-#define unwindPRESERVE  16
-#define unwindRESTART   32
+INLINE unsigned int unwindNONE      = 0;
+INLINE unsigned int unwindERROR     = 1;
+INLINE unsigned int unwindBACKTRACE = 2;
+INLINE unsigned int unwindGO        = 4;
+INLINE unsigned int unwindRETURN    = 8;
+INLINE unsigned int unwindPRESERVE  = 16;
+INLINE unsigned int unwindRESTART   = 32;
 
-int unwindflag = unwindNONE;
+unsigned int unwindflag = unwindNONE;
 
 int backtraceflag = -1;
-#define backtraceHEADER 1
-#define backtraceTRACE  2
+INLINE int backtraceHEADER = 1;
+INLINE int backtraceTRACE  = 2;
 
 LispObject error0(const char *msg)
 {   if ((backtraceflag & backtraceHEADER) != 0)
@@ -3619,11 +3678,12 @@ LispObject Lfloat(LispObject lits, LispObject x)
             error1("arg for float", x));
 }
 
-#define floatval(x)                   \
-   isFLOAT(x) ? qfloat(x) :           \
-   isFIXNUM(x) ? (double)qfixnum(x) : \
-   isBIGNUM(x) ? (double)qint64(x) :  \
-   0.0
+INLINE unsigned int floatval(LispObject x)
+{   return isFLOAT(x) ? qfloat(x) :
+           isFIXNUM(x) ? (double)qfixnum(x) :
+           isBIGNUM(x) ? (double)qint64(x) :
+           0.0;
+}
 
 LispObject Lfp_subnorm(LispObject lits, LispObject arg)
 {   if (!isFLOAT(arg)) return nil;
@@ -5699,7 +5759,7 @@ LispObject Lwrs(LispObject lits, LispObject x)
     return error1("wrs failed", x);
 }
 
-#define LONGEST_LEGAL_FILENAME 1000
+INLINE const unsigned int LONGEST_LEGAL_FILENAME = 1000;
 char filename[LONGEST_LEGAL_FILENAME];
 static char imagename[LONGEST_LEGAL_FILENAME];
 INLINE const char *programDir = ".";
@@ -5936,6 +5996,10 @@ LispObject Lerrorset_2(LispObject lits, LispObject a1, LispObject a2)
 LispObject Lerrorset_1(LispObject lits, LispObject a1)
 {   return Lerrorset_3(lits, a1, nil, nil);
 }
+
+// Here is a place where I use #define and exploit string concatenation
+// at preprocessor time to create some setup tables.
+//
 
 #define SETUPSPEC                                               \
     SETUP_TABLE_SELECT("quote",             Lquote),            \
@@ -6273,7 +6337,7 @@ void *setup_defs[] =
     SETUP_INTERNAL
 };
 
-#define SETUPSIZE  ((int)(sizeof(setup_defs)/sizeof(void *)))
+INLINE const size_t SETUPSIZE = sizeof(setup_defs)/sizeof(void *);
 
 // The number of entries I have in my setup hash table will be about
 // twice the number of entries to put in it, and is not a multiple of
@@ -6281,7 +6345,7 @@ void *setup_defs[] =
 // size is just established by the rounding-up procedure here, however
 // it should scale reasonably happily to almost any size of system.
 
-static const size_t SETUPHASHSIZE = (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1);
+INLINE const size_t SETUPHASHSIZE = (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1);
 static inline size_t HASHPTR(void *x)
 {   return (size_t)((((uintptr_t)x)*314159u)%SETUPHASHSIZE);
 }
@@ -6435,8 +6499,14 @@ int32_t read32(gzFile f)
     return (c[0] + (c[1]<<8) + (c[2]<<16) + (c[3]<<24));
 }
 
-#define FILEID (('v' << 0) | ('s' << 8) | ('l' << 16) | ('+' << 24))
-#define ENDID  (('\n' << 0) | ('e' << 8) | ('n' << 16) | ('d' << 24))
+// Both '+' and 'd' have values < 128 so shifting left by 24 will not
+// overflow (at least on a system where the character code is as I expect it
+// to be!).
+
+INLINE const uint32_t FILEID = ('v' << 0) | ('s' << 8) |
+                               ('l' << 16) | ('+' << 24);
+INLINE const uint32_t ENDID  = ('\n' << 0) | ('e' << 8) |
+                               ('n' << 16) | ('d' << 24);
 
 // Crude allocation for temporary space within the heap2 area.
 
@@ -6503,14 +6573,14 @@ LispObject relocate(LispObject x)
 // the heap had all been put in a single contiguous chunk. If the
 // reference is not within the heap1 part of the image heap then I
 // have a corrupted image...
-    i = search16a((uintptr_t)x,
+    i = search((uintptr_t)x,
         image_blocks[0], image_blocks[1], image_blocks[2], image_blocks[3],
         image_blocks[4], image_blocks[5], image_blocks[6], image_blocks[7],
         image_blocks[8], image_blocks[9], image_blocks[10],image_blocks[11],
         image_blocks[12],image_blocks[13],image_blocks[14],image_blocks[15],
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     x = image_offsets[i] + x - image_h1base[i];
-    i = search16a((uintptr_t)x,
+    i = search((uintptr_t)x,
         blocks_offset[0], blocks_offset[1], blocks_offset[2], blocks_offset[3],
         blocks_offset[4], blocks_offset[5], blocks_offset[6], blocks_offset[7],
         blocks_offset[8], blocks_offset[9], blocks_offset[10],blocks_offset[11],
@@ -6997,11 +7067,12 @@ int write32(gzFile f, uint32_t n)
 
 // The version number has an integer part and a fraction part, and I
 // want the fractional part to be in the range 100 to 999 please.
+// Done using the preprocessor so I can stringify and concatenate strings.
 #define IVERSION 1
 #define FVERSION 501
 #define stringify(x) stringify1(x)
 #define stringify1(x) #x
-char startup_banner[64] =
+INLINE const char startup_banner[64] =
    "VSL+ version " stringify(IVERSION) "." stringify(FVERSION);
 
 // Return 0 on success, 1 on most failures and 2 if the gzclose failed.
@@ -7232,6 +7303,7 @@ void setup_prompt() {
 //
 
 #ifndef BINDIR
+// #define for stringify.
 #define BINDIR /usr/local/bin
 #endif
 
@@ -7921,4 +7993,3 @@ int main(int argc, char *argv[])
 }
 
 // end of main source file.
-

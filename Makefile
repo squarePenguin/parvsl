@@ -20,6 +20,11 @@ vsl:	vsl.cpp
 		vsl.cpp $(LIBS) -o vsl \
 		2>&1 | tee vsl.log
 
+bvsl:	vsl.cpp
+	g++ -fno-diagnostics-color -DBIGNUM=1 $(CFLAGS) \
+		vsl.cpp $(LIBS) -o bvsl \
+		2>&1 | tee bvsl.log
+
 fastvsl:	vsl.cpp
 	g++ -fno-diagnostics-color $(FASTCFLAGS) \
 		vsl.cpp $(LIBS) -o fastvsl \
