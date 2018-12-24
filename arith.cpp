@@ -199,7 +199,11 @@
 // symbols allow other versions to be built.
 
 #if !defined MALLOC && !defined NEW && !defined LISP
+// If no explicit options have been set I will building using memory
+// allocation via C++ "new" and I will compile the test code.
+
 #define NEW  1
+#define TEST 1
 #endif
 
 
@@ -209,12 +213,6 @@
 // to have a header file that declares all the external functions etc
 // that I will need.
 
-#define TEST 1
-
-
-
-
-
 
 // The following 3 macros ought not to be required, however C99 had proposed
 // them, and although no C++ standard adopted them and C11 removed the idea,
@@ -222,9 +220,16 @@
 // harmless apart from the extra text both of the definitions and of this
 // comment.
 
+
+#ifndef __STDC_FORMAT_MACROS
 #define __STDC_FORMAT_MACROS 1
+#endif
+#ifndef __STDC_CONST_MACROS
 #define __STDC_CONST_MACROS 1
+#endif
+#ifndef __STDC_LIMIT_MACROS
 #define __STDC_LIMIT_MACROS 1
+#endif
 
 #include <cstdio>
 #include <cstring>

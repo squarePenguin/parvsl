@@ -95,8 +95,23 @@
 #else
 #include <sys/mman.h>
 
-#ifdef BIGNUM
-#include "BigIntegerLibrary.hh"
+#ifdef __cpp_inline_variables
+// For versions of C++ up to C++17 I will put constant values in header
+// files using something along the line of "static const int VAR = VAL;".
+// This should give the compiler a chance to replace the name with its value
+// throughout the compilation unit, and if the compiler is clever enough it
+// will avoid leaving a word of memory with the value stored if all uses
+// have been dealt with more directly. However it will tend to lead to a
+// lot of "static variable defined but not used" warnings.
+// From C++17 onwards (and C++ mandates the __cpp_inline_variables macro to
+// indicate if the feature is in place) I will use
+// "inline const int VAR = VAL;" and now if memory is allocated for the
+// variable it will only be allocated once, and I hope that compilers will
+// not feel entitled to moan about cases where there are no references.
+//
+#define INLINE inline
+#else
+#define INLINE static
 #endif
 
 // There is a portability issue about MAP_ANONYMOUS: I hope that
@@ -134,74 +149,103 @@ int devzero_fd = 0;
 
 typedef intptr_t LispObject;
 
-#define TAGBITS    0x7
+const intptr_t TAGBITS    = 0x7;
 
-#define tagCONS    0     // Traditional Lisp "cons" item.
-#define tagSYMBOL  1     // a symbol.
-#define tagFIXNUM  2     // An immediate integer value (29 or 61 bits).
-#define tagFLOAT   3     // A double-precision number.
-#define tagATOM    4     // Something else that will have a header word.
-#define tagFORWARD 5     // Used during garbage collection.
-#define tagHDR     6     // the header word at the start of an atom .
-#define tagSPARE   7     // not used!
+const intptr_t tagCONS    = 0;     // Traditional Lisp "cons" item.
+const intptr_t tagSYMBOL  = 1;     // a symbol.
+const intptr_t tagFIXNUM  = 2;     // An immediate integer value (29 or 61 bits).
+const intptr_t tagFLOAT   = 3;     // A double-precision number.
+const intptr_t tagATOM    = 4;     // Something else that will have a header word.
+const intptr_t tagFORWARD = 5;     // Used during garbage collection.
+const intptr_t tagHDR     = 6;     // the header word at the start of an atom .
+const intptr_t tagSPARE   = 7;     // not used!
 
 // Note that in the above I could have used tagATOM to include the case
 // of symbols (aka identifiers) but as an optimisation I choose to make that
 // a special case. I still have one spare code (tagSPARE) that could be
 // used to extend the system.
 
-// Now I provide macros that test the tag bits. These are all rather obvious!
+// Now I provide functions that test the tag bits. These are all rather obvious!
 
-#define isCONS(x)    (((x) & TAGBITS) == tagCONS)
-#define isSYMBOL(x)  (((x) & TAGBITS) == tagSYMBOL)
-#define isFIXNUM(x)  (((x) & TAGBITS) == tagFIXNUM)
-#define isFLOAT(x)   (((x) & TAGBITS) == tagFLOAT)
-#define isATOM(x)    (((x) & TAGBITS) == tagATOM)
-#define isFORWARD(x) (((x) & TAGBITS) == tagFORWARD)
-#define isHDR(x)     (((x) & TAGBITS) == tagHDR)
+static inline bool isCONS(LispObject x)
+{   return (x & TAGBITS) == tagCONS;
+}
+
+static inline bool isSYMBOL(LispObject x)
+{   return (x & TAGBITS) == tagSYMBOL;
+}
+
+static inline bool isFIXNUM(LispObject x)
+{   return (x & TAGBITS) == tagFIXNUM;
+}
+
+static inline bool isFLOAT(LispObject x)
+{   return (x & TAGBITS) == tagFLOAT;
+}
+
+static inline bool isATOM(LispObject x)
+{   return (x & TAGBITS) == tagATOM;
+}
+
+static inline bool isFORWARD(LispObject x)
+{   return (x & TAGBITS) == tagFORWARD;
+}
+
+static inline bool isHDR(LispObject x)
+{   return (x & TAGBITS) == tagHDR;
+}
+
 
 // In memory CONS cells and FLOATS exist as just 2-word items with
 // all their bits in use. All other sorts of data have a header word
 // at their start.
 // This contains extra information about the exact form of data present.
 
-#define TYPEBITS    0x78
-#define TYPEBITSX   0x70
+const intptr_t TYPEBITS    = 0x78;
+const intptr_t TYPEBITSX   = 0x70;
 
-#define typeSYM     0x00
-#define typeSTRING  0x08
-#define typeVEC     0x10
+const intptr_t typeSYM     = 0x00;
+const intptr_t typeSTRING  = 0x08;
+const intptr_t typeVEC     = 0x10;
 // In a first version a BIGNUM only uses typeBIGNUM and the payload it
-// carries is an int64_t. In some future version I MAY represent bignums
-// in sign-and-magnitude form to arbitrary precision, and in that case
-// I MAY use typeBIGNUMX to indicate that a value is negative.
-#define typeBIGNUM  0x20
-#define typeBIGNUMX 0x28
+// carries is an int64_t.
+const intptr_t typeBIGNUM  = 0x20;
 // EQHASH is a hash table that is in a good state and that is ready
 // for use. EQHASHX is one that contains all the correct data but that
 // needs re-hashing before it is used. This case arises because garbage
 // collection can rearrange memory and thus leave hash-codes out of date.
-#define typeEQHASH  0x30
-#define typeEQHASHX 0x38
-// Codes 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
+const intptr_t typeEQHASH  = 0x30;
+const intptr_t typeEQHASHX = 0x38;
+// Codes 0x28, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
 // 0x70 and 0x78 spare!
 
-#define veclength(h)  (((uintptr_t)(h)) >> 7)
-#define packlength(n) (((LispObject)(n)) << 7)
-
-static inline LispObject *heapaddr(LispObject x)
-{
-    return (LispObject *)x;
+static inline size_t veclength(LispObject h)
+{   return ((uintptr_t)h) >> 7;
 }
 
-// General indirection
+static inline constexpr LispObject packlength(size_t n)
+{   return (LispObject)(n << 7);
+}
+
+static inline LispObject *heapaddr(LispObject x)
+{   return (LispObject *)x;
+}
+
+// General indirection. Hmm I think this is an UGLY thing to have because
+// the issue of types for it are unclear. I will leave it as a macro for
+// now but try to remove it later on.
 
 #define qind(x)     (*((LispObject *)(x)))
 
 // Accessor macros the extract fields from LispObjects ...
 
-#define qcar(x) ((heapaddr(x))[0])
-#define qcdr(x) ((heapaddr(x))[1])
+static inline LispObject &qcar(LispObject x)
+{   return (heapaddr(x))[0];
+}
+
+static inline LispObject &qcdr(LispObject x)
+{   return (heapaddr(x))[1];
+}
 
 // For all other types I must remove the tagging information before I
 // can use the item as a pointer.
@@ -223,64 +267,130 @@ typedef LispObject LispFn4(LispObject lits, LispObject a1, LispObject a2,
 typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
                              LispObject a3, LispObject a4, LispObject a5up);
 
-#define qflags(x) ((heapaddr((x)-tagSYMBOL))[0])
-#define qvalue(x) ((heapaddr((x)-tagSYMBOL))[1])
-#define qplist(x) ((heapaddr((x)-tagSYMBOL))[2])
-#define qpname(x) ((heapaddr((x)-tagSYMBOL))[3])
-#define qlits(x)  ((heapaddr((x)-tagSYMBOL))[4])
-#define qspare(x) ((heapaddr((x)-tagSYMBOL))[5])
-#define qdefn0(x) (((LispFn0 **)    (heapaddr((x)-tagSYMBOL)))[6])
-#define qdefn1(x) (((LispFn1 **)    (heapaddr((x)-tagSYMBOL)))[7])
-#define qdefn2(x) (((LispFn2 **)    (heapaddr((x)-tagSYMBOL)))[8])
-#define qdefn3(x) (((LispFn3 **)    (heapaddr((x)-tagSYMBOL)))[9])
-#define qdefn4(x) (((LispFn4 **)    (heapaddr((x)-tagSYMBOL)))[10])
-#define qdefn5up(x) (((LispFn5up **)(heapaddr((x)-tagSYMBOL)))[11])
-#define SYMSIZE 12
+static inline LispObject &qflags(LispObject x)
+{   return (heapaddr(x-tagSYMBOL))[0];
+}
+
+static inline LispObject &qvalue(LispObject x)
+{   return (heapaddr(x-tagSYMBOL))[1];
+}
+
+static inline LispObject &qplist(LispObject x)
+{   return (heapaddr(x-tagSYMBOL))[2];
+}
+
+static inline LispObject &qpname(LispObject x)
+{   return (heapaddr(x-tagSYMBOL))[3];
+}
+
+static inline LispObject &qlits(LispObject x)
+{   return (heapaddr(x-tagSYMBOL))[4];
+}
+
+static inline LispObject &qspare(LispObject x)
+{   return (heapaddr(x-tagSYMBOL))[5];
+}
+
+static inline LispFn0 *&qdefn0(LispObject x)
+{   return ((LispFn0 **)(heapaddr(x-tagSYMBOL)))[6];
+}
+
+static inline LispFn1 *&qdefn1(LispObject x)
+{   return ((LispFn1 **)(heapaddr(x-tagSYMBOL)))[7];
+}
+
+static inline LispFn2 *&qdefn2(LispObject x)
+{   return ((LispFn2 **)(heapaddr(x-tagSYMBOL)))[8];
+}
+
+static inline LispFn3 *&qdefn3(LispObject x)
+{   return ((LispFn3 **)(heapaddr(x-tagSYMBOL)))[9];
+}
+
+static inline LispFn4 *&qdefn4(LispObject x)
+{   return ((LispFn4 **)(heapaddr(x-tagSYMBOL)))[10];
+}
+
+static inline LispFn5up *&qdefn5up(LispObject x)
+{   return ((LispFn5up **)(heapaddr(x-tagSYMBOL)))[11];
+}
+
+INLINE const size_t SYMSIZE = 12;
 
 // Bits within the flags field of a symbol. Uses explained later on.
 
-#define flagTRACED    0x080
-#define flagSPECFORM  0x100
-#define flagMACRO     0x200
-#define flagGLOBAL    0x400
-#define flagFLUID     0x800
+INLINE const LispObject flagTRACED    = 0x080;
+INLINE const LispObject flagSPECFORM  = 0x100;
+INLINE const LispObject flagMACRO     = 0x200;
+INLINE const LispObject flagGLOBAL    = 0x400;
+INLINE const LispObject flagFLUID     = 0x800;
 // There are LOTS more bits available for flags etc here if needbe!
 
 // Other atoms have a header that gives info about them. Well as a special
 // case I will allow that something tagged with tagATOM but with zero as
 // its address is a special marker value...
 
-#define NULLATOM   (tagATOM + 0)
+// I will INSIAT that the definition of tagATOM s in the same compilation
+// unit as this is.
+INLINE const LispObject NULLATOM = tagATOM + 0;
 #define qheader(x) ((heapaddr((x)-tagATOM))[0])
 
 // Fixnums and Floating point numbers are rather easy!
 
 // The behaviour of signed shifts is not nicely defined in C++, so what I
 // really expect to compile as (x>>3) needs to be expressed as division.
-#define qfixnum(x)     ((intptr_t)((x) & ~(uintptr_t)7) / 8)
+//
+// Also note use of the C++11 "constexpr" annotation to encourage the idea
+// that when this is used ini initialization it can be processed at compile
+// time.
 
-// NB that C++ makes this undefined if there is overflow!
-#define packfixnum(n)  ((((LispObject)(n)) << 3) + tagFIXNUM)
+static inline constexpr intptr_t qfixnum(LispObject x)
+{   return ((intptr_t)(x & ~(uintptr_t)7)) / 8;
+}
 
-#define MIN_FIXNUM     qfixnum(INTPTR_MIN)
-#define MAX_FIXNUM     qfixnum(INTPTR_MAX)
+static inline LispObject packfixnum(intptr_t n)
+{   return (LispObject)((uintptr_t)n << 3) + tagFIXNUM;
+}
 
-#define qfloat(x)      (((double *)((x)-tagFLOAT))[0])
+INLINE const intptr_t MIN_FIXNUM = qfixnum(INTPTR_MIN);
+INLINE const intptr_t MAX_FIXNUM = qfixnum(INTPTR_MAX);
 
-#define isBIGNUM(x) (isATOM(x) && ((qheader(x) & TYPEBITSX) == typeBIGNUM))
-#define qint64(x) (*(int64_t *)((x) - tagATOM + 8))
+static inline double &qfloat(LispObject x)
+{   return ((double *)(x-tagFLOAT))[0];
+}
 
-#define isSTRING(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeSTRING))
-#define qstring(x) ((char *)((x) - tagATOM + sizeof(LispObject)))
+static inline bool isBIGNUM(LispObject x)
+{   return isATOM(x) && ((qheader(x) & TYPEBITSX) == typeBIGNUM);
+}
 
-#define isVEC(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeVEC))
-#define isEQHASH(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH))
-#define isEQHASHX(x) (isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX))
+static inline int64_t &qint64(LispObject x)
+{   return *(int64_t *)(x - tagATOM + 8);
+}
+
+static inline bool isSTRING(LispObject x)
+{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeSTRING);
+}
+
+static inline char *qstring(LispObject x)
+{   return (char *)(x - tagATOM + sizeof(LispObject));
+}
+
+static inline bool isVEC(LispObject x)
+{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeVEC);
+}
+
+static inline bool isEQHASH(LispObject x)
+{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH);
+}
+
+static inline bool isEQHASHX(LispObject x)
+{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX);
+}
 
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-#define MEM 256
+INLINE const size_t MEM = 256;
 #endif // MEM
 
 #define HALFBITMAPSIZE ((uintptr_t)MEM*1024*(1024/128))
@@ -301,49 +411,57 @@ LispObject *C_stackbase;
 // Hmm - a full copy of everything that makes up Reduce involved around
 // 40K distinct symbols...
 
-#define OBHASH_SIZE 10007
-#define MAX_LISPFILES 30
+INLINE const size_t OBHASH_SIZE   = 10007;
+INLINE const int MAX_LISPFILES = 30;
 
 // Some Lisp values that I will use frequently...
 
-#define nil        bases[0]
-#define undefined  bases[1]
-#define lisptrue   bases[2]
-#define lispsystem bases[3]
-#define echo       bases[4]
-#define lambda     bases[5]
-#define quote      bases[6]
-#define backquote  bases[7]
-#define comma      bases[8]
-#define comma_at   bases[9]
-#define eofsym     bases[10]
-#define cursym     bases[11]
-#define work1      bases[12]
-#define work2      bases[13]
-#define restartfn  bases[14]
-#define expr       bases[15]
-#define subr       bases[16]
-#define fexpr      bases[17]
-#define fsubr      bases[18]
-#define macro      bases[19]
-#define input      bases[20]
-#define output     bases[21]
-#define pipe       bases[22]
-#define raise      bases[23]
-#define lower      bases[24]
-#define dfprint    bases[25]
-#define bignum     bases[26]
-#define fluid      bases[27]
-#define global     bases[28]
-#define BASES_SIZE       (MAX_LISPFILES+29)
+#define nil        listbases[0]
+#define undefined  listbases[1]
+#define lisptrue   listbases[2]
+#define lispsystem listbases[3]
+#define echo       listbases[4]
+#define symlambda  listbases[5]
+#define quote      listbases[6]
+#define backquote  listbases[7]
+#define comma      listbases[8]
+#define comma_at   listbases[9]
+#define eofsym     listbases[10]
+#define cursym     listbases[11]
+#define work1      listbases[12]
+#define work2      listbases[13]
+#define restartfn  listbases[14]
+#define expr       listbases[15]
+#define subr       listbases[16]
+#define fexpr      listbases[17]
+#define fsubr      listbases[18]
+#define macro      listbases[19]
+#define input      listbases[20]
+#define output     listbases[21]
+#define pipe       listbases[22]
+#define symraise   listbases[23]
+#define symlower   listbases[24]
+#define dfprint    listbases[25]
+#define bignum     listbases[26]
+#define symfluid   listbases[27]
+#define symglobal  listbases[28]
+const int BASES_SIZE = MAX_LISPFILES+29;
 
-#define filecursym (&bases[27])
+#define filecursym (&listbases[29])
 
-LispObject bases[BASES_SIZE];
+LispObject listbases[BASES_SIZE];
 LispObject obhash[OBHASH_SIZE];
 
 // ... and non-LispObject values that need to be saved as part of a
 // heap image.
+
+// I will #include the code for big-numbers once I have all my tag bits etc
+// specified.
+
+#ifdef BIGNUM
+#define LISP 1
+#include "arith1.cpp"
+#endif
 
 
 void my_exit(int n)
@@ -626,7 +744,9 @@ static inline void clearpinned(block_header *block)
 // halfbitmapsize field filled in. Fill in the rest of the entries
 // in them. 
 
-#define ALIGN8(a) (((a) + 7) & ~(LispObject)7)
+static inline uintptr_t ALIGN8(uintptr_t a)
+{   return (a + 7) & ~(uintptr_t)7;
+}
 
 void allocateheap()
 {
@@ -830,8 +950,9 @@ static inline LispObject makestring(const char *s, int len)
     return r;
 }
 
-#define elt(v, n) \
-    (((LispObject *)((v)-tagATOM+sizeof(LispObject)))[n])
+static inline LispObject &elt(LispObject v, size_t n)
+{   return ((LispObject *)(v-tagATOM+sizeof(LispObject)))[n];
+}
 
 static inline LispObject makevector(int maxindex)
 {   int i, len = (maxindex+1)*sizeof(LispObject);
@@ -960,7 +1081,7 @@ static LispObject Lstring_store4(LispObject data, LispObject s,
     return s;
 }
 
-extern LispObject lookup(const char *s, int n, int flags);
+extern LispObject lookup(const char *s, size_t n, int flags);
 
 // The code here is ugly and could be tidied up!
 
@@ -1062,12 +1183,27 @@ static LispObject Lchar_downcase(LispObject data, LispObject arg)
     else return arg;
 }
 
-#define BOFFO_SIZE 4096
+INLINE const size_t BOFFO_SIZE = 4096;
 char boffo[BOFFO_SIZE+4];
-int boffop;
+size_t boffop;
 
-#define swap(a,b) w = (a); (a) = (b); (b) = w;
-#define swapmap(a,b) wmap = (a); (a) = (b); (b) = wmap;
+static inline void swap(uintptr_t &a, uintptr_t &b)
+{   uintptr_t w = a;
+    a = b;
+    b = w;
+}
+
+static inline void swap(LispObject &a, LispObject &b)
+{   uintptr_t w = a;
+    a = b;
+    b = w;
+}
+
+static inline void swapmap(uint32_t *&a, uint32_t *&b)
+{   uint32_t *wmap = a;
+    a = b;
+    b = wmap;
+}
 
 static inline LispObject copy(LispObject x);
 static inline LispObject copycontent(LispObject s);
@@ -1128,10 +1264,9 @@ void inner_reclaim(LispObject *C_stack)
 // Algorithm". Communications of the ACM 13 (11): 677-678, 1970),
 // adapted to be "conservative". C_stack to C_stackbase will be viewed as
 // a set of ambiguous roots.
-    uintptr_t s, w;
-    uintptr_t o;
+    uintptr_t s;
+    size_t o;
     uintptr_t i;
-    uint32_t *wmap;
     LispObject pp;
     npins = heap2_pads = space_used = 0;
     printf("+++ GC number %d ", gccount++);
@@ -1233,7 +1368,7 @@ if (initial_a == 123456) printf("ook\n"); // to get it used.
 // to be copied.
 //
 // Next I copy all objects directly accessible from proper list bases.
-    for (o=0; o<BASES_SIZE; o++) bases[o] = copy(bases[o]);
+    for (o=0; o<BASES_SIZE; o++) listbases[o] = copy(listbases[o]);
     for (o=0; o<OBHASH_SIZE; o++)
         obhash[o] = copy(obhash[o]);
 // Items that are pinned and are in heap1 may have the pinning pointer as
@@ -1697,8 +1832,8 @@ static inline LispObject copycontent(LispObject s)
     }
 }
 
-#define printPLAIN   1
-#define printESCAPES 2
+INLINE const int printPLAIN = 1;
+INLINE const int printESCAPES = 2;
 
 // I suspect that linelength and linepos need to be maintained
 // independently for each output stream. At present that is not
@@ -2092,8 +2227,8 @@ LispObject token()
                curchar == '_' ||
                curchar == '!')
         {   if (curchar == '!') curchar = rdch();
-            else if (curchar != EOF && qvalue(lower) != nil) curchar = tolower(curchar);
-            else if (curchar != EOF && qvalue(raise) != nil) curchar = toupper(curchar);
+            else if (curchar != EOF && qvalue(symlower) != nil) curchar = tolower(curchar);
+            else if (curchar != EOF && qvalue(symraise) != nil) curchar = toupper(curchar);
             if (curchar != EOF)
             {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
                 curchar = rdch();
@@ -2294,16 +2429,16 @@ LispObject readT()
 }
 
 
-LispObject lookup(const char *s, int len, int flag)
+LispObject lookup(const char *s, size_t len, int flag)
 {   LispObject w, pn;
-    int i, hash = 1;
+    size_t i, hash = 1;
     for (i=0; i<len; i++) hash = 13*hash + s[i];
-    hash = (hash & 0x7fffffff) % OBHASH_SIZE;
+    hash = hash % OBHASH_SIZE;
     w = obhash[hash];
     while (w != tagFIXNUM)
     {   LispObject a = qcar(w);        // Will be a symbol.
         LispObject n = qpname(a);      // Will be a string.
-        int l = veclength(qheader(n)); // Length of the name.
+        size_t l = veclength(qheader(n)); // Length of the name.
         if (l == len &&
             strncmp(s, qstring(n), len) == 0)
             return a;                  // Existing symbol found.
@@ -2900,7 +3035,7 @@ LispObject eval(LispObject x)
                 }
             }
         }
-        else if (isCONS(f) && qcar(f) == lambda)
+        else if (isCONS(f) && qcar(f) == symlambda)
         {   LispObject aa = qcdr(x);
             int n = 0;
             while (isCONS(aa))
@@ -3121,17 +3256,17 @@ LispObject Ldm(LispObject lits, LispObject x)
 LispObject Lputd(LispObject lits, LispObject name, LispObject type, LispObject def)
 {   if (!isSYMBOL(name)) return error1("bad name in putd", name);
     if (type == expr)
-    {   if (!isCONS(def) || qcar(def) != lambda)
+    {   if (!isCONS(def) || qcar(def) != symlambda)
             return error1("bad definition in putd", def);
         return definer(cons(name, qcdr(def)), 0);
     }
     else if (type == fexpr)
-    {   if (!isCONS(def) || qcar(def) != lambda)
+    {   if (!isCONS(def) || qcar(def) != symlambda)
             return error1("bad definition in putd", def);
         return definer(cons(name, qcdr(def)), flagSPECFORM);
     }
     else if (type == macro)
-    {   if (!isCONS(def) || qcar(def) != lambda)
+    {   if (!isCONS(def) || qcar(def) != symlambda)
             return error1("bad definition in putd", def);
         return definer(cons(name, qcdr(def)), flagMACRO);
     }
@@ -3693,7 +3828,7 @@ LispObject Llist2string(LispObject lits, LispObject a)
 }
 
 LispObject Loblist(LispObject lits)
-{   int i;
+{   size_t i;
     work1 = nil;
     for (i=0; i<OBHASH_SIZE; i++)
         for (work2=obhash[i]; isCONS(work2); work2 = qcdr(work2))
@@ -3710,7 +3845,7 @@ LispObject Leval(LispObject lits, LispObject x)
 
 LispObject Lapply(LispObject lits, LispObject x, LispObject y)
 {   LispObject a1, a2, a3, a4;
-    if (isCONS(x) && qcar(x) == lambda)
+    if (isCONS(x) && qcar(x) == symlambda)
     {   if (!isCONS(y)) return interpreted0(qcdr(x));
         a1 = qcar(y);
         y = qcdr(y);
@@ -3799,8 +3934,8 @@ LispObject Lfluid(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, global);
-        Lput(lits, v, fluid, lisptrue);
+        Lremprop(lits, v, symglobal);
+        Lput(lits, v, symfluid, lisptrue);
         if (qvalue(v) == undefined) qvalue(v) = nil;
     }
     return nil;
@@ -3811,8 +3946,8 @@ LispObject Lglobal(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, fluid);
-        Lput(lits, v, global, lisptrue);
+        Lremprop(lits, v, symfluid);
+        Lput(lits, v, symglobal, lisptrue);
         if (qvalue(v) == undefined) qvalue(v) = nil;
     }
     return nil;
@@ -3823,7 +3958,7 @@ LispObject Lunfluid(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, fluid);
+        Lremprop(lits, v, symfluid);
     }
     return nil;
 }
@@ -3833,7 +3968,7 @@ LispObject Lunglobal(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, global);
+        Lremprop(lits, v, symglobal);
     }
     return nil;
 }
@@ -4007,7 +4142,7 @@ LispObject Lgetd(LispObject lits, LispObject x)
 // I copy the bound variable list that is returned so that nobody can
 // use rplaca/rplacd to corrupt it.
             return list2star(fexpr,
-                lambda,
+                symlambda,
 //@@@                cons(shallow_copy(qcar(r)), qcdr(r)));
                 r);
         else return cons(fsubr, x);
@@ -4029,7 +4164,7 @@ LispObject Lgetd(LispObject lits, LispObject x)
              qdefn4(x) == interpreted4 &&
              qdefn5up(x) == interpreted5up)
         return list2star((qflags(x) & flagMACRO) ? macro : expr,
-            lambda,
+            symlambda,
             r);
 //***            cons(shallow_copy(qcar(r)), qcdr(r)));
     else return cons(subr, x);
@@ -5488,8 +5623,8 @@ LispObject Lexplodecn(LispObject lits, LispObject x)
 LispObject Lreadch(LispObject lits)
 {   char ch[4];
     if (curchar == EOF) return eofsym;
-    ch[0] = qvalue(lower) != nil ? tolower(curchar) :
-            qvalue(raise) != nil ? toupper(curchar) : curchar;
+    ch[0] = qvalue(symlower) != nil ? tolower(curchar) :
+            qvalue(symraise) != nil ? toupper(curchar) : curchar;
     ch[1] = 0;
     curchar = rdch();
     return lookup(ch, 1, 1);
@@ -5567,7 +5702,7 @@ LispObject Lwrs(LispObject lits, LispObject x)
 #define LONGEST_LEGAL_FILENAME 1000
 char filename[LONGEST_LEGAL_FILENAME];
 static char imagename[LONGEST_LEGAL_FILENAME];
-static const char *programDir = ".";
+INLINE const char *programDir = ".";
 
 LispObject Lget_lisp_directory(LispObject lits)
 {   return makestring(programDir, strlen(programDir));
@@ -6146,8 +6281,10 @@ void *setup_defs[] =
 // size is just established by the rounding-up procedure here, however
 // it should scale reasonably happily to almost any size of system.
 
-#define SETUPHASHSIZE (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1)
-#define HASHPTR(x)    ((int)(((uintptr_t)(x)*314159u)%SETUPHASHSIZE))
+static const size_t SETUPHASHSIZE = (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1);
+static inline size_t HASHPTR(void *x)
+{   return (size_t)((((uintptr_t)x)*314159u)%SETUPHASHSIZE);
+}
 
 void setwrongnumbers(LispObject w)
 {   if (qdefn0(w) == undefined0) qdefn0(w) = wrongnumber0;
@@ -6174,18 +6311,18 @@ void setup()
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
     qvalue(lisptrue) = lisptrue;
-    fluid = lookup("fluid", 5, 3);
-    global = lookup("global", 6, 3);
-    Lput(nil, nil, global, lisptrue);
-    Lput(nil, lisptrue, global, lisptrue);
-    Lput(nil, undefined, global, lisptrue);
+    symfluid = lookup("fluid", 5, 3);
+    symglobal = lookup("global", 6, 3);
+    Lput(nil, nil, symglobal, lisptrue);
+    Lput(nil, lisptrue, symglobal, lisptrue);
+    Lput(nil, undefined, symglobal, lisptrue);
     qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
     qflags(echo) |= flagFLUID;
-    Lput(nil, echo, fluid, lisptrue);
+    Lput(nil, echo, symfluid, lisptrue);
     {   LispObject nn;
         qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
         qflags(nn) |= flagFLUID;
-        Lput(nil, nn, fluid, lisptrue);
+        Lput(nil, nn, symfluid, lisptrue);
     }
     qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
@@ -6193,16 +6330,16 @@ void setup()
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
     qflags(lispsystem) |= flagGLOBAL;
-    Lput(nil, lispsystem, global, lisptrue);
+    Lput(nil, lispsystem, symglobal, lisptrue);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
     qflags(eofsym) |= flagGLOBAL;
-    Lput(nil, eofsym, global, lisptrue);
+    Lput(nil, eofsym, symglobal, lisptrue);
     qvalue(eofsym) = eofsym;
-    lambda = lookup("lambda", 6, 3);
+    symlambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
     subr = lookup("subr", 4, 3);
     fexpr = lookup("fexpr", 5, 3);
@@ -6213,14 +6350,14 @@ void setup()
     pipe = lookup("pipe", 4, 3);
     qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
     qflags(dfprint) |= flagFLUID;
-    Lput(nil, dfprint, fluid, lisptrue);
+    Lput(nil, dfprint, symfluid, lisptrue);
     bignum = lookup("~bignum", 7, 3);
-    qvalue(raise = lookup("*raise", 6, 3)) = nil;
-    qvalue(lower = lookup("*lower", 6, 3)) = lisptrue;
-    qflags(raise) |= flagFLUID;
-    qflags(lower) |= flagFLUID;
-    Lput(nil, raise, fluid, lisptrue);
-    Lput(nil, lower, fluid, lisptrue);
+    qvalue(symraise = lookup("*raise", 6, 3)) = nil;
+    qvalue(symlower = lookup("*lower", 6, 3)) = lisptrue;
+    qflags(symraise) |= flagFLUID;
+    qflags(symlower) |= flagFLUID;
+    Lput(nil, symraise, symfluid, lisptrue);
+    Lput(nil, symlower, symfluid, lisptrue);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
@@ -6261,12 +6398,12 @@ void setup()
 void cold_start()
 {
 // version of setup to call when there is no initial heap image at all.
-    int i;
+    size_t i;
 // I make the object-hash-table lists end in a fixnum rather than nil
 // because I want to create the hash table before even the symbol nil
 // exists.
     for (i=0; i<OBHASH_SIZE; i++) obhash[i] = tagFIXNUM;
-    for (i=0; i<BASES_SIZE; i++) bases[i] = NULLATOM;
+    for (i=0; i<BASES_SIZE; i++) listbases[i] = NULLATOM;
     setup();
 // The following fields could not be set up quite early enough in the
 // cold start case, so I repair them now.
@@ -6327,7 +6464,7 @@ void **setuphash2v;
 
 void *setuphashlookup(void *k)
 {
-    int i = HASHPTR(k);
+    size_t i = HASHPTR(k);
     const uint64_t *p;
     while (setuphash1k[i] != k &&
            setuphash1k[i] != NULL) i = (i + 1) % SETUPHASHSIZE;
@@ -6478,8 +6615,8 @@ int warm_start_1(gzFile f, int *errcode)
 // the sizes of these match between image file and running system.
 // I should probably encode the sizes as part of the image format so as
 // to police that...
-    if (gzread(f, bases, (unsigned int)sizeof(bases)) !=
-        (int)sizeof(bases)) return __LINE__;
+    if (gzread(f, listbases, (unsigned int)sizeof(listbases)) !=
+        (int)sizeof(listbases)) return __LINE__;
 // A small reminder here: when I move to more complete Common Lisp
 // support the single (and fixed size) hash table for use as an object
 // list will need to be replaced with something much more elaborate.
@@ -6650,7 +6787,7 @@ int warm_start_1(gzFile f, int *errcode)
 // that created the image, not the one that is now running. So I need to
 // scan and fix things up. First deal with the list bases...
     for (i=0; i<BASES_SIZE; i++)
-        bases[i] = relocate(bases[i]);
+        listbases[i] = relocate(listbases[i]);
     for (i=0; i<OBHASH_SIZE; i++)
         obhash[i] = relocate(obhash[i]);
 // Now do a scan of the heap... There is a further horrid issue here. I
@@ -6925,8 +7062,8 @@ static inline int write_image_1(gzFile f, int *errcode)
 // number or layout of these ever changes then it will be important to
 // change VERSION, and a discrepancy in that must cause images to
 // be rejected as un-re-loadable.
-    if (gzwrite(f, bases, (unsigned int)sizeof(bases)) !=
-        (int)sizeof(bases)) return 1;
+    if (gzwrite(f, listbases, (unsigned int)sizeof(listbases)) !=
+        (int)sizeof(listbases)) return 1;
     if (gzwrite(f, obhash, (unsigned int)sizeof(obhash)) !=
         (int)sizeof(obhash)) return 1;
 // Finally I need to dump imformation relating to the heap. I need
