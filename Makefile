@@ -126,8 +126,8 @@ step2:	vsl
 		-Dnoinlines=t \
 		step2.red | tee step2.log
 
-arith:	arith.cpp
-	g++ -Wall -O0 -g -DTEST=1 arith.cpp -o arith
+arithtest:	arithtest.cpp arith.hpp
+	g++ -Wall -O0 -g -DTEST=1 arithtest.cpp -o arithtest
 
 testlogs/%.log:
 	time ./test.sh $@
