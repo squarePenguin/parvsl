@@ -321,8 +321,13 @@ int main(int argc, char *argv[])
             quotient = fudge_distribution_bignum(quotient, (int)((rr>>8) & 0xf));
 // While I still want my strange distribution of numbers for testing, I
 // need the sign of my target remainder to be proper, so I will generate
-// random inputs until that is so.
-        } while ((quotient ^ remainder ^ divisor) < Bignum(0)); 
+// random inputs until that is so. Also when I adjust the numbers I could
+// reduce the divisor more than the remainder so that the remainder was
+// invalid in magnitude... so I need to discard those cases too. It is
+// plausible that this means I will discard around 75% of the sets of random
+// numberfs that I initially generate.
+        } while ((quotient ^ remainder ^ divisor) < Bignum(0) ||
+                 abs(remainder) >= abs(divisor)); 
         Bignum dividend = quotient*divisor + remainder;
         Bignum q1 = dividend / divisor;
         Bignum r1 = dividend % divisor;

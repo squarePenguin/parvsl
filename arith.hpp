@@ -1086,6 +1086,12 @@ class Minus
     static intptr_t op(uint64_t *);
 };
 
+class Abs
+{   public:
+    static intptr_t op(int64_t);
+    static intptr_t op(uint64_t *);
+};
+
 class Square
 {   public:
     static intptr_t op(int64_t);
@@ -1434,6 +1440,10 @@ inline Bignum random_upto_bits_bignum(size_t n)
 
 inline Bignum square(const Bignum &x)
 {   return Bignum(true, op_dispatch1<Square,intptr_t>(x.val));
+}
+
+inline Bignum abs(const Bignum &x)
+{   return Bignum(true, op_dispatch1<Abs,intptr_t>(x.val));
 }
 
 inline Bignum pow(const Bignum &x, int64_t n)
@@ -3073,6 +3083,30 @@ intptr_t Minus::op(uint64_t *a)
 intptr_t Minus::op(int64_t a)
 {   if (a == MIN_FIXNUM) return int_to_bignum(-a);
     else return int_to_handle(-a);
+}
+
+intptr_t Abs::op(uint64_t *a)
+{   size_t n = number_size(a);
+    if (!negative(a[n-1]))
+    {   uint64_t *r = reserve(n);
+        std::memcpy(r, a, n*sizeof(uint64_t));
+        return confirm_size(r, n, n);
+    }
+    uint64_t *r = reserve(n+1);
+    size_t final_n;
+    bignegate(a, n, r, final_n);
+    return confirm_size(r, n+1, final_n);
+}
+
+// The following can only be called via op_dispatch1(), and in that
+// case the argument has to have started off as a fixnum. In such cases
+// the result will also be a fixnum except when negating MIN_FIXNUM. But
+// even in that case (-a) can not overflow 64-bit arithmetic because
+// the fixnum will have had at least one tag bit.
+
+intptr_t Abs::op(int64_t a)
+{   if (a == MIN_FIXNUM) return int_to_bignum(-a);
+    else return int_to_handle(a<0 ? -a : a);
 }
 
 // The "bitnot" operation is simple and length can not change.
