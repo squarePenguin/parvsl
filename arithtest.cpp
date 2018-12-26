@@ -47,11 +47,11 @@ using namespace arith;
 // The tests come in sections, and these preprocessor symbols can be used
 // to select which sections get run.
 
-#define TEST_SOME_BASICS 1
-#define TEST_RANDOM 1
-#define TEST_BITWISE 1
-#define TEST_SHIFTS 1
-#define TEST_PLUS_AND_TIMES 1
+//#define TEST_SOME_BASICS 1
+//#define TEST_RANDOM 1
+//#define TEST_BITWISE 1
+//#define TEST_SHIFTS 1
+//#define TEST_PLUS_AND_TIMES 1
 #define TEST_DIVISION 1
 
 int main(int argc, char *argv[])

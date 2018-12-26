@@ -2,12 +2,6 @@
 
 
 
-// TODO:
-//   float, floor, ceil, fix
-//   isqrt
-//   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
-
-
 /**************************************************************************
  * Copyright (C) 2019, Codemist.                         A C Norman       *
  *                                                                        *
@@ -453,7 +447,7 @@ inline char *confirm_size_string(char *p, size_t n, size_t final)
     return r;
 }
 
-intline void abandon_string(char *s)
+inline void abandon_string(char *s)
 {   (*free_function)(s);
 }
 
@@ -907,7 +901,7 @@ inline char *confirm_size_string(char *p, size_t n, size_t final)
 {   my_assert(final>0 && n>final);
 }
 
-intline void abandon_string(char *s)
+inline void abandon_string(char *s)
 {   my_abort("not implemented yet");
 }
 
@@ -942,6 +936,9 @@ intptr_t copy_if_no_garbage_collector(intptr_t p)
 inline intptr_t string_to_bignum(const char *s);
 inline intptr_t int_to_bignum(int64_t n);
 inline intptr_t unsigned_int_to_bignum(uint64_t n);
+inline intptr_t double_to_bignum(double d);
+inline intptr_t double_to_floor(double d);
+inline intptr_t double_to_ceiling(double d);
 inline intptr_t uniform_positive(size_t n);
 inline intptr_t uniform_signed(size_t n);
 inline intptr_t uniform_upto(intptr_t a);
@@ -1055,6 +1052,24 @@ class Logxor
     static intptr_t op(uint64_t *, uint64_t *);
 };
 
+class Zerop
+{   public:
+    static bool op(int64_t);
+    static bool op(uint64_t *);
+};
+
+class Onep
+{   public:
+    static bool op(int64_t);
+    static bool op(uint64_t *);
+};
+
+class Minusp
+{   public:
+    static bool op(int64_t);
+    static bool op(uint64_t *);
+};
+
 class Eqn
 {   public:
     static bool op(int64_t, int64_t);
@@ -1113,6 +1128,12 @@ class Square
     static intptr_t op(uint64_t *);
 };
 
+class Isqrt
+{   public:
+    static intptr_t op(int64_t);
+    static intptr_t op(uint64_t *);
+};
+
 class Lognot
 {   public:
     static intptr_t op(int64_t);
@@ -1146,12 +1167,34 @@ class Rightshift
     static intptr_t op(uint64_t *, int32_t);
 };
 
+class Integer_length
+{   public:
+    static size_t op(int64_t);
+    static size_t op(uint64_t *);
+};
 
+class Logbitp
+{   public:
+    static bool op(int64_t, size_t);
+    static bool op(uint64_t *, size_t);
+};
 
-extern char *bignum_to_string(intptr_t aa);
-extern char *bignum_to_string_hex(intptr_t aa);
-extern char *bignum_to_string_octal(intptr_t aa);
-extern char *bignum_to_string_binary(intptr_t aa);
+class Logcount
+{   public:
+    static size_t op(int64_t);
+    static size_t op(uint64_t *);
+};
+
+class Float
+{   public:
+    static double op(int64_t);
+    static double op(uint64_t *);
+};
+
+inline char *bignum_to_string(intptr_t aa);
+inline char *bignum_to_string_hex(intptr_t aa);
+inline char *bignum_to_string_octal(intptr_t aa);
+inline char *bignum_to_string_binary(intptr_t aa);
 
 
 //=========================================================================
@@ -1194,6 +1237,12 @@ public:
     }
     Bignum(int64_t n)
     {   val = int_to_bignum(n);
+    }
+    Bignum(double d)
+    {   val = double_to_bignum(d);
+    }
+    Bignum(float d)
+    {   val = double_to_bignum((double)d);
     }
     Bignum(const char *s)
     {   val = string_to_bignum(s);
@@ -1457,8 +1506,24 @@ inline Bignum square(const Bignum &x)
 {   return Bignum(true, op_dispatch1<Square,intptr_t>(x.val));
 }
 
+inline Bignum isqrt(const Bignum &x)
+{   return Bignum(true, op_dispatch1<Isqrt,intptr_t>(x.val));
+}
+
 inline Bignum abs(const Bignum &x)
 {   return Bignum(true, op_dispatch1<Abs,intptr_t>(x.val));
+}
+
+inline Bignum zerop(const Bignum &x)
+{   return Bignum(true, op_dispatch1<Zerop,bool>(x.val));
+}
+
+inline Bignum onep(const Bignum &x)
+{   return Bignum(true, op_dispatch1<Zerop,bool>(x.val));
+}
+
+inline Bignum minusp(const Bignum &x)
+{   return Bignum(true, op_dispatch1<Zerop,bool>(x.val));
 }
 
 inline Bignum pow(const Bignum &x, int64_t n)
@@ -1480,7 +1545,29 @@ inline Bignum lcm(const Bignum &x, const Bignum &y)
 {   return Bignum(true, op_dispatch2<Lcm,intptr_t>(x.val, y.val));
 }
 
+inline Bignum fix_bignum(double d)
+{   return Bignum(true, double_to_bignum(d));
+}
 
+inline Bignum floor_bignum(double d)
+{   return Bignum(true, double_to_floor(d));
+}
+
+inline Bignum ceil_bignum(double d)
+{   return Bignum(true, double_to_ceiling(d));
+}
+
+inline Bignum fix_bignum(float d)
+{   return fix_bignum((double)d);
+}
+
+inline Bignum floor_bignum(float d)
+{   return floor_bignum((double)d);
+}
+
+inline Bignum ceil_bignum(float d)
+{   return ceil_bignum((double)d);
+}
 
 //=========================================================================
 //=========================================================================
@@ -1544,6 +1631,10 @@ inline int nlz(uint64_t x)
 {   return __builtin_clzll(x);  // Must use the 64-bit version of clz.
 }
 
+inline int popcount(uint64_t x)
+{   return __builtin_popcountll(x);
+}
+
 #else // __GNUC__
 
 inline int nlz(uint64_t x)
@@ -1555,6 +1646,15 @@ inline int nlz(uint64_t x)
     if (x <= 0x3FFFFFFFFFFFFFFFU) {n = n + 2; x = x << 2;}
     if (x <= 0x7FFFFFFFFFFFFFFFU) {n = n + 1;}
     return n;
+}
+
+inline int popcount(uint64_t x)
+{   x = (x & 0x5555555555555555U) + (x >> 1 & 0x5555555555555555U);
+    x = (x & 0x3333333333333333U) + (x >> 2 & 0x3333333333333333U);
+    x = x + (x >> 4) & 0x0f0f0f0f0f0f0f0fU;
+    x = x + (x >> 8);
+    x = x + (x >> 16);
+    x = x + (x >> 32) & 0x7f;
 }
 
 #endif // __GNUC__
@@ -2432,6 +2532,61 @@ inline intptr_t unsigned_int_to_bignum(uint64_t n)
     return confirm_size(r, w, lenr);
 }
 
+inline intptr_t double_to_bignum(double d)
+{
+// I return 0 if the input is a NaN or either +infinity or -infinity.
+    if (!std::isfinite(d) || d==0.0) return int_to_handle(0);
+    int x;
+    d = std::frexp(d, &x);
+    d = std::ldexp(d, 52);
+    int64_t i = (int64_t)d;
+    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-52);
+}
+
+inline intptr_t double_to_floor(double d)
+{   if (!std::isfinite(d) || d==0.0) return int_to_handle(0);
+    int x;
+    d = std::floor(d);
+    d = std::frexp(d, &x);
+    d = std::ldexp(d, 52);
+    int64_t i = (int64_t)d;
+    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-52);
+}
+
+inline intptr_t double_to_ceiling(double d)
+{   if (!std::isfinite(d) || d==0.0) return int_to_handle(0);
+    int x;
+    d == std::ceil(d);
+    d = std::frexp(d, &x);
+    d = std::ldexp(d, 52);
+    int64_t i = (int64_t)d;
+    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-52);
+}
+
+inline double Float::op(int64_t a)
+{   return (double)a;
+}
+
+inline double Float::op(uint64_t *a)
+{   size_t lena = number_size(a);
+    static double two_64 = 65536.0*65526.0*65536.0*65536.0;
+    double d = (double)(int64_t)a[lena-1];
+// Correct rounding is harder than I would like! The issue is that I want
+// IEEE-style rounding such that cases with exactly 0.5 ULP round to even.
+// This means that at least in some cases I will need to look at every
+// single digit of the bignum: consider a case like
+//       {2^53+1, 0, 0, ..., 0, x}
+// where if x=0 the value should round down to 2^53, while any non-zero
+// value for x will force it to round up to 2^53+2.
+// I am not going to implement that careful treatment in this first
+// version of the code
+    if (lena > 1)
+    {   lena--;
+        d = two_64*d + (double)a[lena-1];
+    }
+    return std::ldexp(d, 64*(lena-1));
+}
+
 INLINE_VAR const uint64_t ten19 = UINT64_C(10000000000000000000);
 
 inline intptr_t string_to_bignum(const char *s)
@@ -2523,13 +2678,23 @@ inline size_t bignum_bits(const uint64_t *a, size_t lena)
 {   if (lena == 0 && a[0] == 0) return 1; // say that 0 has 1 bit.
     uint64_t top = a[lena-1];  // top digit.
 // The exact interpretation of "the length in bits of a negative number"
-// is something I need to think through.
+// is something I need to think through. Well Common Lisp counts the
+// number of bits apart from the sign bit, so we have
+//      n      bignum_bits(n)   bignum_bits(-n)
+//      0           0                0
+ //     1           1    1           0 ..11111:
+//      2           2   10           1 ..1111:0
+//      3           2   11           2 ..111:01
+//      4           3  100           2 ..111:00
+//      7           3  111           3 ..11:001
+//      8           4 1000           3 ..11:000
     if (negative(top))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lena; i++)
         {   top = ~a[i] + carry;
             carry = (top < carry ? 1 : 0);
         }
+        top--;
     }
     return 64*(lena-1) + (top==0 ? 0 : 64-nlz(top));
 }
@@ -2884,6 +3049,31 @@ inline char *bignum_to_string_binary(intptr_t aa)
 // Big number comparisons.
 //=========================================================================
 //=========================================================================
+
+
+inline bool Zerop::op(uint64_t *a)
+{   return number_size(a) == 1 && a[0] == 0;
+}
+
+inline bool Zerop::op(int64_t a)
+{   return a == 0;
+}
+
+inline bool Onep::op(uint64_t *a)
+{   return number_size(a) == 1 && a[0] == 1;
+}
+
+inline bool Onep::op(int64_t a)
+{   return a == 1;
+}
+
+inline bool Minusp::op(uint64_t *a)
+{   return number_size(a) == 1 && negative(a[0]);
+}
+
+inline bool Minusp::op(int64_t a)
+{   return a < 1;
+}
 
 // eqn
 
@@ -3473,7 +3663,46 @@ intptr_t Rightshift::op(int64_t a, int32_t n)
 {   return Rightshift::op(a, (int64_t)n);
 }
 
-// Add when the length of a is greater than that of b.
+size_t Integer_length::op(uint64_t *a)
+{   return bignum_bits(a, number_size(a));
+}
+
+size_t Integer_length::op(int64_t aa)
+{   uint64_t a;
+    if (aa == 0 || aa == -1) return 0;
+    else if (aa < 0) a = -(uint64_t)aa - 1;
+    else a = aa;
+    return (size_t)(64-nlz(aa));
+
+}
+
+size_t Logcount::op(uint64_t *a)
+{   size_t lena = number_size(a);
+    size_t r = 0;
+    if (negative(a[lena-1]))
+    {   for (size_t i=0; i<lena; i++) r += popcount(~a[i]);
+    }
+    else for (size_t i=0; i<lena; i++) r += popcount(a[i]);
+    return r;
+}
+
+size_t Logcount::op(int64_t a)
+{   if (a < 0) return (size_t)popcount(~a);
+    else return (size_t)popcount(a);
+}
+
+bool Logbitp::op(uint64_t *a, size_t n)
+{   size_t lena = number_size(a);
+    if (n >= 64*lena) return negative(a[lena-1]);
+    return (a[n/64] & (((uint64_t)1) << (n%64))) != 0;
+}
+
+bool Logbitp::op(int64_t a, size_t n)
+{   if (n >= 64) return (a < 0);
+    else return (a & (((uint64_t)1) << n)) != 0;
+}
+
+// Addition when the length of a is art least than that of b.
 
 inline void ordered_bigplus(const uint64_t *a, size_t lena,
                             const uint64_t *b, size_t lenb,
@@ -3935,6 +4164,51 @@ intptr_t Square::op(int64_t a)
     p[0] = lo;
     p[1] = hi;
     return confirm_size(p, 2, 2);
+}
+
+intptr_t Isqrt::op(uint64_t *a)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Isqrt::op((int64_t)a[0]);
+    size_t lenx = (lena+1)/2;
+    uint64_t *x = reserve(lenx);
+    for (size_t i=0; i<lenx; i++) x[i] = 0;
+    size_t bitstop = a[lena-1]==0 ? 0 : 64 - nlz(a[lena-1]);
+    bitstop /= 2;
+    if ((lena%2) == 0) bitstop += 32;
+    x[lenx-1] = ((uint64_t)1) << bitstop;
+// I now have a first approximation to the square root as a number that is
+// a power of 2 with about half the bit-length of a.
+    for (;;)
+    {
+// I want to go    x = (x + a/x)/2;
+        std::cout << "isqrt not coded yet" << std::endl;
+        break;
+    }
+    return confirm_size(x, lenx, lenx);
+}
+
+intptr_t Isqrt::op(int64_t aa)
+{   if (aa <= 0) return int_to_bignum(0);
+    uint64_t a = (uint64_t)aa;
+    size_t w = 64 - nlz(a);
+    uint64_t x = a >> (w/2);
+// The iteration here converges to sqrt(a) from above, but I believe that
+// when the value stops changing it will be at floor(sqrt(a)).
+    std::cout << "a = " << a << std::endl;
+    std::cout << "x = " << x << std::endl;
+    x = (x + a/x)/2;
+    std::cout << "x = " << x << std::endl;
+    x = (x + a/x)/2;
+    std::cout << "x = " << x << std::endl;
+    x = (x + a/x)/2;
+    std::cout << "x = " << x << std::endl;
+    x = (x + a/x)/2;
+    std::cout << "x = " << x << std::endl;
+    x = (x + a/x)/2;
+    std::cout << "x = " << x << std::endl;
+    x = (x + a/x)/2;
+    std::cout << "x = " << x << std::endl;
+    return int_to_bignum(x);
 }
 
 // This raises a bignum to a positive integer power. If the power is n then
