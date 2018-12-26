@@ -3,7 +3,6 @@
 
 
 // TODO:
-//   gcdn, lcmn
 //   float, floor, ceil, fix
 //   isqrt
 //   bitlength, findfirst-bit, findlast-bit, bit-is-set, bit-is-clear
@@ -1016,6 +1015,22 @@ class Divide
     static intptr_t op(uint64_t *, uint64_t *, intptr_t &);
 };
 
+class Gcd
+{   public:
+    static intptr_t op(int64_t, int64_t);
+    static intptr_t op(int64_t, uint64_t *);
+    static intptr_t op(uint64_t *, int64_t);
+    static intptr_t op(uint64_t *, uint64_t *);
+};
+
+class Lcm
+{   public:
+    static intptr_t op(int64_t, int64_t);
+    static intptr_t op(int64_t, uint64_t *);
+    static intptr_t op(uint64_t *, int64_t);
+    static intptr_t op(uint64_t *, uint64_t *);
+};
+
 class Logand
 {   public:
     static intptr_t op(int64_t, int64_t);
@@ -1456,6 +1471,16 @@ inline Bignum pow(const Bignum &x, int64_t n)
 inline Bignum pow(const Bignum &x, int32_t n)
 {   return pow(x, (int64_t)n);
 }
+
+inline Bignum gcd(const Bignum &x, const Bignum &y)
+{   return Bignum(true, op_dispatch2<Gcd,intptr_t>(x.val, y.val));
+}
+
+inline Bignum lcm(const Bignum &x, const Bignum &y)
+{   return Bignum(true, op_dispatch2<Lcm,intptr_t>(x.val, y.val));
+}
+
+
 
 //=========================================================================
 //=========================================================================
@@ -4517,6 +4542,17 @@ inline void unsigned_long_division(uint64_t *a, size_t &lena,
     else truncate_positive(a, lena);
 }
 
+// Use unsigned_long_division when all that is required is the remainder.
+// Here a>b and b is at least 2 words. The code corrupts b and replaces
+// a with remainder(a, b).
+
+inline void unsigned_long_remainder(uint64_t *a, size_t &lena,
+                                    uint64_t *b, size_t &lenb)
+{   size_t w;
+    unsigned_long_division(a, lena, b, lenb,
+                           false, NULL, w, w);
+}
+
 intptr_t Quotient::op(uint64_t *a, uint64_t *b)
 {   size_t na = number_size(a);
     size_t nb = number_size(b);
@@ -4662,6 +4698,132 @@ intptr_t Divide::op(uint64_t *a, uint64_t *b, intptr_t &rem)
 }
 
 #endif
+
+inline void biggcd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
+                   uint64_t *r, size_t &lenr)
+{
+    my_abort("not implented yet");
+}
+
+intptr_t Gcd::op(uint64_t *a, uint64_t *b)
+{   if (number_size(b) == 1) return Gcd::op(a, (int64_t)b[0]);
+// Here I am going to have an initial implementation that will be crude
+// and much less efficient than would be possible, just so I have something
+// that might work. Specifically I will implement a straightforward
+// Euclidean GCD in a way that may allocate (and release) memory for
+// intermediate results over and over again.
+    intptr_t absa = Abs::op(a);
+    intptr_t absb = Abs::op(b);
+    if (op_dispatch2<Greaterp,bool>(absb, absa))
+    {   intptr_t w = absa;
+        absa = absb;
+        absb = w;
+    }
+// Now absa >= absb
+    while (!stored_as_fixnum(absb) && number_size(vector_of_handle(absb))!=1)
+    {   intptr_t w = op_dispatch2<Remainder,intptr_t>(absa, absb);
+        absa = absb;
+        absb = w;
+    }
+    if (stored_as_fixnum(absa))
+        return Gcd::op(int_of_handle(absa), int_of_handle(absb));
+    else return Gcd::op(vector_of_handle(absa), int_of_handle(absb));
+}
+
+intptr_t Gcd::op(uint64_t *a, int64_t bb)
+{
+// This case involved doing a long-by-short remainder operation and then
+// it reduces to the small-small case. The main problem is the handling of
+// negative inputs.
+    uint64_t b = bb < 0 ? -bb : bb;
+    size_t lena = number_size(a);
+    bool signa = negative(a[lena-1]);
+    uint64_t hi = 0, q;
+    for (size_t i=lena-1;;i--)
+        divide64(hi, (signa ? ~a[i] : a[i]), b, q, hi);
+// Now if a had been positive we have hi=a%b. If a had been negative we
+// have (~a)%b == (-a-1)%b which is about |a|%b -1
+    if (signa) hi = (hi+1)%b;
+    return Gcd::op(b, hi);
+}
+
+intptr_t Gcd::op(int64_t a, uint64_t *b)
+{   return Gcd::op(b, a);
+}
+
+intptr_t Gcd::op(int64_t a, int64_t b)
+{
+// Take absolute values of both arguments.
+    uint64_t aa = a < 0 ? -(uint64_t)a : a;
+    uint64_t bb = b < 0 ? -(uint64_t)b : b;
+// Ensure that aa >= bb
+    if (bb > aa)
+    {   uint64_t cc = aa;
+        aa = bb;
+        bb = cc;
+    }
+// Do simple Euclidean algorithm
+    while (bb != 0)
+    {   uint64_t cc = aa % bb;
+        aa = bb;
+        bb = cc;
+    }
+// A messy case is gcd(-MIX_FIXNUM, MIN_FIXNUM) which yields -MIN_FIXNUM
+// which is liable to be MAX_FIXNUM+1 and so has to be returned as a bignum.
+    return unsigned_int_to_bignum(aa);
+}
+
+intptr_t Lcm::op(uint64_t *a, uint64_t *b)
+{   intptr_t g = Gcd::op(a, b);
+    if (stored_as_fixnum(g))
+    {   int64_t gg = int_of_handle(g);
+        if (gg == 1) return Times::op(a, b);
+        intptr_t q = Quotient::op(b, gg);
+        return Times::op(vector_to_handle(a), q);
+    }
+    else
+    {   intptr_t q = Quotient::op(b, vector_of_handle(g));
+        if (stored_as_fixnum(q)) return Times::op(a, int_of_handle(q));
+        else return Times::op(a, vector_of_handle(q));
+    }
+}
+
+intptr_t Lcm::op(uint64_t *a, int64_t b)
+{   intptr_t g = Gcd::op(a, b);
+// The GCD can be a bignum if b = MIN_FIXNUM.
+    if (stored_as_fixnum(g))
+    {   int64_t gg = int_of_handle(g);
+        if (gg == 1) return Times::op(a, b);
+        intptr_t q = Quotient::op(b, gg);
+        return Times::op(vector_to_handle(a), q);
+    }
+    else
+    {   intptr_t q = Quotient::op(b, vector_of_handle(g));
+        if (stored_as_fixnum(q)) return Times::op(a, int_of_handle(q));
+        else return Times::op(a, vector_of_handle(q));
+    }
+}
+
+intptr_t Lcm::op(int64_t a, uint64_t *b)
+{   return Lcm::op(b, a);
+}
+
+intptr_t Lcm::op(int64_t a, int64_t b)
+{   intptr_t g = Gcd::op(a, b);
+// The GCD can be a bignum if b = MIN_FIXNUM.
+    if (stored_as_fixnum(g))
+    {   int64_t gg = int_of_handle(g);
+        if (gg == 1) return Times::op(a, b);
+        intptr_t q = Quotient::op(b, gg);
+        if (stored_as_fixnum(q)) return Times::op(a, int_of_handle(q));
+        else return Times::op(a, vector_of_handle(q));
+    }
+    else
+    {   intptr_t q = Quotient::op(b, vector_of_handle(g));
+        if (stored_as_fixnum(q)) return Times::op(a, int_of_handle(q));
+        else return Times::op(a, vector_of_handle(q));
+    }
+}
 
 } // end of namespace arith
 
