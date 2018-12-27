@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
         Bignum c3 = a ^ b;
         Bignum c4 = (a&(~b)) | (b&(~a));
         if (c1==c2 && c3==c4) continue;
-        std::cout << "FAILED" << std::hex << std::endl;
+        std::cout << "FAILED on test " << i << std::hex << std::endl;
         std::cout << "a            " << a << std::endl;
         std::cout << "b            " << b << std::endl;
         std::cout << "c1 ~(a&b)    " << c1 << std::endl;
@@ -218,7 +218,7 @@ int main(int argc, char *argv[])
         Bignum w = a & ~(p-1);
         Bignum c4 = (a & ~(p-1))/p;
         if (c1==c2 && c3==c4) continue;
-        std::cout << "FAILED on try " << i << std::hex << std::endl;
+        std::cout << "FAILED on test " << i << std::hex << std::endl;
         std::cout << "a            " << a << std::endl;
         std::cout << "r            " << std::dec << r << std::hex << std::endl;
         std::cout << "divide " << std::dec << w << std::endl;
@@ -268,7 +268,7 @@ int main(int argc, char *argv[])
         Bignum c2 = a*a - b*b;
         Bignum c3 = square(a) - square(b);
         if (c1 == c2 && c2 == c3) continue;
-        std::cout << "Try " << i << std::endl;
+        std::cout << "FAILED on test " << i << std::endl;
         std::cout << "a  = " << a << std::endl;
         std::cout << "b  = " << b << std::endl;
         std::cout << "a+b         = " << a+b << std::endl;
@@ -326,25 +326,32 @@ int main(int argc, char *argv[])
 // invalid in magnitude... so I need to discard those cases too. It is
 // plausible that this means I will discard around 75% of the sets of random
 // numberfs that I initially generate.
-        } while ((quotient ^ remainder ^ divisor) < Bignum(0) ||
-                 abs(remainder) >= abs(divisor)); 
+        } while (((quotient ^ remainder ^ divisor) < Bignum(0)) ||
+                 (abs(remainder) >= abs(divisor))); 
+
+my_assert(divisor != remainder);
+
         Bignum dividend = quotient*divisor + remainder;
         Bignum q1 = dividend / divisor;
-        Bignum r1 = dividend % divisor;
-        if (q1 == quotient && r1 == remainder) continue;
-        std::cout << "FAILED" << std::endl;
+        Bignum r1 = 999999;
+// If the quotient is incorrect I will not compute the remainder.
+        if (q1 == quotient)
+        {   r1 = dividend % divisor;
+            if (r1 == remainder) continue;
+        }
+        std::cout << "FAILED on test " << i << std::endl;
         std::cout << "divisor   " << divisor << std::endl;
         std::cout << "remainder " << remainder << std::endl;
         std::cout << "quotient  " << quotient << std::endl;
         std::cout << "dividend  " << dividend << std::endl;
         std::cout << "q1        " << q1 << std::endl;
         std::cout << "r1        " << r1 << std::endl;
-        display("divisor", divisor);
+        display("dividend ", dividend);
+        display("divisor  ", divisor);
         display("remainder", remainder);
-        display("quotient", quotient);
-        display("dividend", dividend);
-        display("q1", q1);
-        display("r1", r1);
+        display("quotient ", quotient);
+        display("q1       ", q1);
+        display("r1       ", r1);
         std::cout << "Failed " << std::endl;
         return 1;
     }

@@ -1,6 +1,13 @@
 // Big-number arithmetic.                                  A C Norman, 2019
 
 
+// To do:
+//    fix bug in long division
+//    correct rounding in int -> double
+//    implement isqrt bignum and finish off isqrt fixnum
+//    Lehmer-style gcd implementation
+//    Karatsuba-style multiplication when numbers are big enough
+//    review all fixnum and fixnum/bignum cases for optimisation.
 
 /**************************************************************************
  * Copyright (C) 2019, Codemist.                         A C Norman       *
@@ -1196,6 +1203,12 @@ inline char *bignum_to_string_hex(intptr_t aa);
 inline char *bignum_to_string_octal(intptr_t aa);
 inline char *bignum_to_string_binary(intptr_t aa);
 
+class Bignum;
+
+inline void display(const char *label, const uint64_t *a, size_t lena);
+inline void display(const char *label, intptr_t a);
+inline void display(const char *label, const Bignum &a);
+
 
 //=========================================================================
 //=========================================================================
@@ -1341,6 +1354,9 @@ public:
 
     inline bool operator ==(const Bignum &x) const
     {   return op_dispatch2<Eqn,bool>(val, x.val);
+    }
+    inline bool operator !=(const Bignum &x) const
+    {   return !op_dispatch2<Eqn,bool>(val, x.val);
     }
 
     inline bool operator >(const Bignum &x) const
@@ -1514,16 +1530,16 @@ inline Bignum abs(const Bignum &x)
 {   return Bignum(true, op_dispatch1<Abs,intptr_t>(x.val));
 }
 
-inline Bignum zerop(const Bignum &x)
-{   return Bignum(true, op_dispatch1<Zerop,bool>(x.val));
+inline bool zerop(const Bignum &x)
+{   return op_dispatch1<Zerop,bool>(x.val);
 }
 
-inline Bignum onep(const Bignum &x)
-{   return Bignum(true, op_dispatch1<Zerop,bool>(x.val));
+inline bool onep(const Bignum &x)
+{   return op_dispatch1<Onep,bool>(x.val);
 }
 
-inline Bignum minusp(const Bignum &x)
-{   return Bignum(true, op_dispatch1<Zerop,bool>(x.val));
+inline bool minusp(const Bignum &x)
+{   return op_dispatch1<Minusp,bool>(x.val);
 }
 
 inline Bignum pow(const Bignum &x, int64_t n)
@@ -1787,8 +1803,8 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
 
 inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
                      uint64_t &q, uint64_t &r)
-{   UINT128 dividend = pack128(hi, lo);
-    my_assert(divisor != 0);
+{   my_assert(divisor != 0 && hi < divisor);
+    UINT128 dividend = pack128(hi, lo);
     q = dividend / divisor;
     r = dividend % divisor;
 }
@@ -1856,7 +1872,8 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
 
 uint64_t divide64(uint64_t hi, uint64_t low, uint64_t divisor,
                   uint64_t &q, uint64_t &r)
-{   uint64_t u1 = hi;
+{   my_assert(divisor != 0 && hi < divisor);
+    uint64_t u1 = hi;
     uint64_t u0 = lo;
     uint64_t c = divisor;
 // See the Hacker's Delight for commentary about what follows. The associated
@@ -2556,7 +2573,7 @@ inline intptr_t double_to_floor(double d)
 inline intptr_t double_to_ceiling(double d)
 {   if (!std::isfinite(d) || d==0.0) return int_to_handle(0);
     int x;
-    d == std::ceil(d);
+    d = std::ceil(d);
     d = std::frexp(d, &x);
     d = std::ldexp(d, 52);
     int64_t i = (int64_t)d;
@@ -2569,6 +2586,10 @@ inline double Float::op(int64_t a)
 
 inline double Float::op(uint64_t *a)
 {   size_t lena = number_size(a);
+    int64_t top53;
+    int64_t top = (int64_t)a[lena-1];
+    uint64_t next = lena==1 ? 0 : a[lena-2];
+    
     static double two_64 = 65536.0*65526.0*65536.0*65536.0;
     double d = (double)(int64_t)a[lena-1];
 // Correct rounding is harder than I would like! The issue is that I want
@@ -2577,7 +2598,8 @@ inline double Float::op(uint64_t *a)
 // single digit of the bignum: consider a case like
 //       {2^53+1, 0, 0, ..., 0, x}
 // where if x=0 the value should round down to 2^53, while any non-zero
-// value for x will force it to round up to 2^53+2.
+// value for x will force it to round up to 2^53+2. Hmmm do I mean 2^53 or
+// 2^54 here?
 // I am not going to implement that careful treatment in this first
 // version of the code
     if (lena > 1)
@@ -3068,11 +3090,11 @@ inline bool Onep::op(int64_t a)
 }
 
 inline bool Minusp::op(uint64_t *a)
-{   return number_size(a) == 1 && negative(a[0]);
+{   return negative(a[number_size(a)-1]);
 }
 
 inline bool Minusp::op(int64_t a)
-{   return a < 1;
+{   return a < 0;
 }
 
 // eqn
@@ -3107,7 +3129,7 @@ inline bool Eqn::op(int64_t a, int64_t b)
 // greaterp
 
 inline bool biggreaterp(const uint64_t *a, size_t lena,
-                 const uint64_t *b, size_t lenb)
+                        const uint64_t *b, size_t lenb)
 {   uint64_t a0 = a[lena-1], b0 = b[lenb-1];
 // If one of the numbers has more digits than the other then the sign of
 // the longer one gives my the answer.
@@ -3119,14 +3141,14 @@ inline bool biggreaterp(const uint64_t *a, size_t lena,
     if ((int64_t)a0 < (int64_t)b0) return false;
 // Otherwise I need to scan down through digits...
     lena--;
-    for (;;)
+    while (lena != 0)
     {   lena--;
         a0 = a[lena];
         b0 = b[lena];
         if (a0 > b0) return true;
         if (a0 < b0) return false;
-        if (lena == 0) return false;
     }
+    return false;
 }
 
 inline bool Greaterp::op(uint64_t *a, uint64_t *b)
@@ -3153,70 +3175,34 @@ inline bool Greaterp::op(int64_t a, int64_t b)
 
 // geq
 
-inline bool biggeq(const uint64_t *a, size_t lena,
-            const uint64_t *b, size_t lenb)
-{   uint64_t a0 = a[lena-1], b0 = b[lenb-1];
-    if (lena > lenb) return positive(a0);
-    else if (lenb > lena) return negative(b0);
-    if ((int64_t)a0 > (int64_t)b0) return true;
-    if ((int64_t)a0 < (int64_t)b0) return false;
-    lena--;
-    for (;;)
-    {   lena--;
-        a0 = a[lena];
-        b0 = b[lena];
-        if (a0 > b0) return true;
-        if (a0 < b0) return false;
-        if (lena == 0) return true;
-    }
-}
-
 inline bool Geq::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
-    return biggeq(a, na, b, nb);
+{   return !Greaterp::op(b, a);
 }
 
-inline bool Geq::op(uint64_t *a, int64_t bb)
-{   uint64_t b[1] = {(uint64_t)bb};
-    size_t na = number_size(a);
-    return biggeq(a, na, b, 1);
+inline bool Geq::op(uint64_t *a, int64_t b)
+{   return !Greaterp::op(b, a);
 }
 
-inline bool Geq::op(int64_t aa, uint64_t *b)
-{   uint64_t a[1] = {(uint64_t)aa};
-    size_t nb = number_size(b);
-    return biggeq(a, 1, b, nb);
+inline bool Geq::op(int64_t a, uint64_t *b)
+{   return !Greaterp::op(b, a);
 }
 
 inline bool Geq::op(int64_t a, int64_t b)
 {   return a >= b;
 }
 
-
 // lessp
 
-inline bool biglessp(const uint64_t *a, size_t lena,
-              const uint64_t *b, size_t lenb)
-{   return biggreaterp(b, lenb, a, lena);
-}
-
 inline bool Lessp::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
-    return biglessp(a, na, b, nb);
+{   return Greaterp::op(b, a);
 }
 
-inline bool Lessp::op(uint64_t *a, int64_t bb)
-{   uint64_t b[1] = {(uint64_t)bb};
-    size_t na = number_size(a);
-    return biglessp(a, na, b, 1);
+inline bool Lessp::op(uint64_t *a, int64_t b)
+{   return Greaterp::op(b, a);
 }
 
-inline bool Lessp::op(int64_t aa, uint64_t *b)
-{   uint64_t a[1] = {(uint64_t)aa};
-    size_t nb = number_size(b);
-    return biglessp(a, 1, b, nb);
+inline bool Lessp::op(int64_t a, uint64_t *b)
+{   return Greaterp::op(b, a);
 }
 
 inline bool Lessp::op(int64_t a, int64_t b)
@@ -3226,27 +3212,16 @@ inline bool Lessp::op(int64_t a, int64_t b)
 
 // leq
 
-inline bool bigleq(const uint64_t *a, size_t lena,
-            const uint64_t *b, size_t lenb)
-{   return biggeq(b, lenb, a, lena);
-}
-
 inline bool Leq::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
-    return bigleq(a, na, b, nb);
+{   return !Greaterp::op(a, b);
 }
 
-inline bool Leq::op(uint64_t *a, int64_t bb)
-{   uint64_t b[1] = {(uint64_t)bb};
-    size_t na = number_size(a);
-    return bigleq(a, na, b, 1);
+inline bool Leq::op(uint64_t *a, int64_t b)
+{   return !Greaterp::op(a, b);
 }
 
-inline bool Leq::op(int64_t aa, uint64_t *b)
-{   uint64_t a[1] = {(uint64_t)aa};
-    size_t nb = number_size(b);
-    return bigleq(a, 1, b, nb);
+inline bool Leq::op(int64_t a, uint64_t *b)
+{   return !Greaterp::op(a, b);
 }
 
 inline bool Leq::op(int64_t a, int64_t b)
@@ -3320,7 +3295,7 @@ intptr_t Abs::op(uint64_t *a)
 // the fixnum will have had at least one tag bit.
 
 intptr_t Abs::op(int64_t a)
-{   if (a == MIN_FIXNUM) return int_to_bignum(-a);
+{   if (a == MIN_FIXNUM) return unsigned_int_to_bignum(-a);
     else return int_to_handle(a<0 ? -a : a);
 }
 
@@ -3672,7 +3647,7 @@ size_t Integer_length::op(int64_t aa)
     if (aa == 0 || aa == -1) return 0;
     else if (aa < 0) a = -(uint64_t)aa - 1;
     else a = aa;
-    return (size_t)(64-nlz(aa));
+    return (size_t)(64-nlz(a));
 
 }
 
@@ -4380,14 +4355,14 @@ intptr_t Pow::op(int64_t a, int32_t n)
 
 // Divide the bignum a by the b, returning a quotient or a remainder or
 // both. Note that at this stage a may still be negative! The value b is
-// passed in sign and magnitide form as b/b_negative
+// passed in sign and magnitide form as {b, b_negative}
 
-inline void short_division(const uint64_t *a, size_t lena,
-                           uint64_t b, bool b_negative,
-                           bool want_q, uint64_t *&q,
-                           size_t &olenq, size_t &lenq,
-                           bool want_r, uint64_t *&r,
-                           size_t &olenr, size_t &lenr)
+inline void unsigned_short_division(const uint64_t *a, size_t lena,
+                                    uint64_t b, bool b_negative,
+                                    bool want_q, uint64_t *&q,
+                                    size_t &olenq, size_t &lenq,
+                                    bool want_r, uint64_t *&r,
+                                    size_t &olenr, size_t &lenr)
 {   uint64_t hi = 0;
     bool a_negative = false;
     uint64_t *aa;
@@ -4398,6 +4373,9 @@ inline void short_division(const uint64_t *a, size_t lena,
         internal_negate(a, lena, aa);
         a = (const uint64_t *)aa;
     }
+// Now both a and b are positive so I can do the division fairly simply.
+// Allocate space for the quotient if I need that, and then do standard
+// short division.
     size_t i=lena-1;
     if (want_q)
     {   olenq = lena;
@@ -4410,9 +4388,12 @@ inline void short_division(const uint64_t *a, size_t lena,
         if (i == 0) break;
         i--;
     }
+// If the original a had been negative I allocated space to store its
+// absolute value, and I can discard that now.
     if (a_negative) abandon(aa);
     if (want_q)
     {   lenq = lena;
+// The quotient will be negative if divisor and dividend had different signs.
         if (a_negative != b_negative)
         {   internal_negate(q, lenq, q);
             truncate_negative(q, lenq);
@@ -4421,20 +4402,23 @@ inline void short_division(const uint64_t *a, size_t lena,
     }
     if (want_r)
     {
-// The remainder will be strictly smaller then b, and the largest possible
-// value for b is 0xffffffffffffffff. This can still require two words in
-// its representation.
+// The remainder is now present as an unsigned value in hi. The sign it
+// must end up having must match the sign of a (the dividend). Furthermore
+// the remainder will be strictly smaller then b, and the largest possible
+// value for b is 0xffffffffffffffff. The remainder may need to be returned
+// as a 2-digit bignum.
         if (a_negative)
-        {   if (negative(hi))
+        {   hi = -hi;
+            if (positive(hi))
             {   olenr = lenr = 2;
                 r = reserve(olenr);
-                r[0] = -hi;
+                r[0] = hi;
                 r[1] = -1;
             }
             else
             {   olenr = lenr = 1;
                 r = reserve(olenr);
-                r[0] = -hi;
+                r[0] = hi;
             }
         }
         else
@@ -4459,12 +4443,12 @@ inline void signed_short_division(const uint64_t *a, size_t lena,
                                   size_t &olenq, size_t &lenq,
                                   bool want_r, uint64_t *&r,
                                   size_t &olenr, size_t &lenr)
-{   if (b > 0) short_division(a, lena, b, false,
-                              want_q, q, olenq, lenq,
-                              want_r, r, olenr, lenr);
-    else short_division(a, lena, -b, true,
-                        want_q, q, olenq, lenq,
-                        want_r, r, olenr, lenr);
+{   if (b > 0) unsigned_short_division(a, lena, (uint64_t)b, false,
+                                       want_q, q, olenq, lenq,
+                                       want_r, r, olenr, lenr);
+    else unsigned_short_division(a, lena, -(uint64_t)b, true,
+                                 want_q, q, olenq, lenq,
+                                 want_r, r, olenr, lenr);
 }
 
 inline void unsigned_long_division(uint64_t *a, size_t &lena,
@@ -4507,9 +4491,9 @@ inline void division(const uint64_t *a, size_t lena,
 // Next I have b in the range 2^63 to 2^64-1. Such values can be represented
 // in uint64_t. 
     else if (lenb == 2 && b[1]==0)
-    {   short_division(a, lena, b[0], false,
-                       want_q, q, olenq, lenq,
-                       want_r, r, olenr, lenr);
+    {   unsigned_short_division(a, lena, b[0], false,
+                                want_q, q, olenq, lenq,
+                                want_r, r, olenr, lenr);
         return;
     }
 // Now for b in -2^64 to -2^63-1. The 2s complement representetation will be
@@ -4523,11 +4507,15 @@ inline void division(const uint64_t *a, size_t lena,
         if (b[0] == 0)
         {   if (want_q)
             {   lenq = lena;
-                q = reserve(lena);
                 olenq = lena;
-                internal_negate(&a[1], lena-1, q);
-                if (q[lenq-1]==0 && lenq>1 && positive(q[lenq-2])) lenq--;
-                if (q[lenq-1]==allbits && lenq>1 && negative(q[lenq-2])) lenq--;
+                q = reserve(lena);
+// The next line took me some while to arrive at!
+                uint64_t carry = !negative(a[lena-1]) || a[0]==0 ? 1 : 0;
+                for (size_t i=1; i<lena; i++)
+                    carry = add_with_carry(~a[i], carry, q[i-1]);
+                q[lena-1] = negative(a[lena-1]) ? 0 : -(uint64_t)1;
+                truncate_positive(q, lenq);
+                truncate_negative(q, lenq);
             }
             if (want_r)
             {   uint64_t rr = a[0], padr = 0;
@@ -4547,9 +4535,9 @@ inline void division(const uint64_t *a, size_t lena,
             }
             return;
         }
-        short_division(a, lena, -b[0], true,
-                       want_q, q, olenq, lenq,
-                       want_r, r, olenr, lenr);
+        unsigned_short_division(a, lena, -b[0], true,
+                                want_q, q, olenq, lenq,
+                                want_r, r, olenr, lenr);
         return;
     }
 // Now the absolute value of b will be at least 2 digits of 64-bits with the
@@ -4635,7 +4623,7 @@ inline void division(const uint64_t *a, size_t lena,
 // remainder is smaller than the divisor and so it will be a closer fit into
 // bb than r. So copy it into there so that the allocate/abandon and
 // size confirmation code is given less extreme things to cope with.
-    my_assert(lenr<=lenbb);
+    my_assert(lenr<=lenb);
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
@@ -4719,17 +4707,18 @@ inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
     my_assert(b[lenb-1] != 0);
     uint64_t q0, r0;
     if (r[lenr-1] == b[lenb-1])
-    {   q0 = UINT64_C(0xffffffffffffffff);
+    {   q0 = (uint64_t)(-1);
         r0 = r[lenr-2] + b[lenb-1];
+// Here perhaps q0 is still an over-estimate by 1?
     }
-    else divide64(r[lenr-1], r[lenr-2], b[lenb-1], q0, r0);
+    else
+   {   divide64(r[lenr-1], r[lenr-2], b[lenb-1], q0, r0);
 // At this stage q0 may be correct or it may be an over-estimate by 1 or 2,
 // but never any worse than that.
 //
 // The tests on the next lines should detect all case where q0 was in error
 // by 2 and most when it was in error by 1.
-//
-    {   uint64_t hi, lo;
+        uint64_t hi, lo;
         multiply64(q0, b[lenb-2], hi, lo);
         if (hi > r0 ||
             (hi == r0 && lo > r[lenr-3])) q0--;
