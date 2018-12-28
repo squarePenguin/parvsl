@@ -2,7 +2,6 @@
 
 
 // To do:
-//    fix bug in long division
 //    correct rounding in int -> double
 //    implement isqrt bignum and finish off isqrt fixnum
 //    Lehmer-style gcd implementation
@@ -1585,6 +1584,10 @@ inline Bignum ceil_bignum(float d)
 {   return ceil_bignum((double)d);
 }
 
+inline double float_bignum(const Bignum &x)
+{   return op_dispatch1<Float,double>(x.val);
+}
+
 //=========================================================================
 //=========================================================================
 // display() will show the internal representation of a bignum as a
@@ -2581,32 +2584,98 @@ inline intptr_t double_to_ceiling(double d)
 }
 
 inline double Float::op(int64_t a)
-{   return (double)a;
-}
+{
+// The bad news here is that I am not confident that C++ will guarantee
+// to round large integer values in any particular way when it converts
+// them to floating point. So I will take careful action so that the
+// conversions that I do are ones that will be exact, and I will perform
+// rounding in IEEE style myself. I will ASSUME that the output will end up
+// as an IEEE double precision value.
+// First I will see if the value is small enough that I can work directly.
+// In fact I would still be safe with the simple case without the "-1" in
+// the netx line, but that would slightly complicate the code lower down.
+    static const int64_t range = ((int64_t)1)<<53 - 1;
+    if (a >= -range && a <= range) return (double)a;
+// I will now drop down to a sign and magnitude representation
+    bool sign = a < 0;
+    uint64_t aa = sign ? -(uint64_t)a : a;
+// Because aa >= 2^53 the number of leading zeros in its representation is
+// at most 10. Ha ha. That guaranteed that the shift below will not overflow
+// and is why I chose my range as I did. 
+    int lz = nlz(aa);
+    uint64_t low = aa << (lz+53);
+    aa = aa >> (64-53-lz);
+    if (low > 0x8000000000000000U) aa++;
+    else if (low == 0x8000000000000000U) aa += (aa & 1); // round to even
+// The next line should never introduce any rounding at all.
+    double d = (double)aa;
+    d = std::ldexp(d, 64-53-lz);
+    if (sign) return -d;
+    else return d;
+}   
 
 inline double Float::op(uint64_t *a)
 {   size_t lena = number_size(a);
-    int64_t top53;
-    int64_t top = (int64_t)a[lena-1];
-    uint64_t next = lena==1 ? 0 : a[lena-2];
-    
-    static double two_64 = 65536.0*65526.0*65536.0*65536.0;
-    double d = (double)(int64_t)a[lena-1];
-// Correct rounding is harder than I would like! The issue is that I want
-// IEEE-style rounding such that cases with exactly 0.5 ULP round to even.
-// This means that at least in some cases I will need to look at every
-// single digit of the bignum: consider a case like
-//       {2^53+1, 0, 0, ..., 0, x}
-// where if x=0 the value should round down to 2^53, while any non-zero
-// value for x will force it to round up to 2^53+2. Hmmm do I mean 2^53 or
-// 2^54 here?
-// I am not going to implement that careful treatment in this first
-// version of the code
-    if (lena > 1)
-    {   lena--;
-        d = two_64*d + (double)a[lena-1];
+    if (lena == 1) return Float::op((int64_t)a[0]);
+// Now I need to do something similar to that done for the int64_t case
+// but written larger. Specifically I want to split my input number into
+// its top 53 bits and then all the rest. I will take separate paths
+// for the positive and negative cases.
+    uint64_t top53;
+    int lz;
+    bool sign = false;
+    uint64_t top, next;
+    bool carried = true;
+    for (int i=0; i<lena-2; i++)
+    {   if (a[i] != 0)
+        {   carried = false;
+            break;
+        }
     }
-    return std::ldexp(d, 64*(lena-1));
+// Grap tghe top 128 bits of the number as {top,next}.
+    top = a[lena-1];
+    next = a[lena-2];    // lena >= 2 here
+// Take its absolute value.
+    if (negative(a[lena-1]))
+    {   top = ~top;
+        next = ~next;
+        if (carried)
+        {   next++;
+            if (next == 0) top++;
+        }
+    }
+    if (!carried) next |= 1;
+// Now I need to do something very much like the code for the int64_t case.
+    if (top == 0) lz = nlz(next) + 64;
+    else lz = nlz(top);
+//
+//  uint64_t top53 = {top,next} >> (128-53-lz);
+    int sh = 128-53-lz;
+// Note that sh can never be zero here.
+    if (sh < 64) top53 = (next >> sh) | (top << (64-sh));
+    else top53 = top >> (sh-64);
+//
+//  {top,next} = {top,next} << lz+53; // keep only the fraction bits
+    sh = lz+53;
+    if (sh < 64)
+    {   top = (top << sh) | (next >> (64-sh));
+        next = next << sh;
+    }
+    {   top = next << (sh - 64);
+        next = 0;
+    }
+//
+//  if ({top,next} > 0x80000000000000000000000000000000U) top53++;
+//  else if ({top,next} == 0x80000000000000000000000000000000U)
+//      top53 += (top53 & 1);
+    if (top > 0x8000000000000000U) top53++;
+    else if (top == 0x8000000000000000U)
+    {   if (next != 0) top53++;
+        else top53 += (top53&1);
+    }
+    double d = (double)top53;
+    if (sign) d = -d;
+    return std::ldexp(d, 128-53+1-lz+64*(lena-2));
 }
 
 INLINE_VAR const uint64_t ten19 = UINT64_C(10000000000000000000);
@@ -2842,6 +2911,7 @@ inline char *bignum_to_string(const uint64_t *a, size_t lena,
 // digits data, and I have arranged to position everything to (just)
 // avoid overwriting myself.
     uint64_t top = r[p++];
+    if (top == 0) top = r[p++]; // discard potential leading zero!
 // Get a pointer into the buffer as character data...
     char *p1 = (char *)rc;
     size_t len = 0;
