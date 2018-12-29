@@ -3,7 +3,6 @@
 
 // To do:
 //    correct rounding in int -> double
-//    implement isqrt bignum and finish off isqrt fixnum
 //    Lehmer-style gcd implementation
 //    Karatsuba-style multiplication when numbers are big enough
 //    review all fixnum and fixnum/bignum cases for optimisation.
@@ -265,6 +264,46 @@ static inline void my_abort(const char *msg)
 static inline void my_abort()
 {   std::cout << "About to abort" << std::endl;
     abort();
+}
+
+// The C++ rules about shifts are not always very comfortable, in particular
+// right shifts on signed values may or may not propagate the sign bit
+// and a left shift on signed values might cause trouble in overflow cases.
+// So here are versions that should behave consistently across all
+// architectures.
+
+static inline int32_t ASR(int32_t a, int n)
+{   if (n<0 || n>=8*(int)sizeof(int32_t)) n=0;
+    uint32_t r = ((uint32_t)a) >> n;
+    uint32_t signbit = ((uint32_t)a) >> (8*sizeof(uint32_t)-1);
+    if (n != 0) r |= ((-signbit) << (8*sizeof(uint32_t) - n));
+    return (int32_t)r;
+}
+
+static inline int64_t ASR(int64_t a, int n)
+{   if (n<0 || n>=8*(int)sizeof(int64_t)) n=0;
+    uint64_t r = ((uint64_t)a) >> n;
+    uint64_t signbit = ((uint64_t)a) >> (8*sizeof(uint64_t)-1);
+    if (n != 0) r |= ((-signbit) << (8*sizeof(uint64_t) - n));
+    return (int64_t)r;
+}
+
+static inline uint64_t ASR(uint64_t a, int n)
+{   return ASR((int64_t)a, n);
+}
+
+// The behaviour of left shifts on negative (signed) values seems to be
+// labelled as undefined in C/C++, so any time I am going to do a left shift
+// I need to work in an unsigned type.
+
+static inline int32_t ASL(int32_t a, int n)
+{   if (n < 0 || n>=8*(int)sizeof(uint32_t)) n = 0;
+    return (int32_t)(((uint32_t)a) << n);
+}
+
+static inline int64_t ASL(int64_t a, int n)
+{   if (n < 0 || n>=8*(int)sizeof(uint64_t)) n = 0;
+    return (int64_t)(((uint64_t)a) << n);
 }
 
 INLINE_VAR const bool debug_arith = true;
@@ -1076,6 +1115,18 @@ class Minusp
     static bool op(uint64_t *);
 };
 
+class Evenp
+{   public:
+    static bool op(int64_t);
+    static bool op(uint64_t *);
+};
+
+class Oddp
+{   public:
+    static bool op(int64_t);
+    static bool op(uint64_t *);
+};
+
 class Eqn
 {   public:
     static bool op(int64_t, int64_t);
@@ -1539,6 +1590,14 @@ inline bool onep(const Bignum &x)
 
 inline bool minusp(const Bignum &x)
 {   return op_dispatch1<Minusp,bool>(x.val);
+}
+
+inline bool evenp(const Bignum &x)
+{   return op_dispatch1<Evenp,bool>(x.val);
+}
+
+inline bool oddp(const Bignum &x)
+{   return op_dispatch1<Oddp,bool>(x.val);
 }
 
 inline Bignum pow(const Bignum &x, int64_t n)
@@ -2555,12 +2614,14 @@ inline intptr_t unsigned_int_to_bignum(uint64_t n)
 inline intptr_t double_to_bignum(double d)
 {
 // I return 0 if the input is a NaN or either +infinity or -infinity.
+// This is somewhat arbitrary, but right now I am not minded to raise an
+// exception.
     if (!std::isfinite(d) || d==0.0) return int_to_handle(0);
     int x;
     d = std::frexp(d, &x);
-    d = std::ldexp(d, 52);
+    d = std::ldexp(d, 53);
     int64_t i = (int64_t)d;
-    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-52);
+    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-53);
 }
 
 inline intptr_t double_to_floor(double d)
@@ -2568,9 +2629,9 @@ inline intptr_t double_to_floor(double d)
     int x;
     d = std::floor(d);
     d = std::frexp(d, &x);
-    d = std::ldexp(d, 52);
+    d = std::ldexp(d, 53);
     int64_t i = (int64_t)d;
-    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-52);
+    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-53);
 }
 
 inline intptr_t double_to_ceiling(double d)
@@ -2578,9 +2639,9 @@ inline intptr_t double_to_ceiling(double d)
     int x;
     d = std::ceil(d);
     d = std::frexp(d, &x);
-    d = std::ldexp(d, 52);
+    d = std::ldexp(d, 53);
     int64_t i = (int64_t)d;
-    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-52);
+    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-53);
 }
 
 inline double Float::op(int64_t a)
@@ -2632,12 +2693,13 @@ inline double Float::op(uint64_t *a)
             break;
         }
     }
-// Grap tghe top 128 bits of the number as {top,next}.
+// Grap the top 128 bits of the number as {top,next}.
     top = a[lena-1];
     next = a[lena-2];    // lena >= 2 here
 // Take its absolute value.
     if (negative(a[lena-1]))
-    {   top = ~top;
+    {   sign = true;
+        top = ~top;
         next = ~next;
         if (carried)
         {   next++;
@@ -2675,7 +2737,7 @@ inline double Float::op(uint64_t *a)
     }
     double d = (double)top53;
     if (sign) d = -d;
-    return std::ldexp(d, 128-53+1-lz+64*(lena-2));
+    return std::ldexp(d, 128-53-lz+64*(lena-2));
 }
 
 INLINE_VAR const uint64_t ten19 = UINT64_C(10000000000000000000);
@@ -3165,6 +3227,22 @@ inline bool Minusp::op(uint64_t *a)
 
 inline bool Minusp::op(int64_t a)
 {   return a < 0;
+}
+
+inline bool Evenp::op(uint64_t *a)
+{   return (a[number_size(a)-1] & 1) == 0;
+}
+
+inline bool Evenp::op(int64_t a)
+{   return (a & 1) == 0;
+}
+
+inline bool Oddp::op(uint64_t *a)
+{   return (a[number_size(a)-1] & 1) != 0;
+}
+
+inline bool Oddp::op(int64_t a)
+{   return (a & 1) != 0;
 }
 
 // eqn
@@ -3666,8 +3744,7 @@ inline void bigrightshift(const uint64_t *a, size_t lena,
     {   for (size_t i=0; i<lena-words-1; i++)
            r[i] = (a[i+words]>>bits) |
                   (a[i+words+1]<<(64-bits));
-// Next line is does non-portable right shift on signed value.
-        r[lena-words-1] = (uint64_t)((int64_t)a[lena-1]>>bits);
+        r[lena-words-1] = ASR(a[lena-1], bits);
         lenr = lena-words;
     }
     truncate_positive(r, lenr);
@@ -4221,39 +4298,49 @@ intptr_t Isqrt::op(uint64_t *a)
     bitstop /= 2;
     if ((lena%2) == 0) bitstop += 32;
     x[lenx-1] = ((uint64_t)1) << bitstop;
+    if (bitstop == 63) x[lenx-1]--; // ensure it is still positive!
 // I now have a first approximation to the square root as a number that is
-// a power of 2 with about half the bit-length of a.
+// a power of 2 with about half the bit-length of a. I will degenerate into
+// using generic arithmetic here even though that may have extra costs.
+    Bignum biga(true, vector_to_handle(a));
+    Bignum bigx(true, confirm_size(x, lenx, lenx));
+// I will do the first step outside the loop to guarantee that my
+// approximation is an over-estimate before I try the end-test.
+    bigx = (bigx + biga/bigx) >> 1;
     for (;;)
-    {
-// I want to go    x = (x + a/x)/2;
-        std::cout << "isqrt not coded yet" << std::endl;
-        break;
+    {   Bignum y = (bigx + biga/bigx) >> 1;
+        if (y >= bigx) break;
+        bigx = y;
     }
-    return confirm_size(x, lenx, lenx);
+// The Bignum "biga" encapsulated my argument: when its destructor is called
+// I do not want the input vector "a" to be clobbered, so I clobber the
+// bignum first to break the link. Ditto bigx.
+    biga.val = 0;
+    intptr_t r = bigx.val;
+    bigx.val = 0;
+    return r;
 }
 
 intptr_t Isqrt::op(int64_t aa)
 {   if (aa <= 0) return int_to_bignum(0);
     uint64_t a = (uint64_t)aa;
     size_t w = 64 - nlz(a);
-    uint64_t x = a >> (w/2);
+    uint64_t x0 = a >> (w/2);
 // The iteration here converges to sqrt(a) from above, but I believe that
-// when the value stops changing it will be at floor(sqrt(a)).
-    std::cout << "a = " << a << std::endl;
-    std::cout << "x = " << x << std::endl;
-    x = (x + a/x)/2;
-    std::cout << "x = " << x << std::endl;
-    x = (x + a/x)/2;
-    std::cout << "x = " << x << std::endl;
-    x = (x + a/x)/2;
-    std::cout << "x = " << x << std::endl;
-    x = (x + a/x)/2;
-    std::cout << "x = " << x << std::endl;
-    x = (x + a/x)/2;
-    std::cout << "x = " << x << std::endl;
-    x = (x + a/x)/2;
-    std::cout << "x = " << x << std::endl;
-    return int_to_bignum(x);
+// when the value stops changing it will be at floor(sqrt(a)). There are
+// some cases where the sequence ends up alternating between two adjacent
+// values. Because my input is at most 2^63-1 the number of iterations
+// written here will always suffice.
+    uint64_t x1 = (x0 + a/x0)/2;
+    uint64_t x2 = (x1 + a/x1)/2;
+    if (x2 >= x1) return unsigned_int_to_bignum(x1);
+    uint64_t x3 = (x2 + a/x2)/2;
+    if (x3 >= x2) return unsigned_int_to_bignum(x2);
+    uint64_t x4 = (x3 + a/x3)/2;
+    if (x4 >= x3) return unsigned_int_to_bignum(x3);
+    uint64_t x5 = (x4 + a/x4)/2;
+    if (x5 >= x4) return unsigned_int_to_bignum(x4);
+    return unsigned_int_to_bignum(x5);
 }
 
 // This raises a bignum to a positive integer power. If the power is n then

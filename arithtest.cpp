@@ -47,12 +47,13 @@ using namespace arith;
 // The tests come in sections, and these preprocessor symbols can be used
 // to select which sections get run.
 
-//#define TEST_SOME_BASICS 1
-//#define TEST_RANDOM 1
-//#define TEST_BITWISE 1
-//#define TEST_SHIFTS 1
-//#define TEST_PLUS_AND_TIMES 1
+#define TEST_SOME_BASICS 1
+#define TEST_RANDOM 1
+#define TEST_BITWISE 1
+#define TEST_SHIFTS 1
+#define TEST_PLUS_AND_TIMES 1
 #define TEST_DIVISION 1
+#define TEST_ISQRT 1
 
 int main(int argc, char *argv[])
 {
@@ -361,6 +362,40 @@ my_assert(divisor != remainder);
               << timing << " sec" << std::endl;
 
 #endif // TEST_DIVISION
+
+#ifdef TEST_ISQRT
+
+
+    maxbits = 900;
+    ntries = 50*MILLION;
+
+    std::cout << "Start of isqrt testing" << std::endl;
+    c1 = clock();
+
+    for (int i=1; i<=ntries; i++)
+    {   //std::cout << i << "  ";
+        Bignum a, b;
+        a = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 7);
+        b = isqrt(a);
+        if (square(b) <= a && square(b+1) > a) continue;
+        std::cout << "FAILED on test " << i << std::endl;
+        std::cout << "a         " << a << std::endl;
+        std::cout << "b         " << b << std::endl;
+        std::cout << "b^2       " << square(b) << std::endl;
+        std::cout << "(b+1)^2   " << square(b+1) << std::endl;
+        display("a", a);
+        display("b", b);
+        std::cout << "Failed " << std::endl;
+        return 1;
+    }
+
+    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    std::cout << "Isqrt tests completed in "
+              << timing << " sec" << std::endl;
+
+#endif // TEST_ISQRT
 
     std::cout << "About to exit" << std::endl;
     return 0;    
