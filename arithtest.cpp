@@ -54,6 +54,20 @@ using namespace arith;
 #define TEST_PLUS_AND_TIMES 1
 #define TEST_DIVISION 1
 #define TEST_ISQRT 1
+#define TEST_FLOAT
+
+// This function is to test if the least significant bit in the representation
+// of a floating point value is zero. It is used when verifying the correct
+// rounding of cases that fall exactly half way between two representable
+// floating point numbers.
+
+bool evenfloat(double d)
+{   int x;
+    d = std::frexp(d, &x);
+    d = std::ldexp(d, 53);
+    int64_t i = (int64_t)d;
+    return (i&1) == 0;
+}
 
 int main(int argc, char *argv[])
 {
@@ -365,6 +379,9 @@ my_assert(divisor != remainder);
 
 #ifdef TEST_ISQRT
 
+// For various inputs I compute isqrt() and verify that the square of
+// that value is no greater than my original input, while if I add one
+// and square I get something larger.
 
     maxbits = 900;
     ntries = 50*MILLION;
@@ -396,6 +413,68 @@ my_assert(divisor != remainder);
               << timing << " sec" << std::endl;
 
 #endif // TEST_ISQRT
+
+#ifdef TEST_FLOAT
+
+// Te test FLOAT and FIX I will generate a random integer and convery to
+// floating point. I then look at floating point values just larger and
+// just smaller than the one that I obtained, and verify that my result
+// is closer to the original input than the other wto. If there is a tie
+// I will expect my value to have its least significant bit zero.
+
+    maxbits = 500;
+    ntries = 50*MILLION;
+
+    std::cout << "Start of float testing" << std::endl;
+    c1 = clock();
+
+    for (int i=1; i<=ntries; i++)
+    {   //std::cout << i << "  ";
+        Bignum a, b;
+        a = random_upto_bits_bignum(maxbits);
+        uint64_t r = mersenne_twister();
+        a = fudge_distribution_bignum(a, (int)r & 15);
+        double d = float_bignum(a);
+
+        Bignum n = fix_bignum(d);
+        if (a == n) continue; // round trip was exact!
+
+        double dplus = d + 1.0;
+        if (dplus == d) dplus = std::nextafter(d, 1.0e300);
+        double dminus = d - 1.0;
+        if (dminus == d) dminus = std::nextafter(d, -1.0e300);
+        Bignum nplus = fix_bignum(dplus);
+        Bignum nminus = fix_bignum(dminus);
+
+        Bignum err = a-n;
+        Bignum errplus = a-nplus;
+        Bignum errminus = a-nminus;
+        if (abs(err) < abs(errplus) && abs(err) < abs(errminus)) continue;
+        if (abs(err) == abs(errplus) && abs(err) < abs(errminus) && evenfloat(d)) continue;
+        if (abs(err) < abs(errplus) && abs(err) == abs(errminus) && evenfloat(d)) continue;
+      
+        std::cout << "FAILED on test " << i << std::endl;
+        std::cout << "a       " << a << std::endl;
+        std::cout << "d       " << std::setprecision(17) << d << std::endl;
+        std::cout << "d-      " << dminus << std::endl;
+        std::cout << "d+      " << dplus << std::endl;
+        std::cout << "nminus  " << nminus << std::endl;
+        std::cout << "n       " << n << std::endl;
+        std::cout << "nplus   " << nplus << std::endl;
+        std::cout << "err-    " << errminus << std::endl;
+        std::cout << "err     " << err << std::endl;
+        std::cout << "err+    " << errplus << std::endl;
+        display("a", a);
+        display("n", n);
+        std::cout << "Failed " << std::endl;
+        return 1;
+    }
+
+    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    std::cout << "Float tests completed in "
+              << timing << " sec" << std::endl;
+
+#endif // TEST_FLOAT
 
     std::cout << "About to exit" << std::endl;
     return 0;    

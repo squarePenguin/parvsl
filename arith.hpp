@@ -1,8 +1,7 @@
 // Big-number arithmetic.                                  A C Norman, 2019
 
 
-// To do:
-//    correct rounding in int -> double
+// To do: [I believe tah all these are now just optimizations]
 //    Lehmer-style gcd implementation
 //    Karatsuba-style multiplication when numbers are big enough
 //    review all fixnum and fixnum/bignum cases for optimisation.
@@ -2655,21 +2654,24 @@ inline double Float::op(int64_t a)
 // First I will see if the value is small enough that I can work directly.
 // In fact I would still be safe with the simple case without the "-1" in
 // the netx line, but that would slightly complicate the code lower down.
-    static const int64_t range = ((int64_t)1)<<53 - 1;
+    static const int64_t range = (((int64_t)1)<<53) - 1;
     if (a >= -range && a <= range) return (double)a;
 // I will now drop down to a sign and magnitude representation
     bool sign = a < 0;
-    uint64_t aa = sign ? -(uint64_t)a : a;
-// Because aa >= 2^53 the number of leading zeros in its representation is
+    uint64_t top53 = sign ? -(uint64_t)a : a;
+// Because top53 >= 2^53 the number of leading zeros in its representation is
 // at most 10. Ha ha. That guaranteed that the shift below will not overflow
 // and is why I chose my range as I did. 
-    int lz = nlz(aa);
-    uint64_t low = aa << (lz+53);
-    aa = aa >> (64-53-lz);
-    if (low > 0x8000000000000000U) aa++;
-    else if (low == 0x8000000000000000U) aa += (aa & 1); // round to even
+    int lz = nlz(top53);
+    uint64_t low = top53 << (lz+53);
+    top53 = top53 >> (64-53-lz);
+    if (low > 0x8000000000000000U) top53++;
+    else if (low == 0x8000000000000000U) top53 += (top53 & 1); // round to even
+    my_assert(top53 >= ((int64_t)1)<<52 &&
+              top53 <= ((int64_t)1)<<53);
 // The next line should never introduce any rounding at all.
-    double d = (double)aa;
+    double d = (double)top53;
+    my_assert(top53 == (int64_t)d);
     d = std::ldexp(d, 64-53-lz);
     if (sign) return -d;
     else return d;
@@ -2687,7 +2689,7 @@ inline double Float::op(uint64_t *a)
     bool sign = false;
     uint64_t top, next;
     bool carried = true;
-    for (int i=0; i<lena-2; i++)
+    for (size_t i=0; i<lena-2; i++)
     {   if (a[i] != 0)
         {   carried = false;
             break;
@@ -2697,7 +2699,7 @@ inline double Float::op(uint64_t *a)
     top = a[lena-1];
     next = a[lena-2];    // lena >= 2 here
 // Take its absolute value.
-    if (negative(a[lena-1]))
+    if (negative(top))
     {   sign = true;
         top = ~top;
         next = ~next;
@@ -2723,6 +2725,7 @@ inline double Float::op(uint64_t *a)
     {   top = (top << sh) | (next >> (64-sh));
         next = next << sh;
     }
+    else
     {   top = next << (sh - 64);
         next = 0;
     }
@@ -2735,7 +2738,10 @@ inline double Float::op(uint64_t *a)
     {   if (next != 0) top53++;
         else top53 += (top53&1);
     }
+    my_assert(top53 >= ((int64_t)1)<<52 &&
+              top53 <= ((int64_t)1)<<53);
     double d = (double)top53;
+    my_assert(top53 == (int64_t)d);
     if (sign) d = -d;
     return std::ldexp(d, 128-53-lz+64*(lena-2));
 }
