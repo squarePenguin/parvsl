@@ -1931,8 +1931,8 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     lo = u0;
 }
 
-uint64_t divide64(uint64_t hi, uint64_t low, uint64_t divisor,
-                  uint64_t &q, uint64_t &r)
+inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
+                     uint64_t &q, uint64_t &r)
 {   my_assert(divisor != 0 && hi < divisor);
     uint64_t u1 = hi;
     uint64_t u0 = lo;
@@ -2296,19 +2296,36 @@ inline size_t string_size(char *a)
 //
 
 INLINE_VAR std::random_device basic_randomness;
+INLINE_VAR uint64_t thread_local threadid =
+    (uint64_t)(std::hash<std::thread::id>()(std::this_thread::get_id()));
 INLINE_VAR uint64_t seed_component_1 = (uint64_t)basic_randomness();
 INLINE_VAR uint64_t seed_component_2 = (uint64_t)basic_randomness();
 INLINE_VAR uint64_t seed_component_3 = (uint64_t)basic_randomness();
+INLINE_VAR thread_local uint64_t time_now = (uint64_t)time(NULL);
+INLINE_VAR thread_local uint64_t chrono_now = (uint64_t)
+    (std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
 // Observe the thread_local status here.
+// In my first draft of this library I had made the random seed directly
+// from uint64_t values. However when testing on a Raspberry Pi that
+// triggered a messages about bugs in gcc before gcc7 (relating to the
+// alignment of some values passed as arguments in obscure cases). Building
+// the seed sequence using 32-bit values avoids that issue, and since this
+// is only done during initialization it is not time-critical.
+//
 INLINE_VAR thread_local std::seed_seq random_seed{
-    (uint64_t)(std::hash<std::thread::id>()(std::this_thread::get_id())),
-    seed_component_1,
-    seed_component_2,
-    seed_component_3,
-    (uint64_t)time(NULL),
-    (uint64_t)
-      (std::chrono::high_resolution_clock::now().time_since_epoch().count())};
+    (uint32_t)threadid,
+    (uint32_t)seed_component_1,
+    (uint32_t)seed_component_2,
+    (uint32_t)seed_component_3,
+    (uint32_t)time_now,
+    (uint32_t)chrono_now,
+    (uint32_t)(threadid>>32),
+    (uint32_t)(seed_component_1>>32),
+    (uint32_t)(seed_component_2>>32),
+    (uint32_t)(seed_component_3>>32),
+    (uint32_t)(time_now>>32),
+    (uint32_t)(chrono_now>>32)};
 
 INLINE_VAR thread_local std::mt19937_64 mersenne_twister(random_seed);
 // mersenne_twister() now generates 64-bit unsigned integers.
@@ -2671,7 +2688,7 @@ inline double Float::op(int64_t a)
               top53 <= ((int64_t)1)<<53);
 // The next line should never introduce any rounding at all.
     double d = (double)top53;
-    my_assert(top53 == (int64_t)d);
+    my_assert(top53 == (uint64_t)d);
     d = std::ldexp(d, 64-53-lz);
     if (sign) return -d;
     else return d;
@@ -2741,7 +2758,7 @@ inline double Float::op(uint64_t *a)
     my_assert(top53 >= ((int64_t)1)<<52 &&
               top53 <= ((int64_t)1)<<53);
     double d = (double)top53;
-    my_assert(top53 == (int64_t)d);
+    my_assert(top53 == (uint64_t)d);
     if (sign) d = -d;
     return std::ldexp(d, 128-53-lz+64*(lena-2));
 }
