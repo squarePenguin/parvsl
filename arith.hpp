@@ -405,7 +405,8 @@ namespace arith
 inline uint64_t *reserve(size_t n);
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final);
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final);
-inline void abandon(intptr_t *p);
+inline void abandon(uint64_t *p);
+inline void abandon(intptr_t h);
 
 inline char *reserve_string(size_t n);
 inline char *confirm_size_string(char *p, size_t n, size_t final);
@@ -2636,8 +2637,10 @@ inline intptr_t double_to_bignum(double d)
     int x;
     d = std::frexp(d, &x);
     d = std::ldexp(d, 53);
-    int64_t i = (int64_t)d;
-    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-53);
+    intptr_t i = int_to_bignum((int64_t)d);
+    intptr_t r = op_dispatch1<Leftshift,intptr_t>(i, x-53);
+    abandon(i);
+    return r;
 }
 
 inline intptr_t double_to_floor(double d)
@@ -2646,8 +2649,10 @@ inline intptr_t double_to_floor(double d)
     d = std::floor(d);
     d = std::frexp(d, &x);
     d = std::ldexp(d, 53);
-    int64_t i = (int64_t)d;
-    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-53);
+    intptr_t i = int_to_bignum((int64_t)d);
+    intptr_t r = op_dispatch1<Leftshift,intptr_t>(i, x-53);
+    abandon(i);
+    return r;
 }
 
 inline intptr_t double_to_ceiling(double d)
@@ -2656,8 +2661,10 @@ inline intptr_t double_to_ceiling(double d)
     d = std::ceil(d);
     d = std::frexp(d, &x);
     d = std::ldexp(d, 53);
-    int64_t i = (int64_t)d;
-    return op_dispatch1<Leftshift,intptr_t>(int_to_bignum(i), x-53);
+    intptr_t i = int_to_bignum((int64_t)d);
+    intptr_t r = op_dispatch1<Leftshift,intptr_t>(i, x-53);
+    abandon(i);
+    return r;
 }
 
 inline double Float::op(int64_t a)
