@@ -694,35 +694,36 @@ inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
 }
 
 inline intptr_t vector_to_handle(uint64_t *p)
-{   return (intptr_t)p;
+{   return (intptr_t)p + tagATOM;
 }
 
 inline uint64_t *vector_of_handle(intptr_t n)
-{   return (uint64_t *)n;
+{   return (uint64_t *)(n - tagATOM);
 }
 
 inline size_t number_size(uint64_t *p)
-{   size_t r = ((uint32_t *)(&p[-1]))[1];
+{   uintptr_t h = (uintptr_t)p[-1];
+// in VSL veclength() returns the size of the object in bytes but not
+// including its header. So here I just need to convert that to count in
+// units of uint64_t.
+    size_t r = veclength(h)/sizeof(uint64_t);
     my_assert(r>0 && r<1000000);
     return ((uint32_t *)(&p[-1]))[1];
 }
 
 inline bool stored_as_fixnum(intptr_t a)
-{    return ((int)a & 1) != 0;
+{    return isFIXNUM(a);
 }
 
-// I rather hope that a good compiler will implement this as just an
-// arithmetic shift right by 1 bit, and so it is a very cheap operation.
-
 constexpr inline int64_t int_of_handle(intptr_t a)
-{   return ((int64_t)a & ~(int64_t)1)/2;
+{   return qfixnum(a);
 }
 
 // This function should only ever be called in situations where the
 // arithmetic indicated will not overflow.
 
 inline intptr_t int_to_handle(int64_t n)
-{   return (intptr_t)(2*n + 1);
+{   return packfixnum(n);
 }
 
 // The following two lines are slighly delicate4 in that INTPTR_MIN and _MAX
@@ -761,15 +762,259 @@ inline void abandon_string(char *s)
 {   delete s;
 }
 
-// In the NEW case I will want to make all operations cope with both
-// shorter integers (up to 63 bits) stored as the "handle", or genuine
-// big numbers where the handle yields a pointer to a vector of 64-bit
-// words. I do this by having a dispatch scheme that can activate code
-// for each of the mixtures of representations.
-//
+template <class OP,class RES>
+inline RES op_dispatch1(intptr_t a1)
+{   if (stored_as_fixnum(a1)) return OP::op(int_of_handle(a1));
+    else return OP::op(vector_of_handle(a1));
+}
 
-// Dispatch as between mixed bignum and fixnum representations using some
-// template stuff and classes.
+template <class OP,class RES>
+inline RES op_dispatch1(intptr_t a1, int64_t n)
+{   if (stored_as_fixnum(a1)) return OP::op(int_of_handle(a1), n);
+    else return OP::op(vector_of_handle(a1), n);
+}
+
+template <class OP,class RES>
+inline RES op_dispatch1(intptr_t a1, int32_t n)
+{   if (stored_as_fixnum(a1)) return OP::op(int_of_handle(a1), (int64_t)n);
+    else return OP::op(vector_of_handle(a1), (int64_t)n);
+}
+
+template <class OP,class RES>
+inline RES op_dispatch2(intptr_t a1, intptr_t a2)
+{   if (stored_as_fixnum(a1))
+    {   if (stored_as_fixnum(a2))
+            return OP::op(int_of_handle(a1), int_of_handle(a2));
+        else return OP::op(int_of_handle(a1), vector_of_handle(a2));
+    }
+    else
+    {   if (stored_as_fixnum(a2))
+            return OP::op(vector_of_handle(a1), int_of_handle(a2));
+        else return OP::op(vector_of_handle(a1), vector_of_handle(a2));
+    }
+}
+
+inline intptr_t always_copy_bignum(uint64_t *p)
+{   size_t n = ((uint32_t *)(&p[-1]))[1];
+    uint64_t *r = reserve(n);
+    std::memcpy(r, p, n*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+inline intptr_t copy_if_no_garbage_collector(uint64_t *p)
+{   size_t n = number_size(p);
+    uint64_t *r = reserve(n);
+    std::memcpy(r, p, n*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
+{   if (stored_as_fixnum(pp)) return pp;
+    uint64_t *p = vector_of_handle(pp);
+    size_t n = number_size(p);
+    uint64_t *r = reserve(n);
+    std::memcpy(r, p, n*sizeof(uint64_t));
+    return confirm_size(r, n, n);
+}
+
+#elif defined LISP
+
+//=========================================================================
+//=========================================================================
+// The LISP code is for incorporation in VSL.
+// Well I will start with just a copy of the NEW stuff...
+//=========================================================================
+//=========================================================================
+
+
+inline unsigned int log_next_power_of_2(size_t n);
+
+INLINE_VAR uint64_t *freechain_table[64];
+
+class freechains
+{
+public:
+// I keep my freechain table within an object so that the object can
+// be created as the program starts up and particularly so that it will
+// then be deleted on program termination. Its destructor can free all the
+// memory that it is keeping track of.
+    freechains()
+    {   for (size_t i=0; i<64; i++) freechain_table[i] = NULL;
+    }
+    ~freechains()
+    {   for (size_t i=0; i<64; i++)
+        {   uint64_t *f = freechain_table[i];
+            if (debug_arith)
+// Report how many entries there are in the freechain.
+            {   size_t n = 0;
+// To arrange that double-free mistakes are detected I arrange to put -1
+// in the initial word of any deleted block, so that all blocks on the
+// freechains here should show that. I set and test for that in the other
+// bits of code that allocate or release memory.
+                for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[1])
+                {   my_assert(b[0] == -(uint64_t)1);
+                    n++;
+                }
+                if (n != 0)
+                    std::cout << "Freechain " << i << " length: "
+                              << n << std::endl;
+            }
+            while (f != NULL)
+            {   uint64_t w = f[1];
+                delete f;
+                f = (uint64_t *)w;
+            }
+            freechain_table[i] = NULL;
+        }
+    }
+// Finding the number of bits in n is achieved by counting the leading
+// zeros in the representation of n, and on many platforms an intrinsic
+// function will compile this into a single machine code instruction.
+    static uint64_t *allocate(size_t n)
+    {
+// If I am debugging I will always allocate an extra word that will lie
+// just beyond what would have been the end of my block, and I will
+// fill everything with a pattern that might let me spot some cases where
+// I write beyond the proper size of data.
+        int bits = log_next_power_of_2(debug_arith ? n+1 : n);
+        my_assert(n<=(((size_t)1)<<bits) && n>0);
+        uint64_t *r = freechain_table[bits];
+        if (r == NULL)
+        {   r = new uint64_t[((size_t)1)<<bits];
+            my_assert(r != NULL);
+            if (debug_arith)
+            {   std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
+                r[0] = 0;
+            }
+        }
+        else
+        {   freechain_table[bits] = (uint64_t *)r[1];
+            if (debug_arith)
+            {   my_assert(r[0] == -(uint64_t)1);
+                std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
+                r[0] = 0;
+            }
+        }
+// Just the first 32-bits of the header word record the clock capacity.
+// The casts here look (and indeed are) ugly, but when I store data into
+// memory as a 32-bit value that is how I will read it later on, and the
+// messy notation here does not correspond to complicated computation.
+        ((uint32_t *)r)[0] = bits;
+        return r;
+    }
+// When I abandon a memory block I will push it onto a relevant free chain.
+    static void abandon(uint64_t *p)
+    {   my_assert(p[0] != -(uint64_t)1);
+        int bits = ((uint32_t *)p)[0];
+        my_assert(bits>0 && bits<48);
+// Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
+// risking loss of information.
+        if (debug_arith) p[0] = -(uint64_t)1;
+        p[1] = (uint64_t)freechain_table[bits];
+        freechain_table[bits] = p;
+    }
+};
+
+// Set up the object that manages the freechains. At program startup this
+// fills freechain_table with NULL entries, and at the end of execution
+// it frees all the memory blocks mentioned there.
+
+INLINE_VAR freechains fc;
+
+inline uint64_t *reserve(size_t n)
+{   my_assert(n>0 && n<1000000);
+    return &(fc.allocate(n+1))[1];
+}
+
+inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
+{   my_assert(final>0 && n>=final);
+// Verify that the word just beyond where anything should have been
+// stored has not been clobbered.
+    if (debug_arith) my_assert(p[n] == 0xaaaaaaaaaaaaaaaaU);
+    if (final == 1 && fits_into_fixnum((int64_t)p[0]))
+    {   intptr_t r = int_to_handle((int64_t)p[0]);
+        fc.abandon(&p[-1]);
+        return r;
+    }
+// I compare the final size with the capacity and if it is a LOT smaller
+// I allocate a new smaller block and copy the data across.
+// That situation can most plausibly arise when two similar-values big
+// numbers are subtracted.
+    int bits = ((uint32_t *)(&p[-1]))[0]; 
+    size_t capacity = ((size_t)1)<<bits;
+    if (capacity > 4*final)
+    {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
+        memcpy(&w[1], p, final*sizeof(uint64_t));
+        fc.abandon(&p[-1]);
+        p = &w[1];
+    }
+    ((uint32_t *)(&p[-1]))[1] = final;
+    return vector_to_handle(p);
+}
+
+inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
+{   my_assert(final>0 && n>=final);
+    return confirm_size(p, n, final);
+}
+
+inline intptr_t vector_to_handle(uint64_t *p)
+{   return (intptr_t)p + tagATOM;
+}
+
+inline uint64_t *vector_of_handle(intptr_t n)
+{   return (uint64_t *)(n - tagATOM);
+}
+
+inline size_t number_size(uint64_t *p)
+{   uintptr_t h = p[-1];
+    size_t r = veclength(h)/sizeof(uint64_t);
+    my_assert(r>0 && r<1000000);
+    return ((uint32_t *)(&p[-1]))[1];
+}
+
+inline bool stored_as_fixnum(intptr_t a)
+{    return isFIXNUM(a);
+}
+
+constexpr inline int64_t int_of_handle(intptr_t a)
+{   return qfixnum(a);
+}
+
+inline intptr_t int_to_handle(int64_t n)
+{   return packfixnum(n);
+}
+
+INLINE_VAR const int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
+INLINE_VAR const int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
+
+inline bool fits_into_fixnum(int64_t a)
+{   return a>=MIN_FIXNUM && a<=MAX_FIXNUM;
+}
+
+inline void abandon(uint64_t *p)
+{   fc.abandon(&p[-1]);
+}
+
+inline void abandon(intptr_t p)
+{   if (!stored_as_fixnum(p) && p!=0)
+    {   uint64_t *pp = vector_of_handle(p);
+        fc.abandon(&pp[-1]);
+    }
+}
+
+inline char *reserve_string(size_t n)
+{    return new char[n+1];
+}
+
+inline char *confirm_size_string(char *p, size_t n, size_t final)
+{   my_assert(final>0 && (n+9)>final);
+    p[final] = 0;
+    return p;
+}
+
+inline void abandon_string(char *s)
+{   delete s;
+}
 
 template <class OP,class RES>
 inline RES op_dispatch1(intptr_t a1)
@@ -803,12 +1048,8 @@ inline RES op_dispatch2(intptr_t a1, intptr_t a2)
     }
 }
 
-
-
-
-
 inline intptr_t always_copy_bignum(uint64_t *p)
-{   size_t n = ((uint32_t *)(&p[-1]))[1];
+{   size_t n = number_size(p);
     uint64_t *r = reserve(n);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
@@ -830,179 +1071,6 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
     return confirm_size(r, n, n);
 }
 
-#elif defined LISP
-
-//=========================================================================
-//=========================================================================
-// What I have here is a skeletal indication of how data representation
-// and storage allocation might work. I do not have a garbage collector
-// so this is not suitable for serious use!
-// I allocate memory sequentially, so reserving space is very cheap.
-// Discarding the most recently allocated item can be achieved by resetting
-// the allocation pointer. If something other than the most recent item
-// is released and when such an item shrinks I write in a header for a
-// padder item so that the memory can always be parsed in a linear scan.
-//
-// DO NOT EXPECT THIS OPTION TO BE SOMETHING YOU CAN JUST COMPILE AND USE.
-//
-// The code here is a SKETCH to give an idea of what might be done.
-//
-//=========================================================================
-//=========================================================================
-
-INLINE_VAR size_t MEMORY_SIZE = 1000000;
-INLINE_VAR uint64_t memory[MEMORY_SIZE];
-INLINE_VAR size_t fringe = 0;
-
-inline uint64_t *reserve(size_t n)
-{   my_assert(n>0 && n<1000000);
-    uint64_t *r = &memory[fringe+1];
-    fringe += (n + 1);
-    my_assert(fringe <= MEMORY_SIZE);
-}
-
-
-
-
-
-// Lisp Objects will be represeted using intptr_t with the low 3 bits
-// used as a tag. Every object in memory will be 8-byte aligned, so this
-// does not impact on addressability. The numeric codes established here
-// will not match the ones I actually use in wither VSL or CSL, but they
-// suffice for an illustration of the concepts.
-
-INLINE_VAR const intptr_t tagBITS   = 0x7;
-INLINE_VAR const intptr_t tagCONS   = 0x0;
-INLINE_VAR const intptr_t tagFIXNUM = 0x1;
-INLINE_VAR const intptr_t tagBIGNUM = 0x2;
-INLINE_VAR const intptr_t tagSTRING = 0x3;
-INLINE_VAR const intptr_t tagHEADER = 0x4;
-
-// In memory any object tagged as a BIGNUM or a STRING will have a header
-// word at its start. This will have tagHEADER as its low 3 bits. It then
-// has 5 bits that are reserved to give rich information about its type, which
-//in a full system could cover many sorts of vectors and several other numeric
-// types (eg complex numbers).
-
-INLINE_VAR const intptr_t typeBITS   = 0xf8;
-INLINE_VAR const intptr_t typeBIGNUM = 0x08;
-INLINE_VAR const intptr_t typeSTRING = 0x10;
-INLINE_VAR const intptr_t typeFILLER = 0x18;
-
-// The remaining bits of the header word hold the length of the object.
-// Here I will store that measuring in bytes.
-
-inline intptr_t pack_header(intptr_t type, size_t length)
-{
-// Note that the shifting of length is on an unsigned value, and so even if
-// it ends up setting the top bit of the word its value is defined - while
-// if we had a signed type that would count as overflow and undefined. On a
-// 64-bit system this can never happen for achievable lengths, but on a 32
-// bit machine it could rather easily. Adding in the tag and type information
-// only impacts the low 8 bits and so can not overflow regardless of what sort
-// of arithmetic is used.
-    return (intptr_t)(tagHEADER + type + (length<<8));
-}
-
-inline size_t object_length(intptr_t header)
-{
-// Perform the shift on an unsigned value so that the top bit is handled
-// simply.
-    return (size_t)((uintptr_t)header)>>8);
-}
-
-// With this representation a small number can be represented by a
-// intptr_t that has tagFIXNUM in its low 3 bits and all the rest of the
-// bits treated as a signed integer. However the dispatch into the various
-// integer-big and big-bit variants of functions is handled elsewhere and in
-// a rather broader context than just this code (in particular it will need
-// to support floating point, complex and rational numbers as well as just
-// small and large integers) so here I make the basic arithmetic support
-// JUST the bignum case. By making stored_as_fixnum() return false I avoid
-// the code here doing any dispatch, but by having the proper definition of
-// fits_into_fixnum() I arrange that I generate fixnums as output when that
-// is possible.
-
-inline bool stored_as_fixnum(intptr_t a)
-{   return false;
-}
-
-constexpr inline int64_t int_of_handle(intptr_t a)
-{   return ((int64_t)(a & ~tagBITS))/8;
-}
-
-inline intptr_t int_to_handle(int64_t n)
-{   return tagFIXNUM + 8*(uintptr_t)n;
-}
-
-INLINE_VAR const int64_t MIN_FIXNUM = int_of_handle(INTPTR_MIN);
-INLINE_VAR const int64_t MAX_FIXNUM = int_of_handle(INTPTR_MAX);
-
-inline bool fits_into_fixnum(int64_t a)
-{   return a>=MIN_FIXNUM && a<=MAX_FIXNUM;
-}
-
-
-inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>final);
-// If bignum result ends up such that it could be represented as a
-// fixnum I will detect this here.
-    if (final_n == 1)
-    {   fringe =- (n+1);
-        int64_t v = (int64_t)p[0];
-        if (fits_into_fixnum(v)) return int_to_handle(v);
-    }
-    memory_used -= (n - final_n);
-    bignum_header(p) = pack_header(typeBIGNUM, n*sizeof(uint64_t));
-    return vector_to_handle(p);
-}
-
-inline uint64_t *confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>final);
-    my_abort("not implemented yet");
-}
-
-inline void abandon(intptr_t *p)
-{
-}
-
-
-inline char *reserve_string(size_t n)
-{   my_assert(n>0 && n<1000000);
-    my_abort("not implemented yet");
-}
-
-inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   my_assert(final>0 && n>final);
-}
-
-inline void abandon_string(char *s)
-{   my_abort("not implemented yet");
-}
-
-
-inline intptr_t vector_to_handle(uint64_t *p)
-{   my_abort("not implemented yet");
-}
-
-inline uint64_t *vector_of_handle(intptr_t n)
-{   my_abort("not implemented yet");
-}
-
-inline size_t number_size(uint64_t *p)
-{   my_abort("not implemented yet");
-}
-
-uint64_t *always_copy_bignum(uint64_t *p)
-{   size_t n = p[-1];
-    uint64_t *r = reserve(n);
-    std::memcpy(r, p, n*sizeof(uint64_t));
-    return confirm_size(r, n, n);
-}
-
-intptr_t copy_if_no_garbage_collector(intptr_t p)
-{   return p;
-}
 
 #else
 #error Unspecified memory model
@@ -2116,169 +2184,6 @@ inline int read_u3(const uint64_t *v, size_t n, size_t i)
 //=========================================================================
 
 
-    
-#ifdef VSL
-
-// Within Lisp all values are kept using type "LispObject" which involves
-// all values having a tag in their low 3 bits and all non-trivial objects
-// (apart from cons cells) in memory having a header field that contains
-// detailed type information plus the length of the object. The code here
-// maps this representation onto the one needed within the bignum code.
-
-// This version has NOT BEEN TESTED YET and is really a place-holder for
-// when I try to use the code within my Lisp system!
-
-inline size_t number_size(uint64_t *a)
-{   size_t r = veclength(qheader(a))/sizeof(uint64_t);
-    my_assert(r>0 && r<1000000);
-    return veclength(qheader(a))/sizeof(uint64_t);
-}
-
-// Here strings DO NOT have a terminating nul character - their end is
-// indicated by the leader word that preceeds them having a length
-// field in it.
-
-inline size_t string_size(uint64_t * a)
-{   return veclength(qheader(a));
-}
-
-inline intptr_t &car(intptr_t a)
-{   intptr_t w = a & ~(uintptr_t)TAGBITS;
-    return ((intptr_t *)aw)[0];
-]
-
-inline intptr_t &cdr(intptr_t a)
-{   intptr_t w = a & ~(uintptr_t)TAGBITS;
-    return ((intptr_t *)w)[1];
-]
-
-// My representation has a header word that is an intptr_t stored 8 bytes
-// ahead of the start of the data that represents bignum digits. On a 64-bit
-// machine this is thoroughly natural. On a 32-bit machine it will leave a
-// 32-bit gap so that everything end up nicely aligned.
-
-inline intptr_t &bignum_header(uint64_t *a)
-{   return *(intptr_t)((char *)a - sizeof(uint64_t)));
-}
-
-// For strings the data does not need to end up doubleword aligned, and so
-// the string data starts just an intptr_t size along.
-
-inline intptr_t &string_header(uint64_t *a)
-{   return *(intptr_t)((char *)a - sizeof(intptr_t));
-}
-
-INLINE_VAR size_t MEMORY_SIZE = 1000000;
-INLINE_VAR uint64_t memory[MEMORY_SIZE];
-INLINE_VAR size_t memory_used = 0;
-
-inline uint64_t *reserve(size_t n)
-{   uint64_t *r = &memory[memory_used+1];
-    memory_used += (n + 1);
-// No attempt at garbage collection here - I will just allocate
-// bignums linearly in memory until I run out of space. And I do not
-// provide any scheme for the user to release them.
-    my_assert(memory_used <= MEMORY_SIZE);
-}
-
-inline intptr_t cons(intptr_t a, intptr_t b)
-{   intptr_t r = tagCONS + (intptr_t)&memory[memory_used];
-    memory_used += 2;
-    car(r) = a;
-    cdr(r) = b;
-    return r;
-}
-
-// The very most recent item allocated can be discarded by just winding
-// a fringe pointer back.
-
-inline void abandon(uint64_t *p)
-{
-// reserve does basically: r = memory + 8*(memory_used+1) when thinking
-// in bytes and machine addresses. So I can undo that by going something like
-//         memory_used = (p-memory)/8-1
-    memory_used = ((char *)p - (char *)memory)/sizeof(uint64_t) - 1;
-}
-
-inline LispObject confirm_size(uint64_t *p, size_t n, size_t final_n)
-{   my_assert(final_n>0 && final_n<=n,
-       [&]{ std::cout << final_n << " " << n << std::endl; });
-#ifdef SUPPORT_FIXNUMS
-// WHile doing some initial testing I will represent ALL integers as
-// bignums, but for real use within the Lisp I will have a cheaper way
-// of representing small values.
-    if (final_n == 1)
-    {   memory_used =- (n+1);
-        int64_t v = (int64_t)p[0];
-        if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
-            return packfixnum(v);
-    }
-#endif
-    memory_used -= (n - final_n);
-    bignum_header(p) = tagHDR + typeBIGNUM + packlength(n*sizeof(uint64_t));
-    return (LispObject)&bignum_header(p) + tagATOM;
-}
-
-inline LispObject confirm_size_x(uint64_t *p, size_t n, size_t final_n)
-{   my_assert(final_n>0 && final_n<=n,
-       [&]{ std::cout << final_n << " " << n << std::endl; });
-#ifdef SUPPORT_FIXNUMS
-    if (final_n == 1)
-    {   p[-1] = tagHDR + typeGAP + packlength(n*sizeof(uint64_t));
-        int64_t v = (int64_t)p[0];
-        if (v >= SMALLEST_FIXNUM && v <= LARGEST_FIXNUM)
-            return packfixnum(v);
-    }
-#endif
-    bignum_header(p) = tagHDR + typeBIGNUM + packlength(final_n*sizeof(uint64_t));
-// I insert an item with typeGAP as a filler...
-    p[final_n] = tagHDR + typeGAP + packlength((n-final_n)*sizeof(uint64_t));
-    return (LispObject)&bignum_header(p) + tagATOM;
-}
-
-inline LispObject confirm_size_string(uint64_t *p, size_t n, size_t final_n)
-{   my_assert(final_n>0 && final_n<=n*sizeof(uint64_t),
-       [&]{ std::cout << "confirm_size_string " << final_n << " " << n << std::endl; });
-// The array (p), whose size (n) is expressed in 64-bit chunks, was allocated
-// and laid out as for a bignum. That means it has a header in memory just
-// ahead of it. Both p and the address of the header were kept 8-byte aligned.
-// The size of the header is sizeof(uintptr_t). That means that on a 32-bit
-// platform there is an unused 4-byte gap.
-// When the data is to be arranged as a string there is no longer any need
-// for the string data to remain 8-byte aligned, and so the gap can be
-// filled by shuffling data down. This then lets me reduce the final size
-// a little (typically by 4 bytes bytes on a 32-bit machine).
-    if (sizeof(uint64_t) != sizeof(intptr_t))
-    {   char *p1 = (char *)&p[-1];
-        std::memmove(p1+sizeof(uintptr_t), p, final_n);
-        final_n -= (sizeof(uint64_t) - sizeof(intptr_t));
-    }
-// In my Lisp world I allocate memory in units of 8 bytes and when a string
-// does not completely fill the final unit I like to pad with NULs. Doing so
-// makes it possible to compare strings by doing word-at-a-time operations
-// rather than byte-at-a-time and similarly compute hash values fast. And
-// because I am using byte access here that should not lead to strict aliasing
-// worried when I then access the data using wider data types. I think!
-    size_t n1 = final_n;
-    while ((n1%8) != 0) (char *)p[n1++] = 0;
-    memory_used -= (n - n1/sizeof(uint64_t));
-// The next two lines may look as if they should use string_header, but
-// in fact they are still needing to recognize that p had been a pointer
-// into a bignum not a string!
-    bignum_header(p) = tagHDR + typeSTRING + packlength(final_n);
-    return (LispObject)&bignum_header(p) + tagATOM;
-}
-
-inline void abandon(uint64_t * p)
-{
-}
-
-inline void free_string(char *p)
-{
-}
-
-#else // VSL
-
 // For a free-standing bignum application (including my test code for the
 // stuff here, bignums are represented as blocks of memory (allocated using
 // malloc) where the pointer that is used points to the start of the
@@ -2290,9 +2195,6 @@ inline void free_string(char *p)
 inline size_t string_size(char *a)
 {   return strlen(a);
 }
-
-#endif // VSL
-
 
 
 //=========================================================================
@@ -5127,6 +5029,13 @@ intptr_t Remainder::op(int64_t a, int64_t b)
 // as a function that delivers the quotient as its result and saves
 // the remainder via an additional argument.
 
+}
+
+static inline LispObject cons(LispObject a, LispObject b);
+
+namespace arith
+{
+
 intptr_t Divide::op(uint64_t *a, uint64_t *b)
 {   size_t lena = number_size(a);
     size_t lenb = number_size(b);
@@ -5140,12 +5049,12 @@ intptr_t Divide::op(uint64_t *a, uint64_t *b)
     return cons(qq, rr);
 }
 
-intptr_t Divide::op(uint64_t *a, int64_t b)
+intptr_t Divide::op(uint64_t *a, int64_t bb)
 {   size_t lena = number_size(a);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    uint64_t bb[1] = {(uint64_t)b};
-    division(a, lena, bb, 1,
+    uint64_t b[1] = {(uint64_t)bb};
+    division(a, lena, b, 1,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -5153,11 +5062,12 @@ intptr_t Divide::op(uint64_t *a, int64_t b)
     return cons(qq, rr);
 }
 
-intptr_t Divide::op(int64_t a, uint64_t *b)
+intptr_t Divide::op(int64_t aa, uint64_t *b)
 {   size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, lena, b, lenb,
+    uint64_t a[1] = {(uint64_t)aa};
+    division(a, 1, b, lenb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -5165,12 +5075,12 @@ intptr_t Divide::op(int64_t a, uint64_t *b)
     return cons(qq, rr);
 }
 
-intptr_t Divide::op(int64_t a, int64_t b)
-{   size_t lena = number_size(a);
-    size_t lenb = number_size(b);
-    uint64_t *q, *r;
+intptr_t Divide::op(int64_t aa, int64_t bb)
+{   uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, lena, b, lenb,
+    uint64_t a[1] = {(uint64_t)aa};
+    uint64_t b[1] = {(uint64_t)bb};
+    division(a, 1, b, 1,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);

@@ -1,7 +1,17 @@
 # Makefile for vsl
 
-CFLAGS = -Og -g -Wall
-FASTCFLAGS = -O3 -Wall
+# I switch off the colouring of disgnostics bacause when that is
+# enabled it makes a mess if I capture them in a log file and try to
+# view messages with an editor that does not honour the various escape
+# codes. I limit the number of messages I get to 5 so that I di not
+# end up with page after page of messages. Many current C++ compilers
+# support C++11 by default, but some do not so I force that issue.
+
+CFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -Og -g -Wall
+FASTCFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O3 -Wall
+
+# The issue of just which libraries I need to link in seems to be
+# platform-specific so here are some particular cases...
 
 ifeq ($(shell uname),Darwin)
 LIBS=-lm -lz -ledit -lncurses -ltermcap
@@ -15,30 +25,49 @@ endif
 
 all:	vsl vsl.img
 
+# This first is the VSL Lisp system more or less in its original form.
+# A sequential-only Lisp coded to be compact rather than fast.
+
 vsl:	vsl.cpp
-	g++ -fno-diagnostics-color $(CFLAGS) \
+	g++ $(CFLAGS) \
 		vsl.cpp $(LIBS) -o vsl \
 		2>&1 | tee vsl.log
 
-bvsl:	vsl.cpp
-	g++ -fno-diagnostics-color -DBIGNUM=1 $(CFLAGS) \
-		vsl.cpp $(LIBS) -o bvsl \
-		2>&1 | tee bvsl.log
+# "fastvsl" is "vsl" but compiled for speed rather than with debugging options
 
 fastvsl:	vsl.cpp
-	g++ -fno-diagnostics-color $(FASTCFLAGS) \
+	g++ $(FASTCFLAGS) \
 		vsl.cpp $(LIBS) -o fastvsl \
 		2>&1 | tee fastvsl.log
 
+# vsl-arith and fastvsl-arith will be VSL but with arbitrary precision
+# integer arithmetic implemented in C++.
+
+vsl-arith:	vsl-arith.cpp vsl-arith.hpp
+	g++ $(CFLAGS) -DBIGNUM=1 \
+		vsl-arith.cpp $(LIBS) -o vsl-arith \
+		2>&1 | tee vsl-arith.log
+
+fastvsl-arith:	vsl-arith.cpp vsl-arith.hpp
+	g++ $(FASTCFLAGS) -DBIGNUM=1 \
+		vsl-arith.cpp $(LIBS) -o fastvsl-arith \
+		2>&1 | tee fastvsl-arith.log
+
+# parvsl and fastparvsl represent the version of the code that will
+# support threads and concurrency.
+
 parvsl:    parvsl.cpp common.hpp thread_data.hpp
-	g++ -fno-diagnostics-color -pthread $(CFLAGS) \
+	g++ $(CFLAGS) -pthread \
 		parvsl.cpp $(LIBS) -o parvsl \
 		2>&1 | tee parvsl.log
 
 fastparvsl:    parvsl.cpp common.hpp thread_data.hpp
-	g++ -fno-diagnostics-color -pthread $(FASTCFLAGS) \
+	g++ $(FASTCFLAGS) -pthread \
 		parvsl.cpp $(LIBS) -o fastparvsl \
 		2>&1 | tee fastparvsl.log
+
+# For each version of the main vsl binary there is a corresponding image
+# file that turns the kernal system into a tolerably full-featured Lisp.
 
 vsl.img:	vsl library.lsp vsl.lsp
 	time ./vsl -z library.lsp | tee vsl.img.log
@@ -46,11 +75,20 @@ vsl.img:	vsl library.lsp vsl.lsp
 fastvsl.img:	fastvsl library.lsp vsl.lsp
 	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
+val-arith.img:	val-arith library.lsp val-arith.lsp
+	time ./val-arith -z library.lsp | tee val-arith.img.log
+
+fastval-arith.img:	fastval-arith library.lsp val-arith.lsp
+	time ./fastval-arith -z library.lsp | tee fastval-arith.img.log
+
 parvsl.img:	parvsl library.lsp vsl.lsp
 	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
 
 fastparvsl.img:	fastparvsl library.lsp vsl.lsp
 		time ./fastparvsl -z parlibrary.lsp | tee fastparvsl.img.log
+
+# In much the way that vsl.img (and friends) is a Lisp built on top of
+# the VSL kernel, reduce[.img] is the Reduce algebra system.
 
 reduce:	vsl
 	mkdir -p reduce.img.modules
@@ -88,8 +126,9 @@ debug_reduce:	vsl
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
 
-# rcore is a core of Reduce and I can get this far with a 64M heap
-# without triggering a disaster...
+# rcore is a core of Reduce. Building it will be a LOT cheaper than
+# building the full copy of Reduce, so this will be good for testing an
+# much evaluation.
 
 rcore:	vsl
 	mkdir -p rcore.img.modules
@@ -119,6 +158,11 @@ fastparrcore:	fastparvsl
 		-Dnoinlines=t \
 		buildrcore.lsp | tee fastparrcore.log
 
+# The target "step2" at one stage activated a script that started from
+# rcore and compiled additional parts of Reduce to bring it up to the
+# full system. It has not been reviewed or tested recently and is liable
+# to need review before further use!
+
 step2:	vsl
 	cp rcore.img step2.img
 	cp -r rcore.img.modules step2.img.modules
@@ -126,18 +170,29 @@ step2:	vsl
 		-Dnoinlines=t \
 		step2.red | tee step2.log
 
+# "arithtest" tests the C++ bignum arithmetic code.
+
 arithtest:	arithtest.cpp arith.hpp
-	g++ -Wall -O0 -g -DTEST=1 arithtest.cpp -o arithtest
+	g++ $(FASTCFLAGS) arithtest.cpp -o arithtest
+
+# Once Reduce is built it becomes possible to try its various test
+# scripts. The shell script "test.sh" does the work, and leaves its
+# results in the testlogs directory.
 
 testlogs/%.log:
 	time ./test.sh $@
+
+# "make clean" does some tidying up. 
 
 clean:
 	rm -rf vsl *.exe *.log *.bak reduce.img* vsl.img* *.o *~ \
 		*.ind *.idx *.aux *.ilg *.toc *.xref *.bbl *.blg \
 		testlogs/*
 
+# The original VSL had some (pretence at) documentation, and this target
+# arranges to build that.
 
 docs:   
 	cd docs && $(MAKE)
 
+# end of Makefile
