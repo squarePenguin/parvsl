@@ -1,9 +1,11 @@
 // Big-number arithmetic.                                  A C Norman, 2019
 
 
-// To do: [I believe tah all these are now just optimizations]
-//    Lehmer-style gcd implementation
-//    Karatsuba-style multiplication when numbers are big enough
+// To do:
+//    Bug-checking on various platforms.
+//    [I believe that all the following are just optimizations]
+//    Lehmer-style gcd implementation.
+//    Karatsuba-style multiplication when numbers are big enough.
 //    review all fixnum and fixnum/bignum cases for optimisation.
 
 /**************************************************************************
@@ -265,46 +267,6 @@ static inline void my_abort()
     abort();
 }
 
-// The C++ rules about shifts are not always very comfortable, in particular
-// right shifts on signed values may or may not propagate the sign bit
-// and a left shift on signed values might cause trouble in overflow cases.
-// So here are versions that should behave consistently across all
-// architectures.
-
-static inline int32_t ASR(int32_t a, int n)
-{   if (n<0 || n>=8*(int)sizeof(int32_t)) n=0;
-    uint32_t r = ((uint32_t)a) >> n;
-    uint32_t signbit = ((uint32_t)a) >> (8*sizeof(uint32_t)-1);
-    if (n != 0) r |= ((-signbit) << (8*sizeof(uint32_t) - n));
-    return (int32_t)r;
-}
-
-static inline int64_t ASR(int64_t a, int n)
-{   if (n<0 || n>=8*(int)sizeof(int64_t)) n=0;
-    uint64_t r = ((uint64_t)a) >> n;
-    uint64_t signbit = ((uint64_t)a) >> (8*sizeof(uint64_t)-1);
-    if (n != 0) r |= ((-signbit) << (8*sizeof(uint64_t) - n));
-    return (int64_t)r;
-}
-
-static inline uint64_t ASR(uint64_t a, int n)
-{   return ASR((int64_t)a, n);
-}
-
-// The behaviour of left shifts on negative (signed) values seems to be
-// labelled as undefined in C/C++, so any time I am going to do a left shift
-// I need to work in an unsigned type.
-
-static inline int32_t ASL(int32_t a, int n)
-{   if (n < 0 || n>=8*(int)sizeof(uint32_t)) n = 0;
-    return (int32_t)(((uint32_t)a) << n);
-}
-
-static inline int64_t ASL(int64_t a, int n)
-{   if (n < 0 || n>=8*(int)sizeof(uint64_t)) n = 0;
-    return (int64_t)(((uint64_t)a) << n);
-}
-
 INLINE_VAR const bool debug_arith = true;
 
 template <typename F>
@@ -345,6 +307,46 @@ static inline void logprintf(const char *fmt, ...)
     std::vfprintf(logfile, fmt, args);
     va_end(args);
     std::fflush(logfile);
+}
+
+// The C++ rules about shifts are not always very comfortable, in particular
+// right shifts on signed values may or may not propagate the sign bit
+// and a left shift on signed values might cause trouble in overflow cases.
+// So here are versions that should behave consistently across all
+// architectures.
+
+static inline int32_t ASR(int32_t a, int n)
+{   if (n<0 || n>=8*(int)sizeof(int32_t)) n=0;
+    uint32_t r = ((uint32_t)a) >> n;
+    uint32_t signbit = ((uint32_t)a) >> (8*sizeof(uint32_t)-1);
+    if (n != 0) r |= ((-signbit) << (8*sizeof(uint32_t) - n));
+    return (int32_t)r;
+}
+
+static inline int64_t ASR(int64_t a, int n)
+{   if (n<0 || n>=8*(int)sizeof(int64_t)) n=0;
+    uint64_t r = ((uint64_t)a) >> n;
+    uint64_t signbit = ((uint64_t)a) >> (8*sizeof(uint64_t)-1);
+    if (n != 0) r |= ((-signbit) << (8*sizeof(uint64_t) - n));
+    return (int64_t)r;
+}
+
+static inline uint64_t ASR(uint64_t a, int n)
+{   return ASR((int64_t)a, n);
+}
+
+// The behaviour of left shifts on negative (signed) values seems to be
+// labelled as undefined in C/C++, so any time I am going to do a left shift
+// I need to work in an unsigned type.
+
+static inline int32_t ASL(int32_t a, int n)
+{   if (n < 0 || n>=8*(int)sizeof(uint32_t)) n = 0;
+    return (int32_t)(((uint32_t)a) << n);
+}
+
+static inline int64_t ASL(int64_t a, int n)
+{   if (n < 0 || n>=8*(int)sizeof(uint64_t)) n = 0;
+    return (int64_t)(((uint64_t)a) << n);
 }
 
 //=========================================================================
@@ -548,7 +550,7 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 //=========================================================================
 //=========================================================================
 // The NEW code is intended to be a reasonably sensible implementation for
-// use of thie code free-standing within C++. Memory is allocated in units
+// use of this code free-standing within C++. Memory is allocated in units
 // whose size is a power of 2, and I keep track of memory that I have used
 // and discarded so that I do not need to go back to the system-provided
 // allocator too often.
@@ -563,7 +565,8 @@ INLINE_VAR uint64_t *freechain_table[64];
 // The intent is that for most purposes freechains.allocate() and
 // freechains.abandon() behave rather like malloc, save that they REQUIRE
 // the user of the memory that is returned to avoid overwriting the first
-// 32 bits of the block.
+// 32 bit word of the block. Note that this is a 32-bit chunk even on
+// 64-bit machines.
 
 class freechains
 {
@@ -581,13 +584,20 @@ public:
             if (debug_arith)
 // Report how many entries there are in the freechain.
             {   size_t n = 0;
-                for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[0]) n++;
+// To arrange that double-free mistakes are detected I arrange to put -1
+// in the initial word of any deleted block, so that all blocks on the
+// freechains here should show that. I set and test for that in the other
+// bits of code that allocate or release memory.
+                for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[1])
+                {   my_assert(b[0] == -(uint64_t)1);
+                    n++;
+                }
                 if (n != 0)
                     std::cout << "Freechain " << i << " length: "
                               << n << std::endl;
             }
             while (f != NULL)
-            {   uint64_t w = f[0];
+            {   uint64_t w = f[1];
                 delete f;
                 f = (uint64_t *)w;
             }
@@ -598,14 +608,30 @@ public:
 // zeros in the representation of n, and on many platforms an intrinsic
 // function will compile this into a single machine code instruction.
     static uint64_t *allocate(size_t n)
-    {   int bits = log_next_power_of_2(n);
-        my_assert(n<=(((size_t)1)<<bits));
+    {
+// If I am debugging I will always allocate an extra word that will lie
+// just beyond what would have been the end of my block, and I will
+// fill everything with a pattern that might let me spot some cases where
+// I write beyond the proper size of data.
+        int bits = log_next_power_of_2(debug_arith ? n+1 : n);
+        my_assert(n<=(((size_t)1)<<bits) && n>0);
         uint64_t *r = freechain_table[bits];
         if (r == NULL)
         {   r = new uint64_t[((size_t)1)<<bits];
             my_assert(r != NULL);
+            if (debug_arith)
+            {   std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
+                r[0] = 0;
+            }
         }
-        else freechain_table[bits] = (uint64_t *)r[0];
+        else
+        {   freechain_table[bits] = (uint64_t *)r[1];
+            if (debug_arith)
+            {   my_assert(r[0] == -(uint64_t)1);
+                std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
+                r[0] = 0;
+            }
+        }
 // Just the first 32-bits of the header word record the clock capacity.
 // The casts here look (and indeed are) ugly, but when I store data into
 // memory as a 32-bit value that is how I will read it later on, and the
@@ -615,11 +641,13 @@ public:
     }
 // When I abandon a memory block I will push it onto a relevant free chain.
     static void abandon(uint64_t *p)
-    {   int bits = ((uint32_t *)p)[0];
+    {   my_assert(p[0] != -(uint64_t)1);
+        int bits = ((uint32_t *)p)[0];
         my_assert(bits>0 && bits<48);
 // Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
 // risking loss of information.
-        p[0] = (uint64_t)freechain_table[bits];
+        if (debug_arith) p[0] = -(uint64_t)1;
+        p[1] = (uint64_t)freechain_table[bits];
         freechain_table[bits] = p;
     }
 };
@@ -637,6 +665,9 @@ inline uint64_t *reserve(size_t n)
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 {   my_assert(final>0 && n>=final);
+// Verify that the word just beyond where anything should have been
+// stored has not been clobbered.
+    if (debug_arith) my_assert(p[n] == 0xaaaaaaaaaaaaaaaaU);
     if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
         fc.abandon(&p[-1]);
@@ -3285,19 +3316,19 @@ inline bool bigeqn(const uint64_t *a, size_t lena,
 
 
 inline bool Eqn::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
-    return bigeqn(a, na, b, nb);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
+    return bigeqn(a, lena, b, lenb);
 }
 
 inline bool Eqn::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
-    return na==1 && (int64_t)a[0]==b;
+{   size_t lena = number_size(a);
+    return lena==1 && (int64_t)a[0]==b;
 }
 
 inline bool Eqn::op(int64_t a, uint64_t *b)
-{   size_t nb = number_size(b);
-    return nb==1 && a==(int64_t)b[0];
+{   size_t lenb = number_size(b);
+    return lenb==1 && a==(int64_t)b[0];
 }
 
 inline bool Eqn::op(int64_t a, int64_t b)
@@ -3330,21 +3361,21 @@ inline bool biggreaterp(const uint64_t *a, size_t lena,
 }
 
 inline bool Greaterp::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
-    return biggreaterp(a, na, b, nb);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
+    return biggreaterp(a, lena, b, lenb);
 }
 
 inline bool Greaterp::op(uint64_t *a, int64_t bb)
 {   uint64_t b[1] = {(uint64_t)bb};
-    size_t na = number_size(a);
-    return biggreaterp(a, na, b, 1);
+    size_t lena = number_size(a);
+    return biggreaterp(a, lena, b, 1);
 }
 
 inline bool Greaterp::op(int64_t aa, uint64_t *b)
 {   uint64_t a[1] = {(uint64_t)aa};
-    size_t nb = number_size(b);
-    return biggreaterp(a, 1, b, nb);
+    size_t lenb = number_size(b);
+    return biggreaterp(a, 1, b, lenb);
 }
 
 inline bool Greaterp::op(int64_t a, int64_t b)
@@ -3521,14 +3552,14 @@ inline void biglogand(const uint64_t *a, size_t lena,
 }
 
 intptr_t Logand::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     size_t n;
-    if (na >= nb) n = na;
-    else n = nb;
+    if (lena >= lenb) n = lena;
+    else n = lenb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    biglogand(a, na, b, nb, p, final_n);
+    biglogand(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -3536,21 +3567,21 @@ intptr_t Logand::op(uint64_t *a, uint64_t *b)
 // is guaranteed to end up a fixnum spo can be done more slickly.
 
 intptr_t Logand::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
-    uint64_t *p = reserve(na);
+{   size_t lena = number_size(a);
+    uint64_t *p = reserve(lena);
     size_t final_n;
     uint64_t bb[1] = {(uint64_t)b};
-    biglogand(a, na, bb, 1, p, final_n);
-    return confirm_size(p, na, final_n);
+    biglogand(a, lena, bb, 1, p, final_n);
+    return confirm_size(p, lena, final_n);
 }
 
 intptr_t Logand::op(int64_t a, uint64_t *b)
-{   size_t nb = number_size(b);
-    uint64_t *p = reserve(nb);
+{   size_t lenb = number_size(b);
+    uint64_t *p = reserve(lenb);
     size_t final_n;
     uint64_t aa[1] = {(uint64_t)a};
-    biglogand(aa, 1, b, nb, p, final_n);
-    return confirm_size(p, nb, final_n);
+    biglogand(aa, 1, b, lenb, p, final_n);
+    return confirm_size(p, lenb, final_n);
 }
 
 intptr_t Logand::op(int64_t a, int64_t b)
@@ -3580,33 +3611,33 @@ inline void biglogor(const uint64_t *a, size_t lena,
 }
 
 intptr_t Logor::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     size_t n;
-    if (na >= nb) n = na;
-    else n = nb;
+    if (lena >= lenb) n = lena;
+    else n = lenb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    biglogor(a, na, b, nb, p, final_n);
+    biglogor(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
 intptr_t Logor::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
-    uint64_t *p = reserve(na);
+{   size_t lena = number_size(a);
+    uint64_t *p = reserve(lena);
     size_t final_n;
     uint64_t bb[1] = {(uint64_t)b};
-    biglogor(a, na, bb, 1, p, final_n);
-    return confirm_size(p, na, final_n);
+    biglogor(a, lena, bb, 1, p, final_n);
+    return confirm_size(p, lena, final_n);
 }
 
 intptr_t Logor::op(int64_t a, uint64_t *b)
-{   size_t nb = number_size(b);
-    uint64_t *p = reserve(nb);
+{   size_t lenb = number_size(b);
+    uint64_t *p = reserve(lenb);
     size_t final_n;
     uint64_t aa[1] = {(uint64_t)a};
-    biglogor(aa, 1, b, nb, p, final_n);
-    return confirm_size(p, nb, final_n);
+    biglogor(aa, 1, b, lenb, p, final_n);
+    return confirm_size(p, lenb, final_n);
 }
 
 intptr_t Logor::op(int64_t a, int64_t b)
@@ -3643,33 +3674,33 @@ inline void biglogxor(const uint64_t *a, size_t lena,
 }
 
 intptr_t Logxor::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     size_t n;
-    if (na >= nb) n = na;
-    else n = nb;
+    if (lena >= lenb) n = lena;
+    else n = lenb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    biglogxor(a, na, b, nb, p, final_n);
+    biglogxor(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
 intptr_t Logxor::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
-    uint64_t *p = reserve(na);
+{   size_t lena = number_size(a);
+    uint64_t *p = reserve(lena);
     size_t final_n;
     uint64_t bb[1] = {(uint64_t)b};
-    biglogxor(a, na, bb, 1, p, final_n);
-    return confirm_size(p, na, final_n);
+    biglogxor(a, lena, bb, 1, p, final_n);
+    return confirm_size(p, lena, final_n);
 }
 
 intptr_t Logxor::op(int64_t a, uint64_t *b)
-{   size_t nb = number_size(b);
-    uint64_t *p = reserve(nb);
+{   size_t lenb = number_size(b);
+    uint64_t *p = reserve(lenb);
     size_t final_n;
     uint64_t aa[1] = {(uint64_t)a};
-    biglogxor(aa, 1, b, nb, p, final_n);
-    return confirm_size(p, nb, final_n);
+    biglogxor(aa, 1, b, lenb, p, final_n);
+    return confirm_size(p, lenb, final_n);
 }
 
 intptr_t Logxor::op(int64_t a, int64_t b)
@@ -3720,11 +3751,11 @@ inline intptr_t rightshift_b(uint64_t *a, int n);
 intptr_t Leftshift::op(uint64_t *a, int64_t n)
 {   if (n == 0) return copy_if_no_garbage_collector(a);
     else if (n < 0) return Rightshift::op(a, -n);
-    size_t na = number_size(a);
-    size_t nr = na + (n/64) + 1;
+    size_t lena = number_size(a);
+    size_t nr = lena + (n/64) + 1;
     uint64_t *p = reserve(nr);
     size_t final_n;
-    bigleftshift(a, na, n, p, final_n);
+    bigleftshift(a, lena, n, p, final_n);
     return confirm_size(p, nr, final_n);
 }
 
@@ -3784,13 +3815,13 @@ inline void bigrightshift(const uint64_t *a, size_t lena,
 intptr_t Rightshift::op(uint64_t *a, int64_t n)
 {   if (n == 0) return copy_if_no_garbage_collector(a);
     else if (n < 0) return Leftshift::op(a, -n);
-    size_t na = number_size(a);
+    size_t lena = number_size(a);
     size_t nr;
-    if (na > (size_t)n/64) nr = na - n/64;
+    if (lena > (size_t)n/64) nr = lena - n/64;
     else nr = 1;
     uint64_t *p = reserve(nr);
     size_t final_n;
-    bigrightshift(a, na, n, p, final_n);
+    bigrightshift(a, lena, n, p, final_n);
     return confirm_size(p, nr, final_n);
 }
 
@@ -3905,14 +3936,14 @@ inline void bigplus(const uint64_t *a, size_t lena,
 }
 
 intptr_t Plus::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     size_t n;
-    if (na >= nb) n = na+1;
-    else n = nb+1;
+    if (lena >= lenb) n = lena+1;
+    else n = lenb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigplus(a, na, b, nb, p, final_n);
+    bigplus(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -3959,11 +3990,11 @@ intptr_t Plus::op(uint64_t *a, int64_t b)
 
 inline intptr_t bigplus_small(intptr_t aa, int64_t b)
 {   uint64_t *a = vector_of_handle(aa);
-    size_t na = number_size(a);
-    uint64_t *p = reserve(na+1);
+    size_t lena = number_size(a);
+    uint64_t *p = reserve(lena+1);
     size_t final_n;
-    bigplus_small(a, na, b, p, final_n);
-    return confirm_size(p, na+1, final_n);
+    bigplus_small(a, lena, b, p, final_n);
+    return confirm_size(p, lena+1, final_n);
 }
 
 // For subtraction I implement both a-b and b-a. These work by
@@ -4052,14 +4083,14 @@ inline void bigsubtract(const uint64_t *a, size_t lena,
 }
 
 intptr_t Difference::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     size_t n;
-    if (na >= nb) n = na+1;
-    else n = nb+1;
+    if (lena >= lenb) n = lena+1;
+    else n = lenb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigsubtract(a, na, b, nb, p, final_n);
+    bigsubtract(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -4095,14 +4126,14 @@ intptr_t Difference::op(uint64_t *a, int64_t b)
 
 
 intptr_t Revdifference::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     size_t n;
-    if (na >= nb) n = na+1;
-    else n = nb+1;
+    if (lena >= lenb) n = lena+1;
+    else n = lenb+1;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigsubtract(b, nb, a, na, p, final_n);
+    bigsubtract(b, lenb, a, lena, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -4191,12 +4222,12 @@ inline void bigmultiply(const uint64_t *a, size_t lena,
 }
 
 intptr_t Times::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
-    size_t n = na+nb;
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
+    size_t n = lena+lenb;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigmultiply(a, na, b, nb, p, final_n);
+    bigmultiply(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -4290,11 +4321,11 @@ inline void bigsquare(const uint64_t *a, size_t lena,
 }
 
 intptr_t Square::op(uint64_t *a)
-{   size_t na = number_size(a);
-    size_t n = 2*na;
+{   size_t lena = number_size(a);
+    size_t n = 2*lena;
     uint64_t *p = reserve(n);
     size_t final_n;
-    bigsquare(a, na, p, final_n);
+    bigsquare(a, lena, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
@@ -4383,7 +4414,7 @@ intptr_t Isqrt::op(int64_t aa)
 inline void bigpow(const uint64_t *a, size_t lena, uint64_t n,
                    uint64_t *v,
                    uint64_t *w,
-                   uint64_t *r, size_t &lenr)
+                   uint64_t *r, size_t &lenr, size_t maxlenr)
 {   if (n == 0)
     {   r[0] = 0;
         lenr = 1;
@@ -4396,18 +4427,21 @@ inline void bigpow(const uint64_t *a, size_t lena, uint64_t n,
     while (n > 1)
     {   if (n%2 == 0)
         {   bigsquare(v, lenv, r, lenr);
+            my_assert(lenr <= maxlenr);
             internal_copy(r, lenr, v);
             lenv = lenr;
-            n = n / 2;
+            n = n/2;
         }
         else
         {   bigmultiply(v, lenv, w, lenw, r, lenr);
+            my_assert(lenr <= maxlenr);
             internal_copy(r, lenr, w);
             lenw = lenr;
             bigsquare(v, lenv, r, lenr);
+            my_assert(lenr <= maxlenr);
             internal_copy(r, lenr, v);
             lenv = lenr;
-            n = (n-1) / 2;
+            n = (n-1)/2;
         }
     }
     bigmultiply(v, lenv, w, lenw, r, lenr);
@@ -4443,7 +4477,12 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
     my_assert(hi == 0); // Check that size is at least somewhat sane!
-    uint64_t lenr1 = 1 + bitsr/64;
+// I estimate the largest size that my result could be, but then add
+// an extra word because the internal working of multiplication can
+// write a zero beyond its true result - eg if you are multiplying a pair
+// of 1-word numbers together it will believe that the result could be 2
+// words wide even if in fact you know it will not be.
+    uint64_t lenr1 = 2 + bitsr/64;
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
 // truncating from uint64_t to size_t.
@@ -4452,7 +4491,8 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
     uint64_t *r = reserve(lenr);
     uint64_t *v = reserve(lenr);
     uint64_t *w = reserve(lenr);
-    bigpow(a, lena, (uint64_t)n, v, w, r, lenr);
+    bigpow(a, lena, (uint64_t)n, v, w, r, lenr, lenr);
+    my_assert(lenr <= olenr);
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
@@ -4479,7 +4519,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
     my_assert(hi == 0); // Check that size is at least somewhat sane!
-    uint64_t lenr1 = 1 + bitsr/64;
+    uint64_t lenr1 = 2 + bitsr/64;
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
 // truncating from uint64_t to size_t.
@@ -4489,7 +4529,8 @@ intptr_t Pow::op(int64_t a, int64_t n)
     uint64_t *v = reserve(lenr);
     uint64_t *w = reserve(lenr);
     uint64_t aa[1] = {(uint64_t)a};
-    bigpow(aa, 1, (uint64_t)n, v, w, r, lenr);
+    bigpow(aa, 1, (uint64_t)n, v, w, r, lenr, lenr);
+    my_assert(lenr <= olenr);
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
@@ -4732,7 +4773,7 @@ inline void division(const uint64_t *a, size_t lena,
 // it during long division.
     uint64_t *bb = NULL;
     size_t lenbb = lenb;
-    olenr = lenb;
+//@@    olenr = lenb;
     bool b_negative = negative(b[lenb-1]);
     if (b_negative)
     {
@@ -4745,6 +4786,7 @@ inline void division(const uint64_t *a, size_t lena,
 // as unsigned this leading top bit does not matter and so the absolute value
 // of b fits in the same amount of space that b did with no risk of overflow.  
         bb = reserve(lenb);
+        olenr = lenb;
         internal_negate(b, lenb, bb);
         if (bb[lenbb-1] == 0) lenbb--;
     }
@@ -4766,6 +4808,7 @@ inline void division(const uint64_t *a, size_t lena,
         }
         if (want_r)
         {   r = reserve(lena);
+            olenr = lena;
             internal_copy(a, lena, r);
             lenr = lena;
         }
@@ -4780,9 +4823,11 @@ inline void division(const uint64_t *a, size_t lena,
 // it yet. I delay creation of that copy until now because that lets my
 // avoid a spurious allocation in the various small cases.
     if (!b_negative)
-    {   bb = reserve(lenbb);
+    {   bb = reserve(lenb);
+        olenr = lenb;
         internal_copy(b, lenbb, bb);
     }
+    if (debug_arith) my_assert(bb[olenr] == 0xaaaaaaaaaaaaaaaa);
 // If I actually return the quotient I may need to add a leading 0 or -1 to
 // make its 2s complement representation valid. Hence the "+2" rather than
 // the more obvious "+1" here.
@@ -4800,6 +4845,7 @@ inline void division(const uint64_t *a, size_t lena,
     if (a_negative) internal_negate(a, lena, r);
     else internal_copy(a, lena, r);
     unsigned_long_division(r, lenr, bb, lenbb, want_q, q, olenq, lenq);
+    if (debug_arith) my_assert(r[lena+1] == 0xaaaaaaaaaaaaaaaa);
 // While performing the long division I will have had three vectors that
 // were newly allocated. r starts off containing a copy of a but ends up
 // holding the remainder. It is rather probable that this remainder will
@@ -4835,7 +4881,7 @@ inline void division(const uint64_t *a, size_t lena,
 // During long division I will scale my numbers by shifting left by an
 // amount s. I do that in place. The shift amount will be such that
 // the divisor ends up with the top bit of its top digit set. The
-// divident will need to extend into an extra digit, and I deal with that
+// dividend will need to extend into an extra digit, and I deal with that
 // by returning the overflow word as a result of the scaling function. Note
 // that the shift amount will be in the range 0-63.
 
@@ -5004,22 +5050,22 @@ inline void unsigned_long_remainder(uint64_t *a, size_t &lena,
 }
 
 intptr_t Quotient::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, na, b, nb,
+    division(a, lena, b, lenb,
              true, q, olenq, lenq,
              false, r, olenr, lenr);
     return confirm_size(q, olenq, lenq);
 }
 
 intptr_t Quotient::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
+{   size_t lena = number_size(a);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
     uint64_t bb[1] = {(uint64_t)b};
-    division(a, na, bb, 1,
+    division(a, lena, bb, 1,
              true, q, olenq, lenq,
              false, r, olenr, lenr);
     return confirm_size(q, olenq, lenq);
@@ -5042,22 +5088,22 @@ intptr_t Quotient::op(int64_t a, int64_t b)
 }
 
 intptr_t Remainder::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, na, b, nb,
+    division(a, lena, b, lenb,
              false, q, olenq, lenq,
              true, r, olenr, lenr);
     return confirm_size(r, olenr, lenr);
 }
 
 intptr_t Remainder::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
+{   size_t lena = number_size(a);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
     uint64_t bb[1] = {(uint64_t)b};
-    division(a, na, bb, 1,
+    division(a, lena, bb, 1,
              false, q, olenq, lenq,
              true, r, olenr, lenr);
     return confirm_size(r, olenr, lenr);
@@ -5083,11 +5129,11 @@ intptr_t Remainder::op(int64_t a, int64_t b)
 // the remainder via an additional argument.
 
 intptr_t Divide::op(uint64_t *a, uint64_t *b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, na, b, nb,
+    division(a, lena, b, lenb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -5096,11 +5142,11 @@ intptr_t Divide::op(uint64_t *a, uint64_t *b)
 }
 
 intptr_t Divide::op(uint64_t *a, int64_t b)
-{   size_t na = number_size(a);
+{   size_t lena = number_size(a);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
     uint64_t bb[1] = {(uint64_t)b};
-    division(a, na, bb, 1,
+    division(a, lena, bb, 1,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -5109,10 +5155,10 @@ intptr_t Divide::op(uint64_t *a, int64_t b)
 }
 
 intptr_t Divide::op(int64_t a, uint64_t *b)
-{   size_t nb = number_size(b);
+{   size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, na, b, nb,
+    division(a, lena, b, lenb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -5121,11 +5167,11 @@ intptr_t Divide::op(int64_t a, uint64_t *b)
 }
 
 intptr_t Divide::op(int64_t a, int64_t b)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, na, b, nb,
+    division(a, lena, b, lenb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     intptr_t rr = confirm_size(r, olenr, lenr);
@@ -5136,11 +5182,11 @@ intptr_t Divide::op(int64_t a, int64_t b)
 #else
 
 intptr_t Divide::op(uint64_t *a, uint64_t *b, intptr_t &rem)
-{   size_t na = number_size(a);
-    size_t nb = number_size(b);
+{   size_t lena = number_size(a);
+    size_t lenb = number_size(b);
     uint64_t *q, *r;
     size_t olenq, olenr, lenq, lenr;
-    division(a, na, b, nb,
+    division(a, lena, b, lenb,
              true, q, olenq, lenq,
              true, r, olenr, lenr);
     rem = confirm_size(r, olenr, lenr);

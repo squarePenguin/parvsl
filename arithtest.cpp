@@ -84,7 +84,8 @@ int main(int argc, char *argv[])
     reseed(seed);
 
     int maxbits, ntries;
-    clock_t c1;
+    clock_t clk;
+    int64_t clong;
     double timing;
 
     const int MILLION = 1000000;
@@ -160,10 +161,23 @@ int main(int argc, char *argv[])
     ntries = 50*MILLION;
 
     std::cout << "Start of bitwise operation testing" << std::endl;
-    c1 = clock();
+    clk = clock(); clong = 0;
 
     for (int i=1; i<=ntries; i++)
-    {   //std::cout << i << "  ";
+    {
+// On some 32-bit systems clock_t is a 32-bit type and CLOCKS_PER_SEC
+// is 1000000. The consequence is that clock readings overflow after about
+// half an hour of CPU time. The tests here can reasonably be configured
+// such that on a slow machine this limit may be exceeded. To work around
+// that I unload from clock() into an int64_t value every million times
+// round my loop. On a sufficiently slow system this would not cure the
+// problem, but in realistic cases it will and the overhead of the test
+// here and the extra work every 2^20 iterations is not liable to be severe. 
+        if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
         Bignum a = random_upto_bits_bignum(maxbits);
         Bignum b = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
@@ -199,7 +213,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
     std::cout << "Bitwise operation tests completed in "
               << timing << " sec" << std::endl;
 
@@ -218,10 +232,14 @@ int main(int argc, char *argv[])
     ntries = 50*MILLION;
 
     std::cout << "Start of shift testing" << std::endl;
-    c1 = clock();
+    clk = clock(); clong = 0;
 
     for (int i=1; i<=ntries; i++)
-    {   //std::cout << i << "  ";
+    {   if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
         Bignum a = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 0xf);
@@ -251,7 +269,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
     std::cout << "Shift tests completed in "
               << timing << " sec" << std::endl;
 
@@ -271,10 +289,15 @@ int main(int argc, char *argv[])
     ntries = 50*MILLION;
 
     std::cout << "Start of Plus and Times testing" << std::endl;
-    c1 = clock();
+    clk = clock(); clong = 0;
 
     for (int i=1; i<=ntries; i++)
-    {   Bignum a = random_upto_bits_bignum(maxbits);
+    {   if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
+        Bignum a = random_upto_bits_bignum(maxbits);
         Bignum b = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 0xf);
@@ -301,7 +324,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
     std::cout << "Plus and Times tests completed in "
               << timing << " sec" << std::endl;
 
@@ -321,10 +344,14 @@ int main(int argc, char *argv[])
     ntries = 50*MILLION;
 
     std::cout << "Start of division testing" << std::endl;
-    c1 = clock();
+    clk = clock(); clong = 0;
 
     for (int i=1; i<=ntries; i++)
-    {   //std::cout << i << "  ";
+    {   if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
         Bignum divisor, remainder, quotient;
         do
         {   divisor = random_upto_bits_bignum(maxbits) + 1;
@@ -343,8 +370,6 @@ int main(int argc, char *argv[])
 // numberfs that I initially generate.
         } while (((quotient ^ remainder ^ divisor) < Bignum(0)) ||
                  (abs(remainder) >= abs(divisor))); 
-
-my_assert(divisor != remainder);
 
         Bignum dividend = quotient*divisor + remainder;
         Bignum q1 = dividend / divisor;
@@ -371,7 +396,7 @@ my_assert(divisor != remainder);
         return 1;
     }
 
-    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
     std::cout << "Division tests completed in "
               << timing << " sec" << std::endl;
 
@@ -387,10 +412,14 @@ my_assert(divisor != remainder);
     ntries = 50*MILLION;
 
     std::cout << "Start of isqrt testing" << std::endl;
-    c1 = clock();
+    clk = clock(); clong = 0;
 
     for (int i=1; i<=ntries; i++)
-    {   //std::cout << i << "  ";
+    {   if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
         Bignum a, b;
         a = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
@@ -408,7 +437,7 @@ my_assert(divisor != remainder);
         return 1;
     }
 
-    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
     std::cout << "Isqrt tests completed in "
               << timing << " sec" << std::endl;
 
@@ -416,7 +445,7 @@ my_assert(divisor != remainder);
 
 #ifdef TEST_FLOAT
 
-// Te test FLOAT and FIX I will generate a random integer and convery to
+// To test FLOAT and FIX I will generate a random integer and convery to
 // floating point. I then look at floating point values just larger and
 // just smaller than the one that I obtained, and verify that my result
 // is closer to the original input than the other wto. If there is a tie
@@ -425,11 +454,22 @@ my_assert(divisor != remainder);
     maxbits = 500;
     ntries = 50*MILLION;
 
+// On some systems (notable 32-bit cygwin and at least some older
+// 32-bit Linux systems running on x86) floating point arithmetic is
+// performed in 80-bit working precision, so some of my attempts here
+// to check results are thwarted. I cope with that by forcing important
+// values through the following volatile variable.
+    volatile double fp_forcer;
+
     std::cout << "Start of float testing" << std::endl;
-    c1 = clock();
+    clk = clock(); clong = 0;
 
     for (int i=1; i<=ntries; i++)
-    {   //std::cout << i << "  ";
+    {   if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
         Bignum a, b;
         a = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
@@ -439,23 +479,29 @@ my_assert(divisor != remainder);
         Bignum n = fix_bignum(d);
         if (a == n) continue; // round trip was exact!
 
-        double dplus = d + 1.0;
+        fp_forcer = d + 1.0;
+        double dplus = fp_forcer;
         if (dplus == d) dplus = std::nextafter(d, 1.0e300);
-        double dminus = d - 1.0;
+        my_assert(dplus != d);
+        fp_forcer = d - 1.0;
+        double dminus = fp_forcer;
         if (dminus == d) dminus = std::nextafter(d, -1.0e300);
+        my_assert(dminus != d);
         Bignum nplus = fix_bignum(dplus);
         Bignum nminus = fix_bignum(dminus);
-
         Bignum err = a-n;
         Bignum errplus = a-nplus;
         Bignum errminus = a-nminus;
-        if (abs(err) < abs(errplus) && abs(err) < abs(errminus)) continue;
-        if (abs(err) == abs(errplus) && abs(err) < abs(errminus) && evenfloat(d)) continue;
-        if (abs(err) < abs(errplus) && abs(err) == abs(errminus) && evenfloat(d)) continue;
-      
+    
+        if (nplus != n && nminus != n)
+        {   if (abs(err) < abs(errplus) && abs(err) < abs(errminus)) continue;
+            if (abs(err) == abs(errplus) && abs(err) < abs(errminus) && evenfloat(d)) continue;
+            if (abs(err) < abs(errplus) && abs(err) == abs(errminus) && evenfloat(d)) continue;
+        }
+
         std::cout << "FAILED on test " << i << std::endl;
         std::cout << "a       " << a << std::endl;
-        std::cout << "d       " << std::setprecision(17) << d << std::endl;
+        std::cout << "d       " << std::setprecision(19) << d << std::endl;
         std::cout << "d-      " << dminus << std::endl;
         std::cout << "d+      " << dplus << std::endl;
         std::cout << "nminus  " << nminus << std::endl;
@@ -470,7 +516,7 @@ my_assert(divisor != remainder);
         return 1;
     }
 
-    timing = (clock() - c1)/(double)CLOCKS_PER_SEC;
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
     std::cout << "Float tests completed in "
               << timing << " sec" << std::endl;
 
@@ -479,6 +525,5 @@ my_assert(divisor != remainder);
     std::cout << "About to exit" << std::endl;
     return 0;    
 }
-
 
 // end of arithtest.cpp
