@@ -75,11 +75,11 @@ vsl.img:	vsl library.lsp vsl.lsp
 fastvsl.img:	fastvsl library.lsp vsl.lsp
 	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
-val-arith.img:	val-arith library.lsp val-arith.lsp
-	time ./val-arith -z library.lsp | tee val-arith.img.log
+vsl-arith.img:	vsl-arith library.lsp vsl-arith.lsp
+	time ./vsl-arith -z library.lsp | tee vsl-arith.img.log
 
-fastval-arith.img:	fastval-arith library.lsp val-arith.lsp
-	time ./fastval-arith -z library.lsp | tee fastval-arith.img.log
+fastvsl-arith.img:	fastvsl-arith library.lsp vsl-arith.lsp
+	time ./fastvsl-arith -z library.lsp | tee fastvsl-arith.img.log
 
 parvsl.img:	parvsl library.lsp vsl.lsp
 	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
