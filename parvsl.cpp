@@ -101,34 +101,7 @@
 
 // I want libedit for local editing and history.
 #include <histedit.h>
-#ifdef __WIN32__
-#include <windows.h>
-#else
-#include <sys/mman.h>
 
-#ifdef BIGNUM
-#include "BigIntegerLibrary.hh"
-#endif
-
-// There is a portability issue about MAP_ANONYMOUS: I hope that
-// the adjustments made here will leave everything workable
-// everywhere.
-#ifdef MAP_ANONYMOUS
-#define MMAP_FLAGS (MAP_PRIVATE|MAP_ANONYMOUS)
-#define MMAP_FD    -1
-#else 
-#ifdef MAP_ANON
-#define MMAP_FLAGS (MAP_PRIVATE|MAP_ANON)
-#define MMAP_FD    -1
-#else
-int devzero_fd = 0;
-#define MMAP_FLAGS MAP_PRIVATE
-#define MMAP_FD                                                   \
-    (devzero_fd == 0 ? (devzero_fd = open("/dev/zero", O_RDWR)) : \
-                       devzero_fd)
-#endif // MMAP_ANON
-#endif // MMAP_ANONYMOUS
-#endif // __WIN32__
 
 #ifdef WIN32
 #define popen _popen
@@ -170,41 +143,73 @@ uintptr_t npins = 0, heap1_pads = 0, heap2_pads = 0;
 // Finding a heap segment that is referred to is done using a directly
 // coded search tree.
 
-#define search2(x, h0, h1) (x < h1 ? h0 : h1)
+static inline uintptr_t search(uintptr_t x, uintptr_t h0, uintptr_t h1)
+{   if (x < h1) return h0;
+    else return h1;
+}
 
-#define search4(x, h0, h1, h2, h3)                              \
-    (x < h2 ? search2(x, h0, h1) : search2(x, h2, h3))
+static inline uintptr_t search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3)
+{   if (x < h2) return search(x, h0, h1);
+    else return search(x, h2, h3);
+}
 
-#define search8(x, h0, h1, h2, h3, h4, h5, h6, h7)              \
-    (x < h4 ? search4(x, h0, h1, h2, h3) :                      \
-              search4(x, h4, h5, h6, h7))
+static inline uintptr_t search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7)
+{   if (x < h4) return search(x, h0, h1, h2, h3);
+    else return search(x, h4, h5, h6, h7);
+}
 
-#define search16(x, h0, h1, h2, h3, h4, h5, h6, h7,             \
-                    h8, h9, h10, h11, h12, h13, h14, h15)       \
-    (x < h8 ? search8(x, h0, h1, h2, h3, h4, h5, h6, h7) :      \
-              search8(x, h8, h9, h10, h11, h12, h13, h14, h15))
+static inline uintptr_t search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7,
+    uintptr_t h8, uintptr_t h9, uintptr_t h10, uintptr_t h11,
+    uintptr_t h12, uintptr_t h13, uintptr_t h14, uintptr_t h15)
+{   if (x < h8) return search(x, h0, h1, h2, h3, h4, h5, h6, h7);
+    else return search(x, h8, h9, h10, h11, h12, h13, h14, h15);
+}
 
 // The variants that come next do the same sort of search but return
 // results that can be specified separately from the key values.
 
-#define search2a(x, h0, h1, v0, v1) (x < h1 ? v0 : v1)
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1,
+    int v0, int v1)
+{   if (x < h1) return v0;
+    else return v1;
+}
 
-#define search4a(x, h0, h1, h2, h3, v0, v1, v2, v3)              \
-    (x < h2 ? search2a(x, h0, h1, v0, v1) : search2a(x, h2, h3, v2, v3))
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    int v0, int v1, int v2, int v3)
+{   if (x < h2) return search(x, h0, h1, v0, v1);
+    else return search(x, h2, h3, v2, v3);
+}
 
-#define search8a(x, h0, h1, h2, h3, h4, h5, h6, h7,              \
-                    v0, v1, v2, v3, v4, v5, v6, v7)              \
-    (x < h4 ? search4a(x, h0, h1, h2, h3, v0, v1, v2, v3) :      \
-              search4a(x, h4, h5, h6, h7, v4, v5, v6, v7))
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7,
+    int v0, int v1, int v2, int v3,
+    int v4, int v5, int v6, int v7)
+{   if (x < h4) return search(x, h0, h1, h2, h3, v0, v1, v2, v3);
+    else return search(x, h4, h5, h6, h7, v4, v5, v6, v7);
+}
 
-#define search16a(x, h0, h1, h2, h3, h4, h5, h6, h7,             \
-                     h8, h9, h10, h11, h12, h13, h14, h15,       \
-                     v0, v1, v2, v3, v4, v5, v6, v7,             \
-                     v8, v9, v10, v11, v12, v13, v14, v15)       \
-    (x < h8 ? search8a(x, h0, h1, h2, h3, h4, h5, h6, h7,        \
-                          v0, v1, v2, v3, v4, v5, v6, v7) :      \
-              search8a(x, h8, h9, h10, h11, h12, h13, h14, h15,  \
-                          v8, v9, v10, v11, v12, v13, v14, v15))
+static inline int search(uintptr_t x,
+    uintptr_t h0, uintptr_t h1, uintptr_t h2, uintptr_t h3,
+    uintptr_t h4, uintptr_t h5, uintptr_t h6, uintptr_t h7,
+    uintptr_t h8, uintptr_t h9, uintptr_t h10, uintptr_t h11,
+    uintptr_t h12, uintptr_t h13, uintptr_t h14, uintptr_t h15,
+    int v0, int v1, int v2, int v3,
+    int v4, int v5, int v6, int v7,
+    int v8, int v9, int v10, int v11,
+    int v12, int v13, int v14, int v15)
+{   if (x < h8) return search(x, h0, h1, h2, h3, h4, h5, h6, h7,
+                                 v0, v1, v2, v3, v4, v5, v6, v7);
+    else return search(x, h8, h9, h10, h11, h12, h13, h14, h15,
+                          v8, v9, v10, v11, v12, v13, v14, v15);
+}
 
 // In general I will allocate some initial heap segment and each time
 // I allocate another I will double the total memory that is in use. So
@@ -277,7 +282,7 @@ void hexdump()
 
 static inline block_header *find_block(uintptr_t x)
 {
-    uintptr_t block = search16(x,
+    uintptr_t block = search(x,
         blocks[0],  blocks[1],  blocks[2],  blocks[3],
         blocks[4],  blocks[5],  blocks[6],  blocks[7],
         blocks[8],  blocks[9],  blocks[10], blocks[11],
@@ -421,7 +426,9 @@ static inline void clearpinned(block_header *block)
 // halfbitmapsize field filled in. Fill in the rest of the entries
 // in them. 
 
-#define ALIGN8(a) (((a) + 7) & ~(LispObject)7)
+static inline uintptr_t ALIGN8(uintptr_t a)
+{   return (a + 7) & ~(uintptr_t)7;
+}
 
 void allocateheap()
 {
@@ -601,7 +608,7 @@ static inline LispObject allocatesymbol(LispObject pname)
 // This one allocates an atom that is n bytes long (plus its header
 // word) and again does not fill in ANY of the fields.
 
-static inline LispObject allocateatom(int n)
+static inline LispObject allocateatom(size_t n)
 {   LispObject r;
 // The actual amount of space allocated must include a word for the
 // header and must then be rounded up to be a multiple of 8.
@@ -623,8 +630,9 @@ static inline LispObject makestring(const char *s, int len)
     return r;
 }
 
-#define elt(v, n) \
-    (((LispObject *)((v)-tagATOM+sizeof(LispObject)))[n])
+static inline LispObject &elt(LispObject v, size_t n)
+{   return ((LispObject *)(v-tagATOM+sizeof(LispObject)))[n];
+}
 
 static inline LispObject makevector(int maxindex)
 {   int i, len = (maxindex+1)*sizeof(LispObject);
@@ -753,7 +761,7 @@ static LispObject Lstring_store4(LispObject data, LispObject s,
     return s;
 }
 
-extern LispObject lookup(const char *s, int n, int flags);
+extern LispObject lookup(const char *s, size_t n, int flags);
 
 // The code here is ugly and could be tidied up!
 
@@ -855,12 +863,11 @@ static LispObject Lchar_downcase(LispObject data, LispObject arg)
     else return arg;
 }
 
-#define BOFFO_SIZE 4096
+INLINE constexpr size_t BOFFO_SIZE = 4096;
 char boffo[BOFFO_SIZE+4];
-int boffop;
+size_t boffop;
 
-#define swap(a,b) w = (a); (a) = (b); (b) = w;
-#define swapmap(a,b) wmap = (a); (a) = (b); (b) = wmap;
+using std::swap;
 
 static inline LispObject copy(LispObject x);
 static inline LispObject copycontent(LispObject s);
@@ -869,7 +876,7 @@ int gccount = 1;
 
 // The version of this implemented at present only supports a single block
 // of memory. I really need to look things up in the nice table of memory
-// blocks that I have using search16a...
+// blocks that I have using search...
 
 static uintptr_t mem_base, mem_end;
 // static bool check_an_address(uintptr_t p)
@@ -937,10 +944,9 @@ void inner_reclaim(LispObject *C_stack)
 // Algorithm". Communications of the ACM 13 (11): 677-678, 1970),
 // adapted to be "conservative". C_stack to C_stackbase will be viewed as
 // a set of ambiguous roots.
-    uintptr_t s, w;
-    uintptr_t o;
+    uintptr_t s;
+    size_t o;
     uintptr_t i;
-    uint32_t *wmap;
     LispObject pp;
     npins = heap2_pads = space_used = 0;
     printf("+++ GC number %d ", gccount++);
@@ -1042,8 +1048,8 @@ if (initial_a == 123456) printf("ook\n"); // to get it used.
 // to reduce any big waste blocks that could arise when a vector needed
 // to be copied.
 //
-// Next I copy all objects directly accessible from proper list bases.
-    for (o=0; o<BASES_SIZE; o++) bases[o] = copy(bases[o]);
+// Next I copy all objects directly accessible from proper list list bases.
+    for (o=0; o<BASES_SIZE; o++) listbases[o] = copy(listbases[o]);
     for (o=0; o<OBHASH_SIZE; o++)
         obhash[o] = copy(obhash[o]);
 
@@ -1080,8 +1086,8 @@ if (initial_a == 123456) printf("ook\n"); // to get it used.
     {   block_header *b = (block_header *)blocks[i];
         swap(b->h1base, b->h2base);
         swap(b->h1top, b->h2top);
-        swapmap(b->h1starts, b->h2starts);
-        swapmap(b->h1fp, b->h2fp);
+        swap(b->h1starts, b->h2starts);
+        swap(b->h1fp, b->h2fp);
     }
 // The pinchain now refers to heap2.
     heap2_pinchain = heap1_pinchain;
@@ -1542,8 +1548,8 @@ static inline LispObject copycontent(LispObject s)
     }
 }
 
-#define printPLAIN   1
-#define printESCAPES 2
+INLINE constexpr int printPLAIN = 1;
+INLINE constexpr int printESCAPES = 2;
 
 // I suspect that linelength and linepos need to be maintained
 // independently for each output stream. At present that is not
@@ -1600,10 +1606,9 @@ static EditLine *el_struct;
 static History *el_history;
 static HistEvent el_history_event;
 
-#define INPUT_LINE_SIZE 256
+INLINE constexpr int INPUT_LINE_SIZE = 256;
 static char input_line[INPUT_LINE_SIZE];
-static int input_ptr = 0, input_max = 0;
-
+static size_t input_ptr = 0, input_max = 0;
 char the_prompt[80] = "> ";
 
 
@@ -1939,8 +1944,8 @@ LispObject token()
                curchar == '_' ||
                curchar == '!')
         {   if (curchar == '!') curchar = rdch();
-            else if (curchar != EOF && par::symval(lower) != nil) curchar = tolower(curchar);
-            else if (curchar != EOF && par::symval(raise) != nil) curchar = toupper(curchar);
+            else if (curchar != EOF && par::symval(symlower) != nil) curchar = tolower(curchar);
+            else if (curchar != EOF && par::symval(symraise) != nil) curchar = toupper(curchar);
             if (curchar != EOF)
             {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
                 curchar = rdch();
@@ -2143,16 +2148,16 @@ LispObject readT()
 // TODO VB: Do we want to put it under a mutex? Otherwise it might create a
 // symbol multiple tymes.
 
-LispObject lookup(const char *s, int len, int flag)
+LispObject lookup(const char *s, size_t len, int flag)
 {   LispObject w, pn;
-    int i, hash = 1;
+    size_t i, hash = 1;
     for (i=0; i<len; i++) hash = 13*hash + s[i];
-    hash = (hash & 0x7fffffff) % OBHASH_SIZE;
+    hash = hash % OBHASH_SIZE;
     w = obhash[hash];
     while (w != tagFIXNUM)
     {   LispObject a = qcar(w);        // Will be a symbol.
         LispObject n = qpname(a);      // Will be a string.
-        int l = veclength(qheader(n)); // Length of the name.
+        size_t l = veclength(qheader(n)); // Length of the name.
         if (l == len &&
             strncmp(s, qstring(n), len) == 0)
             return a;                  // Existing symbol found.
@@ -2166,19 +2171,19 @@ LispObject lookup(const char *s, int len, int flag)
     return w;
 }
 
-#define unwindNONE      0
-#define unwindERROR     1
-#define unwindBACKTRACE 2
-#define unwindGO        4
-#define unwindRETURN    8
-#define unwindPRESERVE  16
-#define unwindRESTART   32
+INLINE constexpr unsigned int unwindNONE      = 0;
+INLINE constexpr unsigned int unwindERROR     = 1;
+INLINE constexpr unsigned int unwindBACKTRACE = 2;
+INLINE constexpr unsigned int unwindGO        = 4;
+INLINE constexpr unsigned int unwindRETURN    = 8;
+INLINE constexpr unsigned int unwindPRESERVE  = 16;
+INLINE constexpr unsigned int unwindRESTART   = 32;
 
-thread_local int unwindflag = unwindNONE;
+thread_local unsigned int unwindflag = unwindNONE;
 
 thread_local int backtraceflag = -1;
-#define backtraceHEADER 1
-#define backtraceTRACE  2
+INLINE constexpr int backtraceHEADER = 1;
+INLINE constexpr int backtraceTRACE  = 2;
 
 LispObject error0(const char *msg)
 {   if ((backtraceflag & backtraceHEADER) != 0)
@@ -2509,10 +2514,6 @@ LispObject eval(LispObject x)
     }
     if (isSYMBOL(x))
     {   LispObject v = par::symval(x);
-#ifdef TRACEALL
-//printf("value of symbol "); fflush(stdout); print(x);
-//printf("... is "); fflush(stdout); print(v); fflush(stdout);
-#endif
         if (v == undefined) {
             return error1("undefined variable", x);
         }
@@ -2758,7 +2759,7 @@ LispObject eval(LispObject x)
                 }
             }
         }
-        else if (isCONS(f) && qcar(f) == lambda)
+        else if (isCONS(f) && qcar(f) == symlambda)
         {   LispObject aa = qcdr(x);
             int n = 0;
             while (isCONS(aa))
@@ -2979,17 +2980,17 @@ LispObject Ldm(LispObject lits, LispObject x)
 LispObject Lputd(LispObject lits, LispObject name, LispObject type, LispObject def)
 {   if (!isSYMBOL(name)) return error1("bad name in putd", name);
     if (type == expr)
-    {   if (!isCONS(def) || qcar(def) != lambda)
+    {   if (!isCONS(def) || qcar(def) != symlambda)
             return error1("bad definition in putd", def);
         return definer(cons(name, qcdr(def)), 0);
     }
     else if (type == fexpr)
-    {   if (!isCONS(def) || qcar(def) != lambda)
+    {   if (!isCONS(def) || qcar(def) != symlambda)
             return error1("bad definition in putd", def);
         return definer(cons(name, qcdr(def)), flagSPECFORM);
     }
     else if (type == macro)
-    {   if (!isCONS(def) || qcar(def) != lambda)
+    {   if (!isCONS(def) || qcar(def) != symlambda)
             return error1("bad definition in putd", def);
         return definer(cons(name, qcdr(def)), flagMACRO);
     }
@@ -3429,11 +3430,12 @@ LispObject Lfloat(LispObject lits, LispObject x)
             error1("arg for float", x));
 }
 
-#define floatval(x)                   \
-   isFLOAT(x) ? qfloat(x) :           \
-   isFIXNUM(x) ? (double)qfixnum(x) : \
-   isBIGNUM(x) ? (double)qint64(x) :  \
-   0.0
+INLINE unsigned int floatval(LispObject x)
+{   return isFLOAT(x) ? qfloat(x) :
+           isFIXNUM(x) ? (double)qfixnum(x) :
+           isBIGNUM(x) ? (double)qint64(x) :
+           0.0;
+}
 
 LispObject Lfp_subnorm(LispObject lits, LispObject arg)
 {   if (!isFLOAT(arg)) return nil;
@@ -3638,7 +3640,7 @@ LispObject Llist2string(LispObject lits, LispObject a)
 }
 
 LispObject Loblist(LispObject lits)
-{   int i;
+{   size_t i;
     work1 = nil;
     for (i=0; i<OBHASH_SIZE; i++)
         for (work2=obhash[i]; isCONS(work2); work2 = qcdr(work2))
@@ -3655,7 +3657,7 @@ LispObject Leval(LispObject lits, LispObject x)
 
 LispObject Lapply(LispObject lits, LispObject x, LispObject y)
 {   LispObject a1, a2, a3, a4;
-    if (isCONS(x) && qcar(x) == lambda)
+    if (isCONS(x) && qcar(x) == symlambda)
     {   if (!isCONS(y)) return interpreted0(qcdr(x));
         a1 = qcar(y);
         y = qcdr(y);
@@ -3908,7 +3910,7 @@ LispObject Lgetd(LispObject lits, LispObject x)
 // I copy the bound variable list that is returned so that nobody can
 // use rplaca/rplacd to corrupt it.
             return list2star(fexpr,
-                lambda,
+                symlambda,
 //@@@                cons(shallow_copy(qcar(r)), qcdr(r)));
                 r);
         else return cons(fsubr, x);
@@ -3930,7 +3932,7 @@ LispObject Lgetd(LispObject lits, LispObject x)
              qdefn4(x) == interpreted4 &&
              qdefn5up(x) == interpreted5up)
         return list2star((qflags(x) & flagMACRO) ? macro : expr,
-            lambda,
+            symlambda,
             r);
 //***            cons(shallow_copy(qcar(r)), qcdr(r)));
     else return cons(subr, x);
@@ -5391,8 +5393,8 @@ LispObject Lexplodecn(LispObject lits, LispObject x)
 LispObject Lreadch(LispObject lits)
 {   char ch[4];
     if (curchar == EOF) return eofsym;
-    ch[0] = par::symval(lower) != nil ? tolower(curchar) :
-            par::symval(raise) != nil ? toupper(curchar) : curchar;
+    ch[0] = par::symval(symlower) != nil ? tolower(curchar) :
+            par::symval(symraise) != nil ? toupper(curchar) : curchar;
     ch[1] = 0;
     curchar = rdch();
     return lookup(ch, 1, 1);
@@ -5467,10 +5469,10 @@ LispObject Lwrs(LispObject lits, LispObject x)
     return error1("wrs failed", x);
 }
 
-#define LONGEST_LEGAL_FILENAME 1000
+INLINE constexpr unsigned int LONGEST_LEGAL_FILENAME = 1000;
 char filename[LONGEST_LEGAL_FILENAME];
 static char imagename[LONGEST_LEGAL_FILENAME];
-static const char *programDir = ".";
+INLINE const char *programDir = ".";
 
 LispObject Lget_lisp_directory(LispObject lits)
 {   return makestring(programDir, strlen(programDir));
@@ -6061,7 +6063,7 @@ void *setup_defs[] =
     SETUP_INTERNAL
 };
 
-#define SETUPSIZE  ((int)(sizeof(setup_defs)/sizeof(void *)))
+INLINE constexpr size_t SETUPSIZE = sizeof(setup_defs)/sizeof(void *);
 
 // The number of entries I have in my setup hash table will be about
 // twice the number of entries to put in it, and is not a multiple of
@@ -6069,8 +6071,10 @@ void *setup_defs[] =
 // size is just established by the rounding-up procedure here, however
 // it should scale reasonably happily to almost any size of system.
 
-#define SETUPHASHSIZE (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1)
-#define HASHPTR(x)    ((int)(((uintptr_t)(x)*314159u)%SETUPHASHSIZE))
+INLINE const size_t SETUPHASHSIZE = (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1);
+static inline size_t HASHPTR(void *x)
+{   return (size_t)((((uintptr_t)x)*314159u)%SETUPHASHSIZE);
+}
 
 void setwrongnumbers(LispObject w)
 {   if (qdefn0(w) == undefined0) qdefn0(w) = wrongnumber0;
@@ -6126,7 +6130,7 @@ void setup()
     eofsym = lookup("$eof$", 5, 3);
     global_symbol(eofsym);
     par::symval(eofsym) = eofsym;
-    lambda = lookup("lambda", 6, 3);
+    symlambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
     subr = lookup("subr", 4, 3);
     fexpr = lookup("fexpr", 5, 3);
@@ -6140,12 +6144,14 @@ void setup()
     par::symval(dfprint) = nil;
 
     bignum = lookup("~bignum", 7, 3);
-    raise = lookup("*raise", 6, 3);
-    lower = lookup("*lower", 6, 3);
-    fluid_symbol(raise);
-    fluid_symbol(lower);
-    par::symval(raise) = nil;
-    par::symval(lower) = lisptrue;
+    symraise = lookup("*raise", 6, 3);
+    symlower = lookup("*lower", 6, 3);
+    fluid_symbol(symraise);
+    fluid_symbol(symlower);
+    par::symval(symraise) = nil;
+    par::symval(symlower) = lisptrue;
+    Lput(nil, symraise, symfluid, lisptrue);
+    Lput(nil, symlower, symfluid, lisptrue);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
@@ -6186,12 +6192,12 @@ void setup()
 void cold_start()
 {
 // version of setup to call when there is no initial heap image at all.
-    int i;
+    size_t i;
 // I make the object-hash-table lists end in a fixnum rather than nil
 // because I want to create the hash table before even the symbol nil
 // exists.
     for (i=0; i<OBHASH_SIZE; i++) obhash[i] = tagFIXNUM;
-    for (i=0; i<BASES_SIZE; i++) bases[i] = NULLATOM;
+    for (i=0; i<BASES_SIZE; i++) listbases[i] = NULLATOM;
     setup();
 // The following fields could not be set up quite early enough in the
 // cold start case, so I repair them now.
@@ -6223,9 +6229,10 @@ int32_t read32(gzFile f)
     return (c[0] + (c[1]<<8) + (c[2]<<16) + (c[3]<<24));
 }
 
-#define FILEID (('v' << 0) | ('s' << 8) | ('l' << 16) | ('+' << 24))
-#define ENDID  (('\n' << 0) | ('e' << 8) | ('n' << 16) | ('d' << 24))
-
+INLINE const uint32_t FILEID = ('v' << 0) | ('s' << 8) |
+                               ('l' << 16) | ('+' << 24);
+INLINE const uint32_t ENDID  = ('\n' << 0) | ('e' << 8) |
+                               ('n' << 16) | ('d' << 24);
 // Crude allocation for temporary space within the heap2 area.
 
 void *h2alloc(int n)
@@ -6252,7 +6259,7 @@ void **setuphash2v;
 
 void *setuphashlookup(void *k)
 {
-    int i = HASHPTR(k);
+    size_t i = HASHPTR(k);
     const uint64_t *p;
     while (setuphash1k[i] != k &&
            setuphash1k[i] != NULL) i = (i + 1) % SETUPHASHSIZE;
@@ -6291,14 +6298,14 @@ LispObject relocate(LispObject x)
 // the heap had all been put in a single contiguous chunk. If the
 // reference is not within the heap1 part of the image heap then I
 // have a corrupted image...
-    i = search16a((uintptr_t)x,
+    i = search((uintptr_t)x,
         image_blocks[0], image_blocks[1], image_blocks[2], image_blocks[3],
         image_blocks[4], image_blocks[5], image_blocks[6], image_blocks[7],
         image_blocks[8], image_blocks[9], image_blocks[10],image_blocks[11],
         image_blocks[12],image_blocks[13],image_blocks[14],image_blocks[15],
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     x = image_offsets[i] + x - image_h1base[i];
-    i = search16a((uintptr_t)x,
+    i = search((uintptr_t)x,
         blocks_offset[0], blocks_offset[1], blocks_offset[2], blocks_offset[3],
         blocks_offset[4], blocks_offset[5], blocks_offset[6], blocks_offset[7],
         blocks_offset[8], blocks_offset[9], blocks_offset[10],blocks_offset[11],
@@ -6399,12 +6406,12 @@ int warm_start_1(gzFile f, int *errcode)
         setuphash2v[h] = setup_defs[i];
     }
 // The hash tables that cope with entrypoints are now in place - next
-// the reliable heap bases can be reloaded. I am going to assume that
+// the reliable heap listbases can be reloaded. I am going to assume that
 // the sizes of these match between image file and running system.
 // I should probably encode the sizes as part of the image format so as
 // to police that...
-    if (gzread(f, bases, (unsigned int)sizeof(bases)) !=
-        (int)sizeof(bases)) return __LINE__;
+    if (gzread(f, listbases, (unsigned int)sizeof(listbases)) !=
+        (int)sizeof(listbases)) return __LINE__;
 // A small reminder here: when I move to more complete Common Lisp
 // support the single (and fixed size) hash table for use as an object
 // list will need to be replaced with something much more elaborate.
@@ -6573,9 +6580,9 @@ int warm_start_1(gzFile f, int *errcode)
 // Now the data is all in place, but heap1 may have its bytes in a bad order
 // and it certainly contains address references that relate to the computer
 // that created the image, not the one that is now running. So I need to
-// scan and fix things up. First deal with the list bases...
+// scan and fix things up. First deal with the list listbases...
     for (i=0; i<BASES_SIZE; i++)
-        bases[i] = relocate(bases[i]);
+        listbases[i] = relocate(listbases[i]);
     for (i=0; i<OBHASH_SIZE; i++)
         obhash[i] = relocate(obhash[i]);
 // Now do a scan of the heap... There is a further horrid issue here. I
@@ -6873,12 +6880,12 @@ static inline int write_image_1(gzFile f, int *errcode)
         (int)sizeof(setup_names)) return 1;
     if (gzwrite(f, setup_defs, (unsigned int)sizeof(setup_defs)) !=
         (int)sizeof(setup_defs)) return 1;
-// There are a number of list bases that need to be saved. If the
+// There are a number of list listbases that need to be saved. If the
 // number or layout of these ever changes then it will be important to
 // change VERSION, and a discrepancy in that must cause images to
 // be rejected as un-re-loadable.
-    if (gzwrite(f, bases, (unsigned int)sizeof(bases)) !=
-        (int)sizeof(bases)) return 1;
+    if (gzwrite(f, listbases, (unsigned int)sizeof(listbases)) !=
+        (int)sizeof(listbases)) return 1;
     if (gzwrite(f, obhash, (unsigned int)sizeof(obhash)) !=
         (int)sizeof(obhash)) return 1;
 // Finally I need to dump imformation relating to the heap. I need
@@ -6991,7 +6998,7 @@ void write_image(gzFile f)
 
     // VB: we want to find all symbols and move everything back from thread_local data to global
     // THis has do be done after compaction, as we invalidate the [symval] calls.
-    for (int i = 0; i < OBHASH_SIZE; i += 1) {
+    for (size_t i = 0; i < OBHASH_SIZE; i += 1) {
         for (LispObject l = obhash[i]; isCONS(l); l = qcdr(l)) {
             LispObject x = qcar(l);
             if (isSYMBOL(x) && !is_global(x)) {
