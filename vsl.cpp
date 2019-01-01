@@ -3678,7 +3678,7 @@ LispObject Lfloat(LispObject lits, LispObject x)
             error1("arg for float", x));
 }
 
-INLINE unsigned int floatval(LispObject x)
+INLINE double floatval(LispObject x)
 {   return isFLOAT(x) ? qfloat(x) :
            isFIXNUM(x) ? (double)qfixnum(x) :
            isBIGNUM(x) ? (double)qint64(x) :

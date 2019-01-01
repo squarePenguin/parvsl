@@ -210,8 +210,6 @@ const intptr_t TYPEBITSX   = 0x70;
 const intptr_t typeSYM     = 0x00;
 const intptr_t typeSTRING  = 0x08;
 const intptr_t typeVEC     = 0x10;
-// In a first version a BIGNUM only uses typeBIGNUM and the payload it
-// carries is an int64_t.
 const intptr_t typeBIGNUM  = 0x20;
 // EQHASH is a hash table that is in a good state and that is ready
 // for use. EQHASHX is one that contains all the correct data but that
@@ -350,12 +348,12 @@ static inline LispObject &qheader(LispObject x)
 // that when this is used ini initialization it can be processed at compile
 // time.
 
-static inline constexpr intptr_t qfixnum(LispObject x)
-{   return ((intptr_t)(x & ~(uintptr_t)7)) / 8;
+static inline constexpr int64_t qfixnum(LispObject x)
+{   return ((int64_t)(x & ~(uint64_t)7)) / 8;
 }
 
-static inline LispObject packfixnum(intptr_t n)
-{   return (LispObject)((uintptr_t)n << 3) + tagFIXNUM;
+static inline LispObject packfixnum(int64_t n)
+{   return (LispObject)((uint64_t)n << 3) + tagFIXNUM;
 }
 
 INLINE const intptr_t MIN_FIXNUM = qfixnum(INTPTR_MIN);
@@ -367,10 +365,6 @@ static inline double &qfloat(LispObject x)
 
 static inline bool isBIGNUM(LispObject x)
 {   return isATOM(x) && ((qheader(x) & TYPEBITSX) == typeBIGNUM);
-}
-
-static inline int64_t &qint64(LispObject x)
-{   return *(int64_t *)(x - tagATOM + 8);
 }
 
 static inline bool isSTRING(LispObject x)
@@ -1025,11 +1019,7 @@ static inline LispObject makevector(int maxindex)
 }
 
 static inline LispObject boxint64(int64_t a)
-{   if (a >= MIN_FIXNUM && a <= MAX_FIXNUM) return packfixnum(a);
-    LispObject r = allocateatom(8);
-    qheader(r) = tagHDR + typeBIGNUM + packlength(8);
-    qint64(r) = a;
-    return r;
+{   return (LispObject)arith::int_to_bignum(a);
 }
 
 static LispObject Lallocate_string(LispObject data, LispObject a1)
@@ -2126,9 +2116,10 @@ void internalprint(LispObject x)
 #undef RAWSTRING
                         return;
                     case typeBIGNUM:
-// At present the case typeBIGNUM is merely a fixed-precision 64-bit case,
-// which is not very adventurous!
-                        snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, qint64(x));
+
+
+//@@@@@@@                        snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, qint64(x));
+
                         checkspace(len = strlen(printbuffer));
                         for (i=0; i<len; i++) wrch(printbuffer[i]);
                         return;
@@ -3677,14 +3668,14 @@ LispObject Lfloat(LispObject lits, LispObject x)
 {
     return (isFLOAT(x) ? x :
             isFIXNUM(x) ? boxfloat((double)qfixnum(x)) :
-            isBIGNUM(x) ? boxfloat((double)qint64(x)) :
+            isBIGNUM(x) ? boxfloat(arith::Float::op(arith::vector_of_handle(x))) :
             error1("arg for float", x));
 }
 
-INLINE unsigned int floatval(LispObject x)
+INLINE double floatval(LispObject x)
 {   return isFLOAT(x) ? qfloat(x) :
            isFIXNUM(x) ? (double)qfixnum(x) :
-           isBIGNUM(x) ? (double)qint64(x) :
+           isBIGNUM(x) ? arith::Float::op(arith::vector_of_handle(x)) :
            0.0;
 }
 
@@ -4310,6 +4301,7 @@ static class D {} xD;   // for double precision floats
 // suitable overload but do not carry any data, while the actual operands
 // are passed in the Val arguments.
 
+
 template <class R, class T, class U, typename V>
 static inline R binary(U lhsType, V lhsVal, LispObject b)
 {   using namespace number_dispatcher;
@@ -4323,7 +4315,7 @@ static inline R binary(U lhsType, V lhsVal, LispObject b)
         switch (qheader(b) & TYPEBITS)
         {
         case typeBIGNUM:
-            return T::op(lhsType, lhsVal, xB, qint64(b));
+            return T::op(lhsType, lhsVal, xB, arith::vector_of_handle(b));
         default:
             return error1("Non-numeric argument", b);
         }
@@ -4343,14 +4335,14 @@ static inline R binary(LispObject a, LispObject b)
     switch (a & TAGBITS)
     {
     case tagFIXNUM:
-        return binary<R,T,I,intptr_t>(xI, qfixnum(a), b);
+        return binary<R,T,I,int64_t>(xI, qfixnum(a), b);
     case tagFLOAT:
         return binary<R,T,D,double>(xD, qfloat(a), b);
     case tagATOM:
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return binary<R,T,B,int64_t>(xB, qint64(a), b);
+            return binary<R,T,B,uint64_t *>(xB, arith::vector_of_handle(a), b);
         default:
             return error1("Non-numeric argument", a);
         }
@@ -4373,7 +4365,7 @@ static inline R ibinary(U lhsType, V lhsVal, LispObject b)
         switch (qheader(b) & TYPEBITS)
         {
         case typeBIGNUM:
-            return T::op(lhsType, lhsVal, xB, qint64(b));
+            return T::op(lhsType, lhsVal, xB, arith::vector_of_handle(b));
         default:
             return error1("Non-integer argument", b);
         }
@@ -4388,12 +4380,12 @@ static inline R ibinary(LispObject a, LispObject b)
     switch (a & TAGBITS)
     {
     case tagFIXNUM:
-        return ibinary<R,T,I,intptr_t>(xI, qfixnum(a), b);
+        return ibinary<R,T,I,int64_t>(xI, qfixnum(a), b);
     case tagATOM:
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return ibinary<R,T,B,int64_t>(xB, qint64(a), b);
+            return ibinary<R,T,B,uint64_t *>(xB, arith::vector_of_handle(a), b);
         default:
             return error1("Non-integer argument", a);
         }
@@ -4418,7 +4410,7 @@ static inline R unary(LispObject a)
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return T::op(xB, qint64(a));
+            return T::op(xB, arith::vector_of_handle(a));
         default:
             return error1("Non-numeric argument", a);
         }
@@ -4440,7 +4432,7 @@ static inline R iunary(LispObject a)
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return T::op(xB, qint64(a));
+            return T::op(xB, arith::vector_of_handle(a));
         default:
             return error1("Non-integer argument", a);
         }
@@ -4465,7 +4457,7 @@ static inline R shiftlike(LispObject a, LispObject b)
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return T::op(xB, qint64(a), n);
+            return T::op(xB, arith::vector_of_handle(a), n);
         default:
             return error1("Non-integer argument", a);
         }
@@ -4485,45 +4477,45 @@ public:
 // a and b are both fixnums. I use intptr_t to hold the integer that
 // they decode to since that will be "right" whether running on a 32 or
 // 64-bit platform. I make SHORT definitions like this one "inline".
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a + b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Plus::op(a, b);
     }
 // a is a fixnum and b is a float
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a + b);
+    {   return boxfloat(arith::Float::op(a) + b);
     }
 // a is a fixnum and b is a bignum
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a + b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Plus::op(a, b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxfloat(a + (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return boxfloat(a + arith::Float::op(b));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return boxfloat(a + b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxfloat(a + (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return boxfloat(a + arith::Float::op(b));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a + b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Plus::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a + b);
+    {   return boxfloat(arith::Float::op(a) + b);
     }
 // longer operations, such as adding two bignums, are left so that a
 // real function call might be used.
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a + b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Plus::op(a, b);
     }
 };
 
@@ -4538,41 +4530,41 @@ static LispObject Nplus2(LispObject a, LispObject b)
 class Subtracter
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a - b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Difference::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a - b);
+    {   return boxfloat(arith::Float::op(a) - b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a - b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Difference::op(a, b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxfloat(a - (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return boxfloat(a - arith::Float::op(b));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return boxfloat(a - b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxfloat(a - (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return boxfloat(a - arith::Float::op(b));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a - b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Difference::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a - b);
+    {   return boxfloat(arith::Float::op(a) - b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a - b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Difference::op(a, b);
     }
 };
 
@@ -4586,41 +4578,41 @@ static LispObject Ndifference2(LispObject a, LispObject b)
 class Multiplier
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a * b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Times::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a * b);
+    {   return boxfloat(arith::Float::op(a) * b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a * b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Times::op(a, b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxfloat(a * (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return boxfloat(a * arith::Float::op(b));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return boxfloat(a * b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxfloat(a * (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return boxfloat(a * arith::Float::op(b));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a * b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Times::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a * b);
+    {   return boxfloat(arith::Float::op(a) * b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a * b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Times::op(a, b);
     }
 };
 
@@ -4633,41 +4625,41 @@ static LispObject Ntimes2(LispObject a, LispObject b)
 class Quotienter
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a / b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Quotient::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a / b);
+    {   return boxfloat(arith::Float::op(a) / b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a / b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Quotient::op(a, b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxfloat(a / (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return boxfloat(a / arith::Float::op(b));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return boxfloat(a / b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxfloat(a / (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return boxfloat(a / arith::Float::op(b));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a / b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Quotient::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return boxfloat((double)a / b);
+    {   return boxfloat(arith::Float::op(a) / b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a / b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Quotient::op(a, b);
     }
 };
 
@@ -4688,41 +4680,41 @@ static inline double fpremainder(double a, double b)
 class Remainderer
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(fpremainder(a, b));
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Remainder::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return boxfloat(fpremainder((double)a, b));
+    {   return boxfloat(fpremainder(arith::Float::op(a), b));
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a % b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Remainder::op(a, b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxfloat(fpremainder(a, (double)b));
+                                number_dispatcher::I t2, int64_t b)
+    {   return boxfloat(fpremainder(a, arith::Float::op(b)));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return boxfloat(fpremainder(a, b));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxfloat(fpremainder(a, (double)b));
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return boxfloat(fpremainder(a, arith::Float::op(b)));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a % b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Remainder::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return boxfloat(fpremainder((double)a, b));
+    {   return boxfloat(fpremainder(arith::Float::op(a), b));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a % b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Remainder::op(a, b);
     }
 };
 
@@ -4735,45 +4727,45 @@ static LispObject Nremainder2(LispObject a, LispObject b)
 class Divider
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return cons(boxint64(a / b), boxint64(a % b));
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Divide::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return cons(boxfloat((double)a / b),
-                    boxfloat(fpremainder((double)a, b)));
+    {   return cons(boxfloat(arith::Float::op(a) / b),
+                    boxfloat(fpremainder(arith::Float::op(a), b)));
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return cons(boxint64(a / b), boxint64(a % b));
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Divide::op(a, b);
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return cons(boxfloat(a / (double)b),
-                    boxfloat(fpremainder(a, (double)b)));
+                                number_dispatcher::I t2, int64_t b)
+    {   return cons(boxfloat(a / arith::Float::op(b)),
+                    boxfloat(fpremainder(a, arith::Float::op(b))));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return cons(boxfloat(a / b), boxfloat(fpremainder(a, b)));
     }
     static inline LispObject op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return cons(boxfloat(a / (double)b),
-                    boxfloat(fpremainder(a, (double)b)));
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return cons(boxfloat(a / arith::Float::op(b)),
+                    boxfloat(fpremainder(a, arith::Float::op(b))));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return cons(boxint64(a / b), boxint64(a % b));
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Divide::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return cons(boxfloat((double)a / b),
-                    boxfloat(fpremainder((double)a, b)));
+    {   return cons(boxfloat(arith::Float::op(a) / b),
+                    boxfloat(fpremainder(arith::Float::op(a), b)));
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return cons(boxint64(a / b), boxint64(a % b));
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Divide::op(a, b);
     }
 };
 
@@ -4787,21 +4779,21 @@ static LispObject Ndivide2(LispObject a, LispObject b)
 class Ander
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a & b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Logand::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a & b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Logand::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a & b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Logand::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a & b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Logand::op(a, b);
     }
 };
 
@@ -4815,21 +4807,21 @@ static LispObject Nlogand2(LispObject a, LispObject b)
 class Orer
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a | b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Logor::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a | b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Logor::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a | b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Logor::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a | b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Logor::op(a, b);
     }
 };
 
@@ -4842,21 +4834,21 @@ static LispObject Nlogor2(LispObject a, LispObject b)
 class Xorer
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a ^ b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Logxor::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a ^ b);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Logxor::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return boxint64(a ^ b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Logxor::op(a, b);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return boxint64(a ^ b);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Logxor::op(a, b);
     }
 };
 
@@ -4869,41 +4861,44 @@ static LispObject Nlogxor2(LispObject a, LispObject b)
 class Greaterper
 {
 public:
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a > b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Greaterp::op(a, b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
+// Here I convert both of the tings that are to be compared to floating
+// point. That is not always perfectly accurate and it could also give
+// need for more thought about floating point overflow cases.
+    static inline bool op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return ((double)a > b);
+    {   return (arith::Float::op(a) > b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return (a > b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Greaterp::op(a, b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a > (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return (a > arith::Float::op(b));
     }
     static inline bool op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return (a > b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a > (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return (a > arith::Float::op(b));
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return (a > b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Greaterp::op(a, b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return ((double)a > b);
+    {   return (arith::Float::op(a) > b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a > b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Greaterp::op(a, b);
     }
 };
 
@@ -4917,41 +4912,41 @@ static inline bool Bgreaterp2(LispObject a, LispObject b)
 class Geqer
 {
 public:
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a >= b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Geq::op(a, b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
+    static inline bool op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return ((double)a >= b);
+    {   return (arith::Float::op(a) >= b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return (a >= b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Geq::op(a, b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a >= (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return (a >= arith::Float::op(b));
     }
     static inline bool op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return (a >= b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a >= (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return (a >= arith::Float::op(b));
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return (a >= b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Geq::op(a, b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return ((double)a >= b);
+    {   return (arith::Float::op(a) >= b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a >= b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Geq::op(a, b);
     }
 };
 
@@ -4966,41 +4961,41 @@ static inline bool Bgeq2(LispObject a, LispObject b)
 class Lessper
 {
 public:
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a < b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Lessp::op(a, b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
+    static inline bool op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return ((double)a < b);
+    {   return (arith::Float::op(a) < b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return (a < b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Lessp::op(a, b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a < (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return (a < arith::Float::op(b));
     }
     static inline bool op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return (a < b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a < (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return (a < arith::Float::op(b));
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return (a < b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Lessp::op(a, b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return ((double)a < b);
+    {   return (arith::Float::op(a) < b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a < b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Lessp::op(a, b);
     }
 };
 
@@ -5013,41 +5008,41 @@ static inline bool Blessp2(LispObject a, LispObject b)
 class Leqer
 {
 public:
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a <= b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Leq::op(a, b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
+    static inline bool op(number_dispatcher::I t1, int64_t a,
                                 number_dispatcher::D t2, double b)
-    {   return ((double)a <= b);
+    {   return (arith::Float::op(a) <= b);
     }
-    static inline bool op(number_dispatcher::I t1, intptr_t a,
-                                number_dispatcher::B t2, int64_t b)
-    {   return (a <= b);
+    static inline bool op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Leq::op(a, b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                                number_dispatcher::I t2, intptr_t b)
-    {   return (a <= (double)b);
+                                number_dispatcher::I t2, int64_t b)
+    {   return (a <= arith::Float::op(b));
     }
     static inline bool op(number_dispatcher::D t1, double a,
                                 number_dispatcher::D t2, double b)
     {   return (a <= b);
     }
     static inline bool op(number_dispatcher::D t1, double a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a <= (double)b);
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return (a <= arith::Float::op(b));
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::I t2, intptr_t b)
-    {   return (a <= b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Leq::op(a, b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
                          number_dispatcher::D t2, double b)
-    {   return ((double)a <= b);
+    {   return (arith::Float::op(a) <= b);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a,
-                         number_dispatcher::B t2, int64_t b)
-    {   return (a <= b);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Leq::op(a, b);
     }
 };
 
@@ -5060,14 +5055,14 @@ static inline bool Bleq2(LispObject a, LispObject b)
 class Add1er
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
-    {   return boxint64(a + 1);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Add1::op(a);
     }
     static inline LispObject op(number_dispatcher::D t1, double a)
     {   return boxfloat(a + 1.0);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a)
-    {   return boxint64(a + 1);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Add1::op(a);
     }
 };
 
@@ -5080,14 +5075,14 @@ static LispObject Nadd1(LispObject a)
 class Sub1er
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
-    {   return boxint64(a - 1);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Sub1::op(a);
     }
     static inline LispObject op(number_dispatcher::D t1, double a)
     {   return boxfloat(a - 1.0);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a)
-    {   return boxint64(a - 1);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Sub1::op(a);
     }
 };
 
@@ -5100,14 +5095,14 @@ static LispObject Nsub1(LispObject a)
 class Minuser
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
-    {   return boxint64(-a);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Minus::op(a);
     }
     static inline LispObject op(number_dispatcher::D t1, double a)
     {   return boxfloat(-a);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a)
-    {   return boxint64(-a);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Minus::op(a);
     }
 };
 
@@ -5120,14 +5115,14 @@ static LispObject Nminus(LispObject a)
 class Minusper
 {
 public:
-    static inline bool op(number_dispatcher::I t1, intptr_t a)
-    {   return (a < 0);
+    static inline bool op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Minusp::op(a);
     }
     static inline bool op(number_dispatcher::D t1, double a)
     {   return (a < 0);
     }
-    static inline bool op(number_dispatcher::B t1, int64_t a)
-    {   return (a < 0);
+    static inline bool op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Minusp::op(a);
     }
 };
 
@@ -5141,11 +5136,11 @@ static inline bool Bminusp(LispObject a)
 class Lognoter
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a)
-    {   return boxint64(~a);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Lognot::op(a);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a)
-    {   return boxint64(~a);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Lognot::op(a);
     }
 };
 
@@ -5158,11 +5153,11 @@ static LispObject Nlognot(LispObject a)
 class Leftshifter
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a, intptr_t n)
-    {   return boxint64(a << n);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a, int64_t n)
+    {   return arith::Leftshift::op(a, n);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a, intptr_t n)
-    {   return boxint64(a << n);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a, int64_t n)
+    {   return arith::Leftshift::op(a, n);
     }
 };
 
@@ -5176,11 +5171,11 @@ static LispObject Nleftshift(LispObject a, LispObject b)
 class Rightshifter
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, intptr_t a, intptr_t n)
-    {   return boxint64(a >> n);
+    static inline LispObject op(number_dispatcher::I t1, int64_t a, int64_t n)
+    {   return arith::Rightshift::op(a, n);
     }
-    static inline LispObject op(number_dispatcher::B t1, int64_t a, intptr_t n)
-    {   return boxint64(a >> n);
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a, int64_t n)
+    {   return arith::Rightshift::op(a, n);
     }
 };
 
@@ -5196,11 +5191,10 @@ LispObject Lminus(LispObject lits, LispObject x)
 LispObject Lminusp(LispObject lits, LispObject x)
 {
 // Anything non-numeric will not be negative!
-    if ((isFIXNUM(x) && x < 0) ||
+    if ((isFIXNUM(x) && qfixnum(x) < 0) ||
         (isFLOAT(x) && qfloat(x) < 0.0) ||
-        (isATOM(x) &&
-         (qheader(x) & TYPEBITSX) == typeBIGNUM &&
-         qint64(x) < 0)) return lisptrue;
+        (isBIGNUM(x) &&
+         arith::Minusp::op(arith::vector_of_handle(x)))) return lisptrue;
     else return nil;
 }
 
@@ -5695,7 +5689,7 @@ LispObject Lreadch(LispObject lits)
 
 LispObject Lreadline(LispObject lits)
 {   char ch[200];
-    uintptr_t n = 0;
+    size_t n = 0;
     if (curchar == '\n') curchar = rdch();
     while (curchar != '\n' && curchar != EOF)
     {   if (n < sizeof(ch)-1) ch[n++] = curchar;
@@ -6027,6 +6021,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_0),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_0),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_0),         \
+    SETUP_TABLE_SELECT("plus",              Lplus_0),           \
+    SETUP_TABLE_SELECT("times",             Ltimes_0),          \
+    SETUP_TABLE_SELECT("logand",            Llogand_0),         \
+    SETUP_TABLE_SELECT("logor",             Llogor_0),          \
+    SETUP_TABLE_SELECT("logxor",            Llogxor_0),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_0),       \
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
@@ -6056,6 +6055,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_1),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_1),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_1),         \
+    SETUP_TABLE_SELECT("plus",              Lplus_1),           \
+    SETUP_TABLE_SELECT("times",             Ltimes_1),          \
+    SETUP_TABLE_SELECT("logand",            Llogand_1),         \
+    SETUP_TABLE_SELECT("logor",             Llogor_1),          \
+    SETUP_TABLE_SELECT("logxor",            Llogxor_1),         \
     SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
     SETUP_TABLE_SELECT("atan",              Latan),             \
     SETUP_TABLE_SELECT("atom",              Latom),             \
@@ -6099,8 +6103,19 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("iminusp",           Lminusp),           \
     SETUP_TABLE_SELECT("inumberp",          Lnumberp),          \
     SETUP_TABLE_SELECT("isub1",             Lsub1),             \
+    SETUP_TABLE_SELECT("add1",              Ladd1),             \
+    SETUP_TABLE_SELECT("ceiling",           Lceiling),          \
+    SETUP_TABLE_SELECT("fix",               Lfix),              \
+    SETUP_TABLE_SELECT("fixp",              Lfixp),             \
+    SETUP_TABLE_SELECT("float",             Lfloat),            \
+    SETUP_TABLE_SELECT("lognot",            Llognot),           \
+    SETUP_TABLE_SELECT("minus",             Lminus),            \
+    SETUP_TABLE_SELECT("minusp",            Lminusp),           \
+    SETUP_TABLE_SELECT("numberp",           Lnumberp),          \
+    SETUP_TABLE_SELECT("sub1",              Lsub1),             \
     SETUP_TABLE_SELECT("floatp",            Lfloatp),           \
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
+    SETUP_TABLE_SELECT("floor",             Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("length",            Llength),           \
@@ -6151,6 +6166,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_2),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_2),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_2),         \
+    SETUP_TABLE_SELECT("plus",              Lplus_2),           \
+    SETUP_TABLE_SELECT("times",             Ltimes_2),          \
+    SETUP_TABLE_SELECT("logand",            Llogand_2),         \
+    SETUP_TABLE_SELECT("logor",             Llogor_2),          \
+    SETUP_TABLE_SELECT("logxor",            Llogxor_2),         \
     SETUP_TABLE_SELECT("apply",             Lapply),            \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
     SETUP_TABLE_SELECT("cons",              Lcons),             \
@@ -6169,6 +6189,17 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("iquotient",         Lquotient),         \
     SETUP_TABLE_SELECT("iremainder",        Lremainder),        \
     SETUP_TABLE_SELECT("irightshift",       Lrightshift),       \
+    SETUP_TABLE_SELECT("difference",        Ldifference),       \
+    SETUP_TABLE_SELECT("divide",            Ldivide),           \
+    SETUP_TABLE_SELECT("equal",             Lequal),            \
+    SETUP_TABLE_SELECT("geq",               Lgeq),              \
+    SETUP_TABLE_SELECT("greaterp",          Lgreaterp),         \
+    SETUP_TABLE_SELECT("leftshift",         Lleftshift),        \
+    SETUP_TABLE_SELECT("leq",               Lleq),              \
+    SETUP_TABLE_SELECT("lessp",             Llessp),            \
+    SETUP_TABLE_SELECT("quotient",          Lquotient),         \
+    SETUP_TABLE_SELECT("remainder",         Lremainder),        \
+    SETUP_TABLE_SELECT("rightshift",        Lrightshift),       \
     SETUP_TABLE_SELECT("get",               Lget),              \
     SETUP_TABLE_SELECT("gethash",           Lgethash),          \
     SETUP_TABLE_SELECT("getv",              Lgetv),             \
@@ -6199,6 +6230,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_3),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_3),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_3),         \
+    SETUP_TABLE_SELECT("plus",              Lplus_3),           \
+    SETUP_TABLE_SELECT("times",             Ltimes_3),          \
+    SETUP_TABLE_SELECT("logand",            Llogand_3),         \
+    SETUP_TABLE_SELECT("logor",             Llogor_3),          \
+    SETUP_TABLE_SELECT("logxor",            Llogxor_3),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_3),       \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_3),       \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_3),         \
@@ -6221,6 +6257,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_4),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_4),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_4),         \
+    SETUP_TABLE_SELECT("plus",              Lplus_4),           \
+    SETUP_TABLE_SELECT("times",             Ltimes_4),          \
+    SETUP_TABLE_SELECT("logand",            Llogand_4),         \
+    SETUP_TABLE_SELECT("logor",             Llogor_4),          \
+    SETUP_TABLE_SELECT("logxor",            Llogxor_4),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_4),       \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_4),       \
     SETUP_TABLE_SELECT("string-store2",     Lstring_store2),    \
@@ -6236,6 +6277,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_5up),       \
     SETUP_TABLE_SELECT("ilogor",            Llogor_5up),        \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_5up),       \
+    SETUP_TABLE_SELECT("plus",              Lplus_5up),         \
+    SETUP_TABLE_SELECT("times",             Ltimes_5up),        \
+    SETUP_TABLE_SELECT("logand",            Llogand_5up),       \
+    SETUP_TABLE_SELECT("logor",             Llogor_5up),        \
+    SETUP_TABLE_SELECT("logxor",            Llogxor_5up),       \
     SETUP_TABLE_SELECT("string-store3",     Lstring_store3),    \
     SETUP_TABLE_SELECT("string-store4",     Lstring_store4),    \
     SETUP_TABLE_SELECT("vector",            Lvector_5up),
@@ -6350,7 +6396,7 @@ INLINE const size_t SETUPSIZE = sizeof(setup_defs)/sizeof(void *);
 
 INLINE const size_t SETUPHASHSIZE = (((2*3*5*7*11)*((int)SETUPSIZE/1000+1))+1);
 static inline size_t HASHPTR(void *x)
-{   return (size_t)((((uintptr_t)x)*314159u)%SETUPHASHSIZE);
+{   return (size_t)((((uint64_t)x)*314159u)%SETUPHASHSIZE);
 }
 
 void setwrongnumbers(LispObject w)
@@ -6538,11 +6584,11 @@ void **setuphash2v;
 void *setuphashlookup(void *k)
 {
     size_t i = HASHPTR(k);
-    const uint64_t *p;
+    const uintptr_t *p;
     while (setuphash1k[i] != k &&
            setuphash1k[i] != NULL) i = (i + 1) % SETUPHASHSIZE;
     if (setuphash1k[i] == NULL) return NULL;
-    p = (uint64_t *)setuphash1v[i];
+    p = (uintptr_t *)setuphash1v[i];
     i = (int)((p[0] + p[1]) % SETUPHASHSIZE);
     while (setuphash2k[i] != NULL &&
            memcmp(setuphash2k[i], p, MAX_NAMESIZE) != 0)

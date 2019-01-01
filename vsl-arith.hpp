@@ -422,6 +422,17 @@ inline bool fits_into_fixnum(int64_t n);
 inline intptr_t int_to_handle(int64_t n);
 constexpr inline int64_t int_of_handle(intptr_t n);
 
+inline intptr_t string_to_bignum(const char *s);
+inline intptr_t int_to_bignum(int64_t n);
+inline intptr_t unsigned_int_to_bignum(uint64_t n);
+inline intptr_t double_to_bignum(double d);
+inline intptr_t double_to_floor(double d);
+inline intptr_t double_to_ceiling(double d);
+inline intptr_t uniform_positive(size_t n);
+inline intptr_t uniform_signed(size_t n);
+inline intptr_t uniform_upto(intptr_t a);
+inline intptr_t random_upto_bits(size_t bits);
+inline intptr_t fudge_distribution(intptr_t, int);
 
 #if defined MALLOC
 
@@ -1072,21 +1083,9 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 }
 
 
-#else
+#else // none if MALLOC, LISP or NEW specified.
 #error Unspecified memory model
 #endif
-
-inline intptr_t string_to_bignum(const char *s);
-inline intptr_t int_to_bignum(int64_t n);
-inline intptr_t unsigned_int_to_bignum(uint64_t n);
-inline intptr_t double_to_bignum(double d);
-inline intptr_t double_to_floor(double d);
-inline intptr_t double_to_ceiling(double d);
-inline intptr_t uniform_positive(size_t n);
-inline intptr_t uniform_signed(size_t n);
-inline intptr_t uniform_upto(intptr_t a);
-inline intptr_t random_upto_bits(size_t bits);
-inline intptr_t fudge_distribution(intptr_t, int);
 
 // The main arithmetic operations are supported by code that can work on
 // Bignums stored as vectors of digits or on Fixnums represented as (tagged)
@@ -1263,6 +1262,18 @@ class Lessp
     static bool op(int64_t, uint64_t *);
     static bool op(uint64_t *, int64_t);
     static bool op(uint64_t *, uint64_t *);
+};
+
+class Add1
+{   public:
+    static intptr_t op(int64_t);
+    static intptr_t op(uint64_t *);
+};
+
+class Sub1
+{   public:
+    static intptr_t op(int64_t);
+    static intptr_t op(uint64_t *);
 };
 
 class Minus
@@ -3383,6 +3394,22 @@ intptr_t Minus::op(uint64_t *a)
 intptr_t Minus::op(int64_t a)
 {   if (a == MIN_FIXNUM) return int_to_bignum(-a);
     else return int_to_handle(-a);
+}
+
+intptr_t Add1::op(uint64_t *a)
+{   return Plus::op(a, 1);
+}
+
+intptr_t Add1::op(int64_t a)
+{   return int_to_bignum(a+1);
+}
+
+intptr_t Sub1::op(uint64_t *a)
+{   return Plus::op(a, -1);
+}
+
+intptr_t Sub1::op(int64_t a)
+{   return int_to_bignum(a-1);
 }
 
 intptr_t Abs::op(uint64_t *a)
