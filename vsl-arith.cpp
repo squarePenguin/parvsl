@@ -6167,10 +6167,15 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogor",            Llogor_2),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_2),         \
     SETUP_TABLE_SELECT("plus",              Lplus_2),           \
+    SETUP_TABLE_SELECT("plus2",             Lplus_2),           \
     SETUP_TABLE_SELECT("times",             Ltimes_2),          \
+    SETUP_TABLE_SELECT("times2",            Ltimes_2),          \
     SETUP_TABLE_SELECT("logand",            Llogand_2),         \
+    SETUP_TABLE_SELECT("logand2",           Llogand_2),         \
     SETUP_TABLE_SELECT("logor",             Llogor_2),          \
+    SETUP_TABLE_SELECT("logor2",            Llogor_2),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_2),         \
+    SETUP_TABLE_SELECT("logxor2",           Llogxor_2),         \
     SETUP_TABLE_SELECT("apply",             Lapply),            \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
     SETUP_TABLE_SELECT("cons",              Lcons),             \
