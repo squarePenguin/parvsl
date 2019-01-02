@@ -477,6 +477,8 @@ const int BASES_SIZE = MAX_LISPFILES+29;
 LispObject listbases[BASES_SIZE];
 LispObject obhash[OBHASH_SIZE];
 
+static inline LispObject allocateatom(size_t n);
+
 // ... and non-LispObject values that need to be saved as part of a
 // heap image.
 
@@ -2116,12 +2118,15 @@ void internalprint(LispObject x)
 #undef RAWSTRING
                         return;
                     case typeBIGNUM:
-
-
-//@@@@@@@                        snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, qint64(x));
-
-                        checkspace(len = strlen(printbuffer));
-                        for (i=0; i<len; i++) wrch(printbuffer[i]);
+                        {   uint64_t *v = arith::vector_of_handle(x);
+                            size_t lenv = arith::number_size(v);
+                            LispObject ss = arith::bignum_to_string(v, lenv);
+                            len = veclength(qheader(ss));
+                            s = qstring(ss);
+                            checkspace(len);
+                            for (i=0; i<len; i++) wrch(s[i]);
+                            arith::abandon_string(ss);
+                        }
                         return;
                     case typeVEC:
                     case typeEQHASH:
@@ -5188,6 +5193,24 @@ LispObject Lminus(LispObject lits, LispObject x)
 {   return Nminus(x);
 }
 
+// ====== expt ======
+
+class Expter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a, int64_t n)
+    {   return arith::Pow::op(a, n);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a, int64_t n)
+    {   return arith::Pow::op(a, n);
+    }
+};
+
+static LispObject Nexpt(LispObject a, LispObject b)
+{   return number_dispatcher::shiftlike<LispObject,Expter>(a, b);
+}
+
+
 LispObject Lminusp(LispObject lits, LispObject x)
 {
 // Anything non-numeric will not be negative!
@@ -5232,6 +5255,10 @@ LispObject Lleftshift(LispObject lits, LispObject x, LispObject y)
 
 LispObject Lrightshift(LispObject lits, LispObject x, LispObject y)
 {   return Nrightshift(x, y);
+}
+
+LispObject Lexpt(LispObject lits, LispObject x, LispObject y)
+{   return Nexpt(x, y);
 }
 
 LispObject Lgreaterp(LispObject lits, LispObject x, LispObject y)
@@ -6197,6 +6224,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("difference",        Ldifference),       \
     SETUP_TABLE_SELECT("divide",            Ldivide),           \
     SETUP_TABLE_SELECT("equal",             Lequal),            \
+    SETUP_TABLE_SELECT("expt",              Lexpt),             \
     SETUP_TABLE_SELECT("geq",               Lgeq),              \
     SETUP_TABLE_SELECT("greaterp",          Lgreaterp),         \
     SETUP_TABLE_SELECT("leftshift",         Lleftshift),        \

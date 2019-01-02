@@ -56,6 +56,19 @@
 // need that. It should work on 32-bit systems as well, although one should
 // expect performance there to be lower.
 //
+// If "softfloat_h" is defined I will suppose that there is a type "float128"
+// available and I will support conversions to and from that. In part because
+// this type is not supported in any standard way I will be assuming that the
+// version I use is as provided by the SoftFloat IEEE Floating-Point Arithmetic
+// package released by John R. Hauser. That does everything in software so
+// absolute speed may be modest, but it is nicely portable. For more
+// information see http://www.jhauser.us/arithmetic/SoftFloat.html.
+//
+// I will check "#ifdef softfloat_h" to see if I will activate the 128-bit
+// floating pint option. That should check whether softfloat.h has been
+// included before this file.
+
+//
 // I will provide two levels of access and abstraction. At the low level
 // a big number is represented as and array of uint64_t digits along with
 // a size_t value that indicates the number of digits in use. The most
@@ -409,10 +422,14 @@ inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final);
 inline void abandon(uint64_t *p);
 inline void abandon(intptr_t h);
 
-inline char *reserve_string(size_t n);
-inline char *confirm_size_string(char *p, size_t n, size_t final);
-inline size_t string_size(char *s);
-inline void abandon_string(char *s);
+#ifdef LISP
+typedef intptr_t string_handle;
+#else
+typedef char *string_handle;
+#endif
+
+inline string_handle confirm_size_string(char *p, size_t n, size_t final);
+inline void abandon_string(string_handle);
 
 inline intptr_t vector_to_handle(uint64_t *p);
 inline uint64_t *vector_of_handle(intptr_t n);
@@ -705,39 +722,35 @@ inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
 }
 
 inline intptr_t vector_to_handle(uint64_t *p)
-{   return (intptr_t)p + tagATOM;
+{   return (intptr_t)p;
 }
 
 inline uint64_t *vector_of_handle(intptr_t n)
-{   return (uint64_t *)(n - tagATOM);
+{   return (uint64_t *)n;
 }
 
 inline size_t number_size(uint64_t *p)
-{   uintptr_t h = (uintptr_t)p[-1];
-// in VSL veclength() returns the size of the object in bytes but not
-// including its header. So here I just need to convert that to count in
-// units of uint64_t.
-    size_t r = veclength(h)/sizeof(uint64_t);
+{   size_t r = ((uint32_t *)(&p[-1]))[1];
     my_assert(r>0 && r<1000000);
     return ((uint32_t *)(&p[-1]))[1];
 }
 
 inline bool stored_as_fixnum(intptr_t a)
-{    return isFIXNUM(a);
+{    return ((int)a & 1) != 0;
 }
 
 constexpr inline int64_t int_of_handle(intptr_t a)
-{   return qfixnum(a);
+{   return ((int64_t)a & ~(int64_t)1)/2;
 }
 
 // This function should only ever be called in situations where the
 // arithmetic indicated will not overflow.
 
 inline intptr_t int_to_handle(int64_t n)
-{   return packfixnum(n);
+{   return (intptr_t)(2*n + 1);
 }
 
-// The following two lines are slighly delicate4 in that INTPTR_MIN and _MAX
+// The following two lines are slighly delicate in that INTPTR_MIN and _MAX
 // may not have the low tage bits to be proper fixnums. But if I implement
 // int_of_handle so that it ignores tag bits that will be OK.
 
@@ -772,6 +785,16 @@ inline char *confirm_size_string(char *p, size_t n, size_t final)
 inline void abandon_string(char *s)
 {   delete s;
 }
+
+// In the NEW case I will want to make all operations cope with both
+// shorter integers (up to 63 bits) stored as the "handle", or genuine
+// big numbers where the handle yields a pointer to a vector of 64-bit
+// words. I do this by having a dispatch scheme that can activate code
+// for each of the mixtures of representations.
+//
+
+// Dispatch as between mixed bignum and fixnum representations using some
+// template stuff and classes.
 
 template <class OP,class RES>
 inline RES op_dispatch1(intptr_t a1)
@@ -833,154 +856,57 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 //=========================================================================
 //=========================================================================
 // The LISP code is for incorporation in VSL.
-// Well I will start with just a copy of the NEW stuff...
 //=========================================================================
 //=========================================================================
-
-
-inline unsigned int log_next_power_of_2(size_t n);
-
-INLINE_VAR uint64_t *freechain_table[64];
-
-class freechains
-{
-public:
-// I keep my freechain table within an object so that the object can
-// be created as the program starts up and particularly so that it will
-// then be deleted on program termination. Its destructor can free all the
-// memory that it is keeping track of.
-    freechains()
-    {   for (size_t i=0; i<64; i++) freechain_table[i] = NULL;
-    }
-    ~freechains()
-    {   for (size_t i=0; i<64; i++)
-        {   uint64_t *f = freechain_table[i];
-            if (debug_arith)
-// Report how many entries there are in the freechain.
-            {   size_t n = 0;
-// To arrange that double-free mistakes are detected I arrange to put -1
-// in the initial word of any deleted block, so that all blocks on the
-// freechains here should show that. I set and test for that in the other
-// bits of code that allocate or release memory.
-                for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[1])
-                {   my_assert(b[0] == -(uint64_t)1);
-                    n++;
-                }
-                if (n != 0)
-                    std::cout << "Freechain " << i << " length: "
-                              << n << std::endl;
-            }
-            while (f != NULL)
-            {   uint64_t w = f[1];
-                delete f;
-                f = (uint64_t *)w;
-            }
-            freechain_table[i] = NULL;
-        }
-    }
-// Finding the number of bits in n is achieved by counting the leading
-// zeros in the representation of n, and on many platforms an intrinsic
-// function will compile this into a single machine code instruction.
-    static uint64_t *allocate(size_t n)
-    {
-// If I am debugging I will always allocate an extra word that will lie
-// just beyond what would have been the end of my block, and I will
-// fill everything with a pattern that might let me spot some cases where
-// I write beyond the proper size of data.
-        int bits = log_next_power_of_2(debug_arith ? n+1 : n);
-        my_assert(n<=(((size_t)1)<<bits) && n>0);
-        uint64_t *r = freechain_table[bits];
-        if (r == NULL)
-        {   r = new uint64_t[((size_t)1)<<bits];
-            my_assert(r != NULL);
-            if (debug_arith)
-            {   std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
-                r[0] = 0;
-            }
-        }
-        else
-        {   freechain_table[bits] = (uint64_t *)r[1];
-            if (debug_arith)
-            {   my_assert(r[0] == -(uint64_t)1);
-                std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
-                r[0] = 0;
-            }
-        }
-// Just the first 32-bits of the header word record the clock capacity.
-// The casts here look (and indeed are) ugly, but when I store data into
-// memory as a 32-bit value that is how I will read it later on, and the
-// messy notation here does not correspond to complicated computation.
-        ((uint32_t *)r)[0] = bits;
-        return r;
-    }
-// When I abandon a memory block I will push it onto a relevant free chain.
-    static void abandon(uint64_t *p)
-    {   my_assert(p[0] != -(uint64_t)1);
-        int bits = ((uint32_t *)p)[0];
-        my_assert(bits>0 && bits<48);
-// Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
-// risking loss of information.
-        if (debug_arith) p[0] = -(uint64_t)1;
-        p[1] = (uint64_t)freechain_table[bits];
-        freechain_table[bits] = p;
-    }
-};
-
-// Set up the object that manages the freechains. At program startup this
-// fills freechain_table with NULL entries, and at the end of execution
-// it frees all the memory blocks mentioned there.
-
-INLINE_VAR freechains fc;
 
 inline uint64_t *reserve(size_t n)
 {   my_assert(n>0 && n<1000000);
-    return &(fc.allocate(n+1))[1];
+// I must allow for alignment padding on 32-bit platforms.
+    if (sizeof(LispObject)==4) n = n*sizeof(uint64_t) + 4;
+    else n = n*sizeof(uint64_t);
+    LispObject a = allocateatom(n);
+    return (uint64_t *)(a + 8 - tagATOM);
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 {   my_assert(final>0 && n>=final);
-// Verify that the word just beyond where anything should have been
-// stored has not been clobbered.
-    if (debug_arith) my_assert(p[n] == 0xaaaaaaaaaaaaaaaaU);
     if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
-        fc.abandon(&p[-1]);
         return r;
     }
-// I compare the final size with the capacity and if it is a LOT smaller
-// I allocate a new smaller block and copy the data across.
-// That situation can most plausibly arise when two similar-values big
-// numbers are subtracted.
-    int bits = ((uint32_t *)(&p[-1]))[0]; 
-    size_t capacity = ((size_t)1)<<bits;
-    if (capacity > 4*final)
-    {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
-        memcpy(&w[1], p, final*sizeof(uint64_t));
-        fc.abandon(&p[-1]);
-        p = &w[1];
-    }
-    ((uint32_t *)(&p[-1]))[1] = final;
+// If I am on a 32-bit system the data for a bignum is 8 bit aligned and
+// that leaves a 4-byte gat after the header. In such a case I will write
+// in a zero just to keep memory tidy.
+    if (sizeof(LispObject) == 4) p[-1] = 0;
+    *((LispObject *)&p[-1]) =
+        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t));
+// Here I should reset fringe down by (final-n) perhaps. Think about that
+// later!
     return vector_to_handle(p);
 }
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
 {   my_assert(final>0 && n>=final);
+// Here I might need to write a nice dummy object into the gap left by
+// shrinking the object.
     return confirm_size(p, n, final);
 }
 
 inline intptr_t vector_to_handle(uint64_t *p)
-{   return (intptr_t)p + tagATOM;
+{   return (intptr_t)p - 8 + tagATOM;
 }
 
 inline uint64_t *vector_of_handle(intptr_t n)
-{   return (uint64_t *)(n - tagATOM);
+{   return (uint64_t *)(n + 8 - tagATOM);
 }
 
 inline size_t number_size(uint64_t *p)
-{   uintptr_t h = p[-1];
-    size_t r = veclength(h)/sizeof(uint64_t);
+{   uintptr_t h = *(uintptr_t *)&p[-1];
+    size_t r = veclength(h);
+    if (sizeof(LispObject) == 4) r -= 4;
+    r = r/sizeof(uint64_t);
     my_assert(r>0 && r<1000000);
-    return ((uint32_t *)(&p[-1]))[1];
+    return r;
 }
 
 inline bool stored_as_fixnum(intptr_t a)
@@ -1003,28 +929,29 @@ inline bool fits_into_fixnum(int64_t a)
 }
 
 inline void abandon(uint64_t *p)
-{   fc.abandon(&p[-1]);
+{   // No need to do anything! But MIGHT reset fringe pointer?
 }
 
 inline void abandon(intptr_t p)
 {   if (!stored_as_fixnum(p) && p!=0)
     {   uint64_t *pp = vector_of_handle(p);
-        fc.abandon(&pp[-1]);
+        abandon(pp);
     }
 }
 
 inline char *reserve_string(size_t n)
-{    return new char[n+1];
+{    LispObject a = allocateatom(n);
+     return (char *)(a - tagATOM + sizeof(LispObject));
 }
 
-inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   my_assert(final>0 && (n+9)>final);
-    p[final] = 0;
-    return p;
+inline LispObject confirm_size_string(char *p, size_t n, size_t final)
+{   LispObject *a = (LispObject *)(p - sizeof(LispObject));
+    *a = tagHDR + typeSTRING + packlength(final*sizeof(uint64_t));
+    return (LispObject)a +tagATOM;
 }
 
-inline void abandon_string(char *s)
-{   delete s;
+inline void abandon_string(string_handle s)
+{   // Do nothing.
 }
 
 template <class OP,class RES>
@@ -1353,14 +1280,30 @@ class Logcount
 
 class Float
 {   public:
+    static float op(int64_t);
+    static float op(uint64_t *);
+};
+
+class Double
+{   public:
     static double op(int64_t);
     static double op(uint64_t *);
 };
 
-inline char *bignum_to_string(intptr_t aa);
-inline char *bignum_to_string_hex(intptr_t aa);
-inline char *bignum_to_string_octal(intptr_t aa);
-inline char *bignum_to_string_binary(intptr_t aa);
+#ifdef softfloat_h
+
+class Float128
+{   public:
+    static float128_t op(int64_t);
+    static float128_t op(uint64_t *);
+};
+
+#endif
+
+inline string_handle bignum_to_string(intptr_t aa);
+inline string_handle bignum_to_string_hex(intptr_t aa);
+inline string_handle bignum_to_string_octal(intptr_t aa);
+inline string_handle bignum_to_string_binary(intptr_t aa);
 
 class Bignum;
 
@@ -1626,9 +1569,21 @@ public:
         return oldval;
     }
     
+    inline operator float()
+    {   return op_dispatch1<Float,float>(val);
+    }
+
+    inline operator double()
+    {   return op_dispatch1<Double,double>(val);
+    }
+
     friend std::ostream & operator << (std::ostream &out, const Bignum &a)
     {   std::ios_base::fmtflags fg = out.flags();
+#ifdef LISP
+        LispObject s;
+#else
         char *s;
+#endif
         if ((fg & std::ios_base::hex) != 0)
             s = bignum_to_string_hex(a.val);
         else if ((fg & std::ios_base::oct) != 0)
@@ -1638,7 +1593,12 @@ public:
         else if (radix::is_binary_output(out))
             s = bignum_to_string_binary(a.val);
         else s = bignum_to_string(a.val);
+#ifdef LISP
+        std::string ss(s, veclength(qheader(s)));
+        out << ss;
+#else
         out << s;
+#endif
         abandon_string(s);
         return out;
     }
@@ -1653,7 +1613,7 @@ public:
     }
 };
 
-inline const char *to_string(Bignum x)
+inline const string_handle to_string(Bignum x)
 {   return bignum_to_string(x.val);
 }
 
@@ -1753,8 +1713,20 @@ inline Bignum ceil_bignum(float d)
 }
 
 inline double float_bignum(const Bignum &x)
-{   return op_dispatch1<Float,double>(x.val);
+{   return op_dispatch1<Float,float>(x.val);
 }
+
+inline double double_bignum(const Bignum &x)
+{   return op_dispatch1<Double,double>(x.val);
+}
+
+#ifdef softfloat_h
+
+inline double float128_bignum(const Bignum &x)
+{   return op_dispatch1<Float128,float128_t>(x.val);
+}
+
+#endif
 
 //=========================================================================
 //=========================================================================
@@ -2203,10 +2175,6 @@ inline int read_u3(const uint64_t *v, size_t n, size_t i)
 // Strings are returned to the user as freshly malloced memory holding a
 // native-style C++ string with a terminating NUL character at the end.
 
-inline size_t string_size(char *a)
-{   return strlen(a);
-}
-
 
 //=========================================================================
 //=========================================================================
@@ -2610,18 +2578,128 @@ inline intptr_t double_to_ceiling(double d)
     return r;
 }
 
-inline double Float::op(int64_t a)
+// On Cygwin (at least) the std::ldexpf function that is part of C++11
+// is hidden in the header file perhaps because of issues about thread
+// safety in its implementation. I reason here that converting from a
+// float to a double will never lose anything, then ldexp() can be used.
+// The case back to a float can not introduxce rounding, but might notice
+// overflow leading to a result that is an IEEE infinity.
+
+inline float ldexpf(float a, int n)
+{   return (float)ldexp((double)a, n);
+}
+
+inline float Float::op(int64_t a)
 {
 // The bad news here is that I am not confident that C++ will guarantee
 // to round large integer values in any particular way when it converts
 // them to floating point. So I will take careful action so that the
 // conversions that I do are ones that will be exact, and I will perform
-// rounding in IEEE style myself. I will ASSUME that the output will end up
-// as an IEEE double precision value.
+// rounding in IEEE style myself.
 // First I will see if the value is small enough that I can work directly.
 // In fact I would still be safe with the simple case without the "-1" in
 // the netx line, but that would slightly complicate the code lower down.
-    static const int64_t range = (((int64_t)1)<<53) - 1;
+    static const int64_t range = ((int64_t)1)<<24;
+    if (a >= -range && a <= range) return (float)a;
+// I will now drop down to a sign and magnitude representation
+    bool sign = a < 0;
+    uint64_t top24 = sign ? -(uint64_t)a : a;
+// Because top24 > 2^24 the number of leading zeros in its representation is
+// at most 39. Ha ha. That guaranteed that the shift below will not overflow
+// and is why I chose my range as I did. 
+    int lz = nlz(top24);
+    uint64_t low = top24 << (lz+24);
+    top24 = top24 >> (64-24-lz);
+    if (low > 0x8000000000000000U) top24++;
+    else if (low == 0x8000000000000000U) top24 += (top24 & 1); // round to even
+    my_assert(top24 >= ((int64_t)1)<<23 &&
+              top24 <= ((int64_t)1)<<24);
+// The next line should never introduce any rounding at all.
+    float d = (float)top24;
+    my_assert(top24 == (uint64_t)d);
+    d = ldexpf(d, (int)(64-24-lz));
+    if (sign) return -d;
+    else return d;
+}   
+
+inline float Float::op(uint64_t *a)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Float::op((int64_t)a[0]);
+// Now I need to do something similar to that done for the int64_t case
+// but written larger. Specifically I want to split my input number into
+// its top 24 bits and then all the rest. I will take separate paths
+// for the positive and negative cases.
+    uint64_t top24;
+    int lz;
+    bool sign = false;
+    uint64_t top, next;
+    bool carried = true;
+    for (size_t i=0; i<lena-2; i++)
+    {   if (a[i] != 0)
+        {   carried = false;
+            break;
+        }
+    }
+// Grap the top 128 bits of the number as {top,next}.
+    top = a[lena-1];
+    next = a[lena-2];    // lena >= 2 here
+// Take its absolute value.
+    if (negative(top))
+    {   sign = true;
+        top = ~top;
+        next = ~next;
+        if (carried)
+        {   next++;
+            if (next == 0) top++;
+        }
+    }
+    if (!carried) next |= 1;
+// Now I need to do something very much like the code for the int64_t case.
+    if (top == 0) lz = nlz(next) + 64;
+    else lz = nlz(top);
+//
+//  uint64_t top24 = {top,next} >> (128-24-lz);
+    int sh = 128-24-lz;
+// Note that sh can never be zero here.
+    if (sh < 64) top24 = (next >> sh) | (top << (64-sh));
+    else top24 = top >> (sh-64);
+//
+//  {top,next} = {top,next} << lz+24; // keep only the fraction bits
+    sh = lz+24;
+    if (sh < 64)
+    {   top = (top << sh) | (next >> (64-sh));
+        next = next << sh;
+    }
+    else
+    {   top = next << (sh - 64);
+        next = 0;
+    }
+//
+//  if ({top,next} > 0x80000000000000000000000000000000U) top24++;
+//  else if ({top,next} == 0x80000000000000000000000000000000U)
+//      top24 += (top24 & 1);
+    if (top > 0x8000000000000000U) top24++;
+    else if (top == 0x8000000000000000U)
+    {   if (next != 0) top24++;
+        else top24 += (top24&1);
+    }
+    my_assert(top24 >= ((int64_t)1)<<23 &&
+              top24 <= ((int64_t)1)<<24);
+    double d = (float)top24;
+    my_assert(top24 == (uint64_t)d);
+    if (sign) d = -d;
+    return ldexpf(d, (int)(128-24-lz+64*(lena-2)));
+}
+
+inline double Double::op(int64_t a)
+{
+// The bad news here is that I am not confident that C++ will guarantee
+// to round large integer values in any particular way when it converts
+// them to floating point. So I will take careful action so that the
+// conversions that I do are ones that will be exact, and I will perform
+// rounding in IEEE style myself.
+// First I will see if the value is small enough that I can work directly.
+    static const int64_t range = ((int64_t)1)<<53;
     if (a >= -range && a <= range) return (double)a;
 // I will now drop down to a sign and magnitude representation
     bool sign = a < 0;
@@ -2639,12 +2717,12 @@ inline double Float::op(int64_t a)
 // The next line should never introduce any rounding at all.
     double d = (double)top53;
     my_assert(top53 == (uint64_t)d);
-    d = std::ldexp(d, 64-53-lz);
+    d = std::ldexp(d, (int)(64-53-lz));
     if (sign) return -d;
     else return d;
 }   
 
-inline double Float::op(uint64_t *a)
+inline double Double::op(uint64_t *a)
 {   size_t lena = number_size(a);
     if (lena == 1) return Float::op((int64_t)a[0]);
 // Now I need to do something similar to that done for the int64_t case
@@ -2710,8 +2788,105 @@ inline double Float::op(uint64_t *a)
     double d = (double)top53;
     my_assert(top53 == (uint64_t)d);
     if (sign) d = -d;
-    return std::ldexp(d, 128-53-lz+64*(lena-2));
+    return std::ldexp(d, (int)(128-53-lz+64*(lena-2)));
 }
+
+#ifdef softfloat_h
+
+inline float128_t Float128::op(int64_t a)
+{   return i64_to_f128(a);
+}   
+
+inline float128_t Double::op(uint64_t *a)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Float128::op((int64_t)a[0]);
+    uint64_t top113, top113a;
+    int lz;
+    bool sign = false;
+    uint64_t top, next1, next2;
+    bool carried = true;
+    for (size_t i=0; i<lena-3; i++)
+    {   if (a[i] != 0)
+        {   carried = false;
+            break;
+        }
+    }
+// Grap the top 192 bits of the number as {top,next}.
+    top = a[lena-1];
+    next1 = a[lena-2];
+    next2 = len1==2 ? 0 : a[lena-3];
+// Take its absolute value.
+    if (negative(top))
+    {   sign = true;
+        top = ~top;
+        next1 = ~next1;
+        next2 = ~next2;
+        if (carried)
+        {   next2++;
+            if (next2 == 0)
+            {   next1++;
+                if (next1 == 0) top++;
+            }
+        }
+    }
+    if (!carried) next2 |= 1;
+// I now have {top,next1,next2} the top 192 bits of my integer. top may be
+// zero, but if it is then next1 will have its top bit set, and so within
+// these bits I certainly have the 113 that I need to obtain an accurate
+// floating point value.
+    if (top == 0) lz = nlz(next1) + 64;
+    else lz = nlz(top);
+//
+//  uint64_t {top113,top112a} = {top,next1,next2} >> (128-113-lz);
+    int sh = 192-113-lz;
+// Note that sh can never be zero here.
+    if (sh < 64)
+    {   top113 = (next >> sh) | (top << (64-sh));
+        top113a = (next2 >> sh) | (next1 << (64-sh));
+    }
+    else
+    {   top113 = top >> (sh-64);
+        top113a = (next1 >> (sh-64)) | (top << (128-sh));
+    }
+//
+//  {top,next} = {top,next} << lz+113; // keep only the fraction bits
+    sh = lz+113;
+    if (sh < 64)
+    {   top = (top << sh) | (next1 >> (64-sh));
+        next1 = (next1 << sh) | (next2 >> (64-sh));
+        next2 = next2 << sh;
+    }
+    else
+    {   top = next1 << (sh - 64);
+        next1 = (next1 << (sh-64)) | (next2 >> (129-sh));
+        next2 = 0;
+    }
+//
+//  if ({top,next1,next2} > 0x80000000000000000000000000000000U) top113++;
+//  else if ({top,next1, next2} == 0x80000000000000000000000000000000U)
+//      top113 += (top113 & 1);
+    if (top > 0x8000000000000000U)
+    {   top113a++;
+        if (top113a == 0) top113++;
+    }
+    else if (top == 0x8000000000000000U)
+    {   if (next1 != 0 || (next1==0 && next2!=0))
+        {   top113a++;
+            if (top113a == 0) top113++;
+        }
+        else top113 += add_with_carry(top113a, top113a&1, top113a);
+    }
+//  float128_t d = i64_to_f128({top113, top113a});
+    float128_t d = i64_to_f128(top113);
+    d = f128_add(f128_multiply(2.0^64, d), u64_to_f128(top113a));
+    if (sign) d = f128_negate(d);
+// There is an implementation of ldexp() for 128-bit floats in
+// the CSL source file arith14.cpp.
+    f128M_ldexp(&d, (int)(192-113-lz+64*(lena-2)));
+    return d;
+}
+
+#endif // softfloat_t
 
 INLINE_VAR const uint64_t ten19 = UINT64_C(10000000000000000000);
 
@@ -2854,8 +3029,8 @@ inline size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // internal debugging because at times I work with values that are known
 // to be positive and so where the top digit must be treated as unsigned...
 
-inline char *bignum_to_string(const uint64_t *a, size_t lena,
-                              bool as_unsigned=false)
+inline string_handle bignum_to_string(const uint64_t *a, size_t lena,
+                                      bool as_unsigned=false)
 {
 // Making one-word numbers a special case simplifies things later on! It may
 // also make this case go just slightly faster.
@@ -2996,7 +3171,7 @@ inline char *bignum_to_string(const uint64_t *a, size_t lena,
     return confirm_size_string(rc, m, len);
 }
 
-inline char *bignum_to_string(intptr_t aa)
+inline string_handle bignum_to_string(intptr_t aa)
 {   uint64_t *a, v[1];
     size_t lena;
     if (stored_as_fixnum(aa))
@@ -3013,7 +3188,7 @@ inline char *bignum_to_string(intptr_t aa)
 
 // As well as converting to decimal I can do hex, octal or binary!
 
-inline char *bignum_to_string_hex(intptr_t aa)
+inline string_handle bignum_to_string_hex(intptr_t aa)
 {   uint64_t *a, v[1];
     size_t n;
     if (stored_as_fixnum(aa))
@@ -3075,7 +3250,7 @@ inline char *bignum_to_string_hex(intptr_t aa)
     return confirm_size_string(r, m, m);
 }
 
-inline char *bignum_to_string_octal(intptr_t aa)
+inline string_handle bignum_to_string_octal(intptr_t aa)
 {   uint64_t *a, v[1];
     size_t n;
     if (stored_as_fixnum(aa))
@@ -3113,7 +3288,7 @@ inline char *bignum_to_string_octal(intptr_t aa)
     return confirm_size_string(r, nn, width);
 }
 
-inline char *bignum_to_string_binary(intptr_t aa)
+inline string_handle bignum_to_string_binary(intptr_t aa)
 {   uint64_t *a, v[1];
     size_t n;
     if (stored_as_fixnum(aa))
