@@ -4621,6 +4621,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
     }
     if (a == 0) return int_to_handle(0);
     else if (a == 1) return int_to_handle(a);
+    else if (n == 0) return int_to_handle(1);
     uint64_t absa = (a < 0 ? -(uint64_t)a : (uint64_t)a);
     size_t bitsa = 64 - nlz(absa);
     uint64_t hi, bitsr;
