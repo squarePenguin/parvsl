@@ -279,7 +279,11 @@ static inline void my_abort()
     abort();
 }
 
+#ifdef NEW
 INLINE_VAR const bool debug_arith = true;
+#else
+INLINE_VAR const bool debug_arith = false;
+#endif
 
 template <typename F>
 static inline void my_assert(bool ok, F&& action)
@@ -946,7 +950,7 @@ inline char *reserve_string(size_t n)
 
 inline LispObject confirm_size_string(char *p, size_t n, size_t final)
 {   LispObject *a = (LispObject *)(p - sizeof(LispObject));
-    *a = tagHDR + typeSTRING + packlength(final*sizeof(uint64_t));
+    *a = tagHDR + typeSTRING + packlength(final);
     return (LispObject)a +tagATOM;
 }
 
@@ -4740,7 +4744,7 @@ inline void unsigned_short_division(const uint64_t *a, size_t lena,
 // as a 2-digit bignum.
         if (a_negative)
         {   hi = -hi;
-            if (positive(hi))
+            if (positive(hi) && hi!=0)
             {   olenr = lenr = 2;
                 r = reserve(olenr);
                 r[0] = hi;

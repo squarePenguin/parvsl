@@ -7,7 +7,7 @@
 # end up with page after page of messages. Many current C++ compilers
 # support C++11 by default, but some do not so I force that issue.
 
-CFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O0 -g -Wall
+CFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O0 -g -pg -Wall
 FASTCFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O3 -Wall
 
 # The issue of just which libraries I need to link in seems to be
@@ -76,10 +76,10 @@ fastvsl.img:	fastvsl library.lsp vsl.lsp
 	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
 vsl-arith.img:	vsl-arith library.lsp vsl-arith.lsp
-	time ./vsl-arith -z library.lsp | tee vsl-arith.img.log
+	time ./vsl-arith -z library-arith.lsp | tee vsl-arith.img.log
 
 fastvsl-arith.img:	fastvsl-arith library.lsp vsl-arith.lsp
-	time ./fastvsl-arith -z library.lsp | tee fastvsl-arith.img.log
+	time ./fastvsl-arith -z library-arith.lsp | tee fastvsl-arith.img.log
 
 parvsl.img:	parvsl library.lsp vsl.lsp
 	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
@@ -137,6 +137,13 @@ rcore:	vsl
 		-Dnoinlines=t \
 		buildrcore.lsp | tee rcore.log
 
+rcore-arith:	vsl-arith
+	mkdir -p rcore-arith.img.modules
+	rm -f rcore-arith.img.modules/* rcore-arith.img inline-defs.dat
+	time ./vsl-arith -z -ircore-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildrcore-arith.lsp | tee rcore-arith.log
+
 parrcore:	parvsl
 	mkdir -p parrcore.img.modules
 	rm -f parrcore.img.modules/* parrcore.img inline-defs.dat
@@ -150,6 +157,13 @@ fastrcore:	fastvsl
 	time ./fastvsl -z -ifastrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildrcore.lsp | tee fastrcore.log
+
+fastrcore-arith:	fastvsl-arith
+	mkdir -p fastrcore-arith.img.modules
+	rm -f fastrcore-arith.img.modules/* fastrcore-arith.img inline-defs.dat
+	time ./fastvsl-arith -z -ifastrcore-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildrcore-arith.lsp | tee fastrcore-arith.log
 
 fastparrcore:	fastparvsl
 	mkdir -p fastparrcore.img.modules

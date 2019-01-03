@@ -4471,6 +4471,33 @@ static inline R shiftlike(LispObject a, LispObject b)
     }
 }
 
+// Things like "expt" that take and integer and a fixnum.
+
+template <class R, class T>
+static inline R exptlike(LispObject a, LispObject b)
+{   using namespace number_dispatcher;
+    if ((b & TAGBITS) != tagFIXNUM)
+        return error1("second argument should be a small integer", b);
+    intptr_t n = qfixnum(b);
+    switch (a & TAGBITS)
+    {
+    case tagFIXNUM:
+        return T::op(xI, qfixnum(a), n);
+    case tagFLOAT:
+        return T::op(xD, qfloat(a), n);
+    case tagATOM:
+        switch (qheader(a) & TYPEBITS)
+        {
+        case typeBIGNUM:
+            return T::op(xB, arith::vector_of_handle(a), n);
+        default:
+            return error1("Non-integer argument", a);
+        }
+    default:
+        return error1("Non-integer argument", a);
+    }
+}
+
 } // end of number_dispatcher namespace.
 
 // ====== addition =====
@@ -5204,10 +5231,13 @@ public:
     static inline LispObject op(number_dispatcher::B t1, uint64_t *a, int64_t n)
     {   return arith::Pow::op(a, n);
     }
+    static inline LispObject op(number_dispatcher::D t1, double a, int64_t n)
+    {   return boxfloat(pow(a, n));
+    }
 };
 
 static LispObject Nexpt(LispObject a, LispObject b)
-{   return number_dispatcher::shiftlike<LispObject,Expter>(a, b);
+{   return number_dispatcher::exptlike<LispObject,Expter>(a, b);
 }
 
 
@@ -5275,6 +5305,78 @@ LispObject Llessp(LispObject lits, LispObject x, LispObject y)
 
 LispObject Lleq(LispObject lits, LispObject x, LispObject y)
 {   return Bleq2(x,y) ? lisptrue : nil;
+}
+
+LispObject Lmax_1(LispObject lits, LispObject a)
+{   return a;
+}
+
+LispObject Lmax_2(LispObject lits, LispObject a1, LispObject a2)
+{   if (Bgreaterp2(a2, a1)) a1 = a2;
+    return a1;
+}
+
+LispObject Lmax_3(LispObject lits, LispObject a1, LispObject a2, LispObject a3)
+{   if (Bgreaterp2(a2, a1)) a1 = a2;
+    if (Bgreaterp2(a3, a1)) a1 = a3;
+    return a1;
+}
+
+LispObject Lmax_4(LispObject lits, LispObject a1, LispObject a2,
+                  LispObject a3, LispObject a4)
+{   if (Bgreaterp2(a2, a1)) a1 = a2;
+    if (Bgreaterp2(a3, a1)) a1 = a3;
+    if (Bgreaterp2(a4, a1)) a1 = a4;
+    return a1;
+}
+
+LispObject Lmax_5up(LispObject lits, LispObject a1, LispObject a2,
+                    LispObject a3, LispObject a4, LispObject a5up)
+{   if (Bgreaterp2(a2, a1)) a1 = a2;
+    if (Bgreaterp2(a3, a1)) a1 = a3;
+    if (Bgreaterp2(a4, a1)) a1 = a4;
+    while (isCONS(a5up))
+    {   LispObject w = qcar(a5up);
+        a5up = qcdr(a5up);
+        if (Bgreaterp2(w, a1)) a1 = w;
+    }
+    return a1;
+}
+
+LispObject Lmin_1(LispObject lits, LispObject a)
+{   return a;
+}
+
+LispObject Lmin_2(LispObject lits, LispObject a1, LispObject a2)
+{   if (Blessp2(a2, a1)) a1 = a2;
+    return a1;
+}
+
+LispObject Lmin_3(LispObject lits, LispObject a1, LispObject a2, LispObject a3)
+{   if (Blessp2(a2, a1)) a1 = a2;
+    if (Blessp2(a3, a1)) a1 = a3;
+    return a1;
+}
+
+LispObject Lmin_4(LispObject lits, LispObject a1, LispObject a2,
+                  LispObject a3, LispObject a4)
+{   if (Blessp2(a2, a1)) a1 = a2;
+    if (Blessp2(a3, a1)) a1 = a3;
+    if (Blessp2(a4, a1)) a1 = a4;
+    return a1;
+}
+
+LispObject Lmin_5up(LispObject lits, LispObject a1, LispObject a2,
+                    LispObject a3, LispObject a4, LispObject a5up)
+{   if (Blessp2(a2, a1)) a1 = a2;
+    if (Blessp2(a3, a1)) a1 = a3;
+    if (Blessp2(a4, a1)) a1 = a4;
+    while (isCONS(a5up))
+    {   LispObject w = qcar(a5up);
+        a5up = qcdr(a5up);
+        if (Blessp2(w, a1)) a1 = w;
+    }
+    return a1;
 }
 
 LispObject Lplus_0(LispObject data)
@@ -6052,6 +6154,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("times",             Ltimes_0),          \
     SETUP_TABLE_SELECT("logand",            Llogand_0),         \
     SETUP_TABLE_SELECT("logor",             Llogor_0),          \
+    SETUP_TABLE_SELECT("land",              Llogand_0),         \
+    SETUP_TABLE_SELECT("lor",               Llogor_0),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_0),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_0),       \
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
@@ -6086,6 +6190,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("times",             Ltimes_1),          \
     SETUP_TABLE_SELECT("logand",            Llogand_1),         \
     SETUP_TABLE_SELECT("logor",             Llogor_1),          \
+    SETUP_TABLE_SELECT("land",              Llogand_1),         \
+    SETUP_TABLE_SELECT("lor",               Llogor_1),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_1),         \
     SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
     SETUP_TABLE_SELECT("atan",              Latan),             \
@@ -6136,6 +6242,10 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("fixp",              Lfixp),             \
     SETUP_TABLE_SELECT("float",             Lfloat),            \
     SETUP_TABLE_SELECT("lognot",            Llognot),           \
+    SETUP_TABLE_SELECT("imax",              Lmax_1),            \
+    SETUP_TABLE_SELECT("imin",              Lmin_1),            \
+    SETUP_TABLE_SELECT("max",               Lmax_1),            \
+    SETUP_TABLE_SELECT("min",               Lmin_1),            \
     SETUP_TABLE_SELECT("minus",             Lminus),            \
     SETUP_TABLE_SELECT("minusp",            Lminusp),           \
     SETUP_TABLE_SELECT("numberp",           Lnumberp),          \
@@ -6193,6 +6303,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_2),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_2),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_2),         \
+    SETUP_TABLE_SELECT("iplus2",            Lplus_2),           \
+    SETUP_TABLE_SELECT("itimes2",           Ltimes_2),          \
+    SETUP_TABLE_SELECT("ilogand2",          Llogand_2),         \
+    SETUP_TABLE_SELECT("ilogor2",           Llogor_2),          \
+    SETUP_TABLE_SELECT("ilogxor2",          Llogxor_2),         \
     SETUP_TABLE_SELECT("plus",              Lplus_2),           \
     SETUP_TABLE_SELECT("plus2",             Lplus_2),           \
     SETUP_TABLE_SELECT("times",             Ltimes_2),          \
@@ -6201,6 +6316,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("logand2",           Llogand_2),         \
     SETUP_TABLE_SELECT("logor",             Llogor_2),          \
     SETUP_TABLE_SELECT("logor2",            Llogor_2),          \
+    SETUP_TABLE_SELECT("land",              Llogand_2),         \
+    SETUP_TABLE_SELECT("lor",               Llogor_2),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_2),         \
     SETUP_TABLE_SELECT("logxor2",           Llogxor_2),         \
     SETUP_TABLE_SELECT("apply",             Lapply),            \
@@ -6227,15 +6344,22 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("expt",              Lexpt),             \
     SETUP_TABLE_SELECT("geq",               Lgeq),              \
     SETUP_TABLE_SELECT("greaterp",          Lgreaterp),         \
+    SETUP_TABLE_SELECT("ashift",            Lleftshift),        \
+    SETUP_TABLE_SELECT("lshift",            Lleftshift),        \
     SETUP_TABLE_SELECT("leftshift",         Lleftshift),        \
     SETUP_TABLE_SELECT("leq",               Lleq),              \
     SETUP_TABLE_SELECT("lessp",             Llessp),            \
     SETUP_TABLE_SELECT("quotient",          Lquotient),         \
     SETUP_TABLE_SELECT("remainder",         Lremainder),        \
+    SETUP_TABLE_SELECT("rshift",            Lrightshift),       \
     SETUP_TABLE_SELECT("rightshift",        Lrightshift),       \
     SETUP_TABLE_SELECT("get",               Lget),              \
     SETUP_TABLE_SELECT("gethash",           Lgethash),          \
     SETUP_TABLE_SELECT("getv",              Lgetv),             \
+    SETUP_TABLE_SELECT("imax",              Lmax_2),            \
+    SETUP_TABLE_SELECT("imin",              Lmin_2),            \
+    SETUP_TABLE_SELECT("max",               Lmax_2),            \
+    SETUP_TABLE_SELECT("min",               Lmin_2),            \
     SETUP_TABLE_SELECT("member",            Lmember),           \
     SETUP_TABLE_SELECT("memq",              Lmemq),             \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_2),         \
@@ -6267,9 +6391,15 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("times",             Ltimes_3),          \
     SETUP_TABLE_SELECT("logand",            Llogand_3),         \
     SETUP_TABLE_SELECT("logor",             Llogor_3),          \
+    SETUP_TABLE_SELECT("land",              Llogand_3),         \
+    SETUP_TABLE_SELECT("lor",               Llogor_3),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_3),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_3),       \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_3),       \
+    SETUP_TABLE_SELECT("imax",              Lmax_3),            \
+    SETUP_TABLE_SELECT("imin",              Lmin_3),            \
+    SETUP_TABLE_SELECT("max",               Lmax_3),            \
+    SETUP_TABLE_SELECT("min",               Lmin_3),            \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_3),         \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_3),       \
     SETUP_TABLE_SELECT("put",               Lput),              \
@@ -6294,7 +6424,13 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("times",             Ltimes_4),          \
     SETUP_TABLE_SELECT("logand",            Llogand_4),         \
     SETUP_TABLE_SELECT("logor",             Llogor_4),          \
+    SETUP_TABLE_SELECT("land",              Llogand_4),         \
+    SETUP_TABLE_SELECT("lor",               Llogor_4),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_4),         \
+    SETUP_TABLE_SELECT("imax",              Lmax_4),            \
+    SETUP_TABLE_SELECT("imin",              Lmin_4),            \
+    SETUP_TABLE_SELECT("max",               Lmax_4),            \
+    SETUP_TABLE_SELECT("min",               Lmin_4),            \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_4),       \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_4),       \
     SETUP_TABLE_SELECT("string-store2",     Lstring_store2),    \
@@ -6314,7 +6450,13 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("times",             Ltimes_5up),        \
     SETUP_TABLE_SELECT("logand",            Llogand_5up),       \
     SETUP_TABLE_SELECT("logor",             Llogor_5up),        \
+    SETUP_TABLE_SELECT("land",              Llogand_5up),       \
+    SETUP_TABLE_SELECT("lor",               Llogor_5up),        \
     SETUP_TABLE_SELECT("logxor",            Llogxor_5up),       \
+    SETUP_TABLE_SELECT("imax",              Lmax_5up),          \
+    SETUP_TABLE_SELECT("imin",              Lmin_5up),          \
+    SETUP_TABLE_SELECT("max",               Lmax_5up),          \
+    SETUP_TABLE_SELECT("min",               Lmin_5up),          \
     SETUP_TABLE_SELECT("string-store3",     Lstring_store3),    \
     SETUP_TABLE_SELECT("string-store4",     Lstring_store4),    \
     SETUP_TABLE_SELECT("vector",            Lvector_5up),
