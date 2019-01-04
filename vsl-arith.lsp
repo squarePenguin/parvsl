@@ -1065,8 +1065,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de verbos (x) nil)
 
-(de linelength (n) 80)
-
 (de getenv (x) nil)
 
 % Because I have onnly just migrated a version of filep into the kernel
@@ -1205,8 +1203,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de find!-gnuplot ()
   "gnuplot")
-
-(de posn () 0)
 
 (de prin1 (x) (prin x))
 

@@ -485,11 +485,8 @@ static inline LispObject allocateatom(size_t n);
 // I will #include the code for big-numbers once I have all my tag bits etc
 // specified.
 
-#ifdef BIGNUM
 #define LISP 1
 #include "vsl-arith.hpp"
-#endif
-
 
 void my_exit(int n)
 {
@@ -1891,8 +1888,19 @@ INLINE const int printESCAPES = 2;
 
 // I suspect that linelength and linepos need to be maintained
 // independently for each output stream. At present that is not
-// done.
+// done. And also blank_pending.
 int linelength = 80, linepos = 0, printflags = printESCAPES;
+bool blank_pending = false;
+
+LispObject Llinelength(LispObject lits, LispObject a1)
+{   int oo = linelength;
+    if (isFIXNUM(a1))
+    {   int nn = qfixnum(a1);
+        if (nn > 0 && nn < 1000000) linelength = nn;
+    }
+    return packfixnum(oo);
+}
+    
 
 #ifdef DEBUG
 FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
@@ -1903,7 +1911,7 @@ int32_t file_direction = 0, interactive = 0;
 int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
-void wrch(int c)
+void wrch1(int c)
 {
     if (lispout == -1)
     {   char w[4];
@@ -1935,8 +1943,17 @@ void wrch(int c)
         {   linepos = 0;
             fflush(lispfiles[lispout]);
         }
+        else if (c == '\t') linepos = (linepos + 8) & ~7;
         else linepos++;
     }
+}
+
+void wrch(int ch)
+{   if (blank_pending)
+    {   wrch1(' ');
+        blank_pending = false;
+    }
+    wrch1(ch);
 }
 
 static bool stdin_tty = false;
@@ -1977,9 +1994,9 @@ int rdch()
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s = el_gets(el_struct, &n);
+                if (s == NULL) return EOF;
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
-                if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
                 strncpy(input_line, s, n);
                 input_line[INPUT_LINE_SIZE-1] = 0;
@@ -1997,7 +2014,10 @@ int rdch()
 int gensymcounter = 1;
 
 void checkspace(int n)
-{   if (linepos + n >= linelength && lispout != -1 && lispout != -3) wrch('\n');
+{   if (linepos + n + (blank_pending ? 1 : 0) > linelength &&
+        lispout != -1 &&
+        lispout != -2 &&
+        lispout != -3) wrch('\n');
 }
 
 char printbuffer[32];
@@ -2017,37 +2037,30 @@ void internalprint(LispObject x)
                 return;
             }
             while (isCONS(x))
-            {   i = printflags;
-// With the software bignum scheme this is messy! a data structure of the
-// for (~bignum d1 d2 ...) must be interpreted as a number not a list. But
-// then one gets the case (a b !~bignum x y) and that maybe needs to render
-// as (a b . NUMBER).
-                if (qcar(x) == bignum &&
-                    (pn = call1("~big2str", qcdr(x))) != NULLATOM &&
-                    pn != nil)
-                {   printflags = printPLAIN;
-                    if (sep == ' ')
-                    {   checkspace(3);
-                        wrch(' '); wrch('.'); wrch(' ');
-                    }
-                    internalprint(pn);
-                    if (sep == ' ')
-                    {   checkspace(1);
-                        wrch(')');
-                    }
-                    printflags = i;
-                    return;
+            {
+// Dealing with line-end is a bit delicate, so I will write about it here.
+// The same issues arose earlier regarding "(a . b)" style output.
+// When I have got "... abd def" and am about to want to display " ghi" I
+// want to output a blank unless I am at the end of the line. But there is
+// no merit in displaying the blank unless something will fit on the line
+// after it! A consequence of that is that I can not tell if I need to
+// print a blank unril I have assessed the width of whatever will follow it!
+// So when a blank is or may be due I set a flag to indicate that and wrch and
+// checkspace will need to interact with it.
+                if (sep == ' ') blank_pending = true;
+                else
+                {   checkspace(1);
+                    wrch(sep);
                 }
-                printflags = i;
-                checkspace(1);
-                if (linepos != 0 || sep != ' ' || lispout < 0) wrch(sep);
                 sep = ' ';
                 internalprint(qcar(x));
                 x = qcdr(x);
             }
             if (x != nil)
-            {   checkspace(3);
-                wrch(' '); wrch('.'); wrch(' ');
+            {   blank_pending = 1;
+                checkspace(1);
+                wrch('.');
+                blank_pending = 1;
                 internalprint(x);
             }
             checkspace(1);
@@ -2248,6 +2261,8 @@ int hexval(int n)
     else if ('A' <= n && n <= 'F') return n - 'A' + 10;
     else return 0;
 }
+static LispObject Nplus2(LispObject a, LispObject b);
+static LispObject Ntimes2(LispObject a, LispObject b);
 
 LispObject token()
 {   symtype = 'a';           // Default result is an atom.
@@ -2337,7 +2352,7 @@ LispObject token()
             r = packfixnum(0);
             boffop = 0;
             while (boffo[boffop] != 0)
-            {   r = call2("plus2", call2("times2", packfixnum(16), r),
+            {   r = Nplus2(Ntimes2(packfixnum(16), r),
                            packfixnum(hexval(boffo[boffop++])));
             }
             return r;
@@ -2387,7 +2402,7 @@ LispObject token()
             if (boffo[boffop] == '+') boffop++;
             else if (boffo[boffop] == '-') neg=1, boffop++;
             while (boffo[boffop] != 0)
-            {   r = call2("plus2", call2("times2", packfixnum(10), r),
+            {   r = Nplus2(Ntimes2(packfixnum(10), r),
                            packfixnum(boffo[boffop++] - '0'));
             }
             if (neg) r = call1("minus", r);
@@ -5886,7 +5901,7 @@ LispObject Lwrs(LispObject lits, LispObject x)
 }
 
 INLINE const unsigned int LONGEST_LEGAL_FILENAME = 1000;
-char filename[LONGEST_LEGAL_FILENAME];
+char filename[LONGEST_LEGAL_FILENAME+100];
 static char imagename[LONGEST_LEGAL_FILENAME];
 INLINE const char *programDir = ".";
 
@@ -5965,8 +5980,10 @@ LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
         !((y == input && (how=1)!=0) ||
           (y == output && (how=2)!=0)))
         return error1("bad arg for open-module", cons(x, y));
+    int len = (int)veclength(qheader(x));
+    if (len > 100) len = 100;
     snprintf(filename, sizeof(filename), "%s.modules/%.*s.fasl", imagename,
-                      (int)veclength(qheader(x)), qstring(x));
+                      len, qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -6023,7 +6040,8 @@ void readevalprint(int loadp)
                            qcar(r) == lookup("faslend", 7, 2))))
         {   r = eval(r);
             if (showallreads || (unwindflag == unwindNONE && !loadp))
-            {   linepos += printf("Value: ");
+            {   if (linepos != 0) wrch('\n');
+                linepos += printf("Value: ");
 #ifdef DEBUG
                 if (logfile != NULL) fprintf(logfile, "Value: ");
 #endif // DEBUG
@@ -6256,6 +6274,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("length",            Llength),           \
+    SETUP_TABLE_SELECT("linelength",        Llinelength),       \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
     SETUP_TABLE_SELECT("log",               Llog),              \
