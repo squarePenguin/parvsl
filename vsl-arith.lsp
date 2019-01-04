@@ -962,7 +962,7 @@ top (cond ((atom a) (return (reversip r))))
 (put (quote faslend) (quote stat) (quote endstat))
 (flag '(faslend) 'eval)
 
-(setq !*backtrace t)
+(setq !*backtrace nil)
 (setq !*debug nil)
 
 (de s!:fasl_supervisor nil
@@ -1162,8 +1162,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de md60 (x) 123456789)
 
-(de error1 () (error 99 nil))
-
 (dm eval!-when (u)
    (if (member 'eval (cadr u))
        (cons 'progn (cddr u))
@@ -1229,6 +1227,9 @@ top (cond ((atom a) (return (reversip r))))
     (return (list2string (reversip r)))))
 
 (dm bldmsg (u) (list 'bldmsg1 (list 'explodec (cadr u)) (cons 'list (cddr u))))
+
+(de printprompt (u) nil)
+(flag '(printprompt) 'lose)
 
 "End of vsl.lsp"
 

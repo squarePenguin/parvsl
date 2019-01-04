@@ -43,12 +43,12 @@ fastvsl:	vsl.cpp
 # vsl-arith and fastvsl-arith will be VSL but with arbitrary precision
 # integer arithmetic implemented in C++.
 
-vsl-arith:	vsl-arith.cpp vsl-arith.hpp
+vsl-arith:	vsl-arith.cpp arith.hpp
 	g++ $(CFLAGS) -DBIGNUM=1 \
 		vsl-arith.cpp $(LIBS) -o vsl-arith \
 		2>&1 | tee vsl-arith.log
 
-fastvsl-arith:	vsl-arith.cpp vsl-arith.hpp
+fastvsl-arith:	vsl-arith.cpp arith.hpp
 	g++ $(FASTCFLAGS) -DBIGNUM=1 \
 		vsl-arith.cpp $(LIBS) -o fastvsl-arith \
 		2>&1 | tee fastvsl-arith.log
@@ -75,7 +75,7 @@ vsl.img:	vsl library.lsp vsl.lsp
 fastvsl.img:	fastvsl library.lsp vsl.lsp
 	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
-vsl-arith.img:	vsl-arith library.lsp vsl-arith.lsp
+vsl-arith.img:	vsl-arith library.lsp arith.lsp
 	time ./vsl-arith -z library-arith.lsp | tee vsl-arith.img.log
 
 fastvsl-arith.img:	fastvsl-arith library.lsp vsl-arith.lsp

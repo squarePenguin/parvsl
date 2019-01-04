@@ -390,7 +390,7 @@ static inline bool isEQHASHX(LispObject x)
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-INLINE const size_t MEM = 256;
+INLINE const size_t MEM = 512;
 #endif // MEM
 
 INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
@@ -486,7 +486,7 @@ static inline LispObject allocateatom(size_t n);
 // specified.
 
 #define LISP 1
-#include "vsl-arith.hpp"
+#include "arith.hpp"
 
 void my_exit(int n)
 {
@@ -834,6 +834,7 @@ void allocateheap()
 extern void reclaim(int line);
 extern LispObject error1(const char *s, LispObject a);
 extern LispObject error0(const char *s);
+extern LispObject quiet_error();
 extern void check_space(int nbytes, int line);
 
 LispObject undefined0(LispObject env)
@@ -1973,7 +1974,9 @@ LispObject Lsetpchar(LispObject lits, LispObject a)
     if (!isSTRING(a)) return error1("bad arg to setpchar", a);
     uintptr_t len = veclength(qheader(a));
     if (len > sizeof(the_prompt)-1) len = sizeof(the_prompt)-1;
-    snprintf(the_prompt, sizeof(the_prompt), "%.*s", (int)len, qstring(a));
+    int n = snprintf(the_prompt, sizeof(the_prompt), "%.*s",
+                     (int)len, qstring(a));
+    if (n<0 || (unsigned int)n>=sizeof(the_prompt)) strcpy(the_prompt, "> ");
     return r;
 }
 
@@ -2069,8 +2072,11 @@ void internalprint(LispObject x)
         case tagSYMBOL:
             pn = qpname(x);
             if (pn == nil)
-            {   int len = snprintf(printbuffer, sizeof(printbuffer), "g%.3d", gensymcounter++);
-                pn = makestring(printbuffer, len);
+            {   int len = snprintf(printbuffer, sizeof(printbuffer),
+                                   "g%.3d", gensymcounter++);
+                if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+                    pn = makestring("?gensym?", 8);
+                else pn = makestring(printbuffer, len);
                 qpname(x) = pn;
             }
             len = veclength(qheader(pn));
@@ -2535,7 +2541,7 @@ INLINE unsigned int unwindRESTART   = 32;
 
 unsigned int unwindflag = unwindNONE;
 
-int backtraceflag = -1;
+int backtraceflag = 0;
 INLINE int backtraceHEADER = 1;
 INLINE int backtraceTRACE  = 2;
 
@@ -2548,6 +2554,11 @@ LispObject error0(const char *msg)
     }
     unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
                  unwindERROR;
+    return nil;
+}
+
+LispObject quiet_error()
+{   unwindflag = unwindERROR;
     return nil;
 }
 
@@ -5901,7 +5912,7 @@ LispObject Lwrs(LispObject lits, LispObject x)
 }
 
 INLINE const unsigned int LONGEST_LEGAL_FILENAME = 1000;
-char filename[LONGEST_LEGAL_FILENAME+100];
+char filename[LONGEST_LEGAL_FILENAME];
 static char imagename[LONGEST_LEGAL_FILENAME];
 INLINE const char *programDir = ".";
 
@@ -5922,15 +5933,25 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 // If the filename that is passed is something like "$word/rest" then I look
 // for a Lisp variable "@word" and look at its value. If that value is a
 // string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
+    int r;
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
-    {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+    {   r = snprintf(filename, sizeof(filename),
+                     "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+        if (r<0) strcpy(filename, "badfile");
+        else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
         lits = qvalue(lookup(filename, strlen(filename), 0));
-        if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
-           (int)veclength(qheader(lits)), qstring(lits),
-           (int)(veclength(qheader(x)) - (p-qstring(x))), p);
-        else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+        if (isSTRING(lits))
+            r = snprintf(filename, sizeof(filename),
+                         "%.*s%.*s",
+                         (int)veclength(qheader(lits)), qstring(lits),
+                         (int)(veclength(qheader(x)) - (p-qstring(x))), p);
+        else r = snprintf(filename, sizeof(filename),
+                          "%.*s", (int)veclength(qheader(x)), qstring(x));
     }
-    else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    else r = snprintf(filename, sizeof(filename),
+                      "%.*s", (int)veclength(qheader(x)), qstring(x));
+    if (r<0) strcpy(filename, "badfile");
+    else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -5954,15 +5975,24 @@ LispObject Lfilep(LispObject lits, LispObject x)
     if (isSYMBOL(x)) x = qpname(x);
     if (!isSTRING(x))
         return error1("bad arg for filep", x);
+    int r;
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
-    {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+    {   r = snprintf(filename, sizeof(filename), "@%.*s",
+                     (int)(p-qstring(x))-1, 1+qstring(x));
+        if (r<0) strcpy(filename, "badfile");
+        else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
         lits = qvalue(lookup(filename, strlen(filename), 0));
-        if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
+        if (isSTRING(lits)) r = snprintf(filename,
+           sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
-        else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+        else r = snprintf(filename,
+           sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
     }
-    else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    else r = snprintf(filename,
+        sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    if (r<0) strcpy(filename, "badfile");
+    else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -5982,8 +6012,11 @@ LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
         return error1("bad arg for open-module", cons(x, y));
     int len = (int)veclength(qheader(x));
     if (len > 100) len = 100;
-    snprintf(filename, sizeof(filename), "%s.modules/%.*s.fasl", imagename,
-                      len, qstring(x));
+    int r = snprintf(filename, sizeof(filename),
+                     "%s.modules/%.*s.fasl", imagename,
+                     len, qstring(x));
+    if (r<0) strcpy(filename, "badfile");
+    else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -6100,6 +6133,10 @@ LispObject Luntrace(LispObject lits, LispObject x)
     return nil;
 }
 
+LispObject Lquiet_error(LispObject lits)
+{   return quiet_error();
+}
+
 LispObject Lerror_0(LispObject lits)
 {   return error1("error function called", nil);
 }
@@ -6177,6 +6214,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("logxor",            Llogxor_0),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_0),       \
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
+    SETUP_TABLE_SELECT("error1",            Lquiet_error),      \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
     SETUP_TABLE_SELECT("get-lisp-directory",Lget_lisp_directory), \
     SETUP_TABLE_SELECT("oblist",            Loblist),           \
@@ -6623,7 +6661,8 @@ void setup()
     Lput(nil, nil, symglobal, lisptrue);
     Lput(nil, lisptrue, symglobal, lisptrue);
     Lput(nil, undefined, symglobal, lisptrue);
-    qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
+    qvalue(echo = lookup("*echo", 5, 3)) = nil;
+// interactive ? nil : lisptrue;
     qflags(echo) |= flagFLUID;
     Lput(nil, echo, symfluid, lisptrue);
     {   LispObject nn;
@@ -7267,7 +7306,7 @@ int warm_start_1(gzFile f, int *errcode)
     }
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
-     qvalue(echo) = interactive ? nil : lisptrue;
+     qvalue(echo) = nil; // interactive ? nil : lisptrue;
      return 0;
 }
 
@@ -7969,14 +8008,19 @@ const char *find_image_directory(int argc, const char *argv[])
 // tests here that are intended to detect the above cases and do special
 // things! My tests will be based on file names and paths.
 //
-    snprintf(xname, sizeof(xname), "/%s.app/Contents/MacOS", programName);
+    int r = snprintf(xname, sizeof(xname),
+                     "/%s.app/Contents/MacOS", programName);
+    if (r<0) strcpy(xname, "badfile");
+    else if ((unsigned int)r>=sizeof(xname)) xname[sizeof(xname)-1] = 0;
     n = strlen(programDir) - strlen(xname);
     if (n>=0 && strcmp(programDir+n, xname) == 0)
     {   // Seem to be being executed from within application bundle.
 // This dates from when I thought I would put the image in merely Contents not
 // in Contents/MacOS.
-        snprintf(xname, sizeof(xname), "%.*s/%s.img",
-            (int)strlen(programDir), programDir, programName);
+        r = snprintf(xname, sizeof(xname), "%.*s/%s.img",
+                     (int)strlen(programDir), programDir, programName);
+        if (r<0) strcpy(xname, "badfile");
+        else if ((unsigned int)r>=sizeof(xname)) xname[sizeof(xname)-1] = 0;
     }
     else
     {   struct stat buf;
@@ -7986,14 +8030,20 @@ const char *find_image_directory(int argc, const char *argv[])
 // such bundle I will put the image file in the location I would have used
 // with Windows of X11.
 //
-        snprintf(xname, sizeof(xname), "%s/%s.app/Contents/MacOS", programDir, programName);
+        r = snprintf(xname, sizeof(xname),
+                     "%s/%s.app/Contents/MacOS", programDir, programName);
+        if (r<0) strcpy(xname, "badfile");
+        else if ((unsigned int)r>=sizeof(xname)) xname[sizeof(xname)-1] = 0;
         if (stat(xname, &buf) == 0 &&
             (buf.st_mode & S_IFDIR) != 0)
-        {   snprintf(xname, sizeof(xname), "%s/%s.app/Contents/MacOS/%s.img",
+        {   r = snprintf(xname, sizeof(xname),
+                "%s/%s.app/Contents/MacOS/%s.img",
                 programDir, programName, programName);
         }
-        else snprintf(xname, sizeof(xname), "%s/%s.img", programDir, programName);
-
+        else r = snprintf(xname, sizeof(xname),
+                          "%s/%s.img", programDir, programName);
+        if (r<0) strcpy(xname, "badfile");
+        else if ((unsigned int)r>=sizeof(xname)) xname[sizeof(xname)-1] = 0;
     }
 #else
     {   const char *bin  = xstringify(BINDIR);
@@ -8030,10 +8080,13 @@ const char *find_image_directory(int argc, const char *argv[])
         }
         i = strlen(bin);
         j = strlen(programDir);
+        int r;
         if (strcmp(programDir+j-i, bin) == 0)
-        {   snprintf(xname, sizeof(xname), "%.*s%s/%s.img", j-i, programDir, data, pn);
+        {   r = snprintf(xname, sizeof(xname),
+                         "%.*s%s/%s.img", j-i, programDir, data, pn);
+            if (r<0) strcpy(xname, "badfile");
+            else if ((unsigned int)r>=sizeof(xname)) xname[sizeof(xname)-1] = 0;
         }
-
 //
 // If the name I just created does not correspond to a file I will fall
 // back and use the older location, adjacent to my binary. Hmmm this is
@@ -8100,10 +8153,12 @@ int main(int argc, char *argv[])
 #ifdef __WIN32__
     size_t i = strlen(argv[0]);
     if (strcmp(argv[0]+i-4, ".exe") == 0) i -= 4;
-    snprintf(imagename, sizeof(imagename), "%.*s.img", i, argv[0]);
+    int r = snprintf(imagename, sizeof(imagename), "%.*s.img", i, argv[0]);
 #else // __WIN32__
-    snprintf(imagename, sizeof(imagename), "%s.img", argv[0]);
+    int r = snprintf(imagename, sizeof(imagename), "%s.img", argv[0]);
 #endif // __WIN32__
+    if (r<0) strcpy(imagename, "badfile.img");
+    else if ((unsigned int)r>=sizeof(imagename)) imagename[sizeof(imagename)-1] = 0;
     for (int i=1; i<argc; i++)
     {
 // I have some VERY simple command-line options here.
@@ -8184,14 +8239,6 @@ int main(int argc, char *argv[])
             {   const char *d1 = &argv[i][2];
                 LispObject d3 = lookup(d1, strlen(d1), 1);
                 qflags(d3) |= flagTRACED;
-            }
-// -Dname displays the value and definition of a symbol
-            else if (argv[i][0] == '-' && argv[i][1] == 'D')
-            {   const char *d1 = &argv[i][2];
-                LispObject d3 = lookup(d1, strlen(d1), 1);
-                printf("Symbol "); prin(d3);
-                printf(" Value cell = "); prin(qvalue(d3));
-                printf(" Lits = "); print(qlits(d3));
             }
         }
         curchar = '\n'; symtype = '?'; cursym = nil;
