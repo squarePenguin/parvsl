@@ -474,8 +474,8 @@ int main(int argc, char *argv[])
         a = random_upto_bits_bignum(maxbits);
         uint64_t r = mersenne_twister();
         a = fudge_distribution_bignum(a, (int)r & 15);
-        double d = float_bignum(a);
 
+        double d = double_bignum(a);
         Bignum n = fix_bignum(d);
         if (a == n) continue; // round trip was exact!
 
@@ -494,9 +494,12 @@ int main(int argc, char *argv[])
         Bignum errminus = a-nminus;
     
         if (nplus != n && nminus != n)
-        {   if (abs(err) < abs(errplus) && abs(err) < abs(errminus)) continue;
-            if (abs(err) == abs(errplus) && abs(err) < abs(errminus) && evenfloat(d)) continue;
-            if (abs(err) < abs(errplus) && abs(err) == abs(errminus) && evenfloat(d)) continue;
+        {   if (abs(err) < abs(errplus) &&
+                abs(err) < abs(errminus)) continue;
+            if (abs(err) == abs(errplus) &&
+                abs(err) < abs(errminus) && evenfloat(d)) continue;
+            if (abs(err) < abs(errplus) &&
+                abs(err) == abs(errminus) && evenfloat(d)) continue;
         }
 
         std::cout << "FAILED on test " << i << std::endl;

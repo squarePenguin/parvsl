@@ -192,14 +192,23 @@
 //   To support that when a block that is not the most recently allocated one
 //   is shrunk or discarded a header word is placed in the released space
 //   leaving a valid but dummy Lisp item there.
-//   Calls to memory allocation primitives are made without any special
+//   Usually calls to memory allocation primitives are made without any special
 //   concern for garbage collector safety of other pointers, and so in its
 //   current form this code insistes on running in a context where the garbage
 //   collector is conservative, so that for instance the untagged pointers to
 //   raw vectors of digits are safe. This aspect of the code may well limit
-//   its direct usefulness, but resolving the issue would involve an
-//   understanding of how to arrange that particular items got treated as
-//   list bases in some system.
+//   its direct usefulness. To allow for a system that uses a previse garbage
+//   collector I allow for a "#define PRECISE_GC 1" option and in that case
+//   where calls to memory allocation are performed within the low-level
+//   code I will use functions "push(intptr_t)" and "pop(intptr_t&)" and
+//   expect that they save values somewhere that the garbage collector can
+//   find. Note that this scheme does not automate keeping large bignum
+//   calculations expressed via operator overloading safe! It is mostly aimed
+//   at making the low level code usable. A typical case will be the code
+//   to multiply two big numbers. That can work out how large its result
+//   will be and then needs to call reserve() to get space for it. Across
+//   the call to reserve it will need to push its two arguments, because a
+//   copying garbage collector might relocate them.
 //   In Lisp mode it is anticipated that as well as a tagged representation
 //   of small integers that the generic arithemetic will need to support
 //   floating point numbers (and possibly multiple widths of floating point
@@ -455,6 +464,38 @@ inline intptr_t uniform_upto(intptr_t a);
 inline intptr_t random_upto_bits(size_t bits);
 inline intptr_t fudge_distribution(intptr_t, int);
 
+#ifdef PRECISE_GC
+inline void push(intptr_t);
+inline void pop(intptr_t&);
+
+// In many cases where I want to save things I will have a reference to
+// an array of uint64_t objects, so when I push it I must convert it back to
+// a Lisp-friendly form.  
+inline void push(uint64_t *p)
+{   push(vector_to_handle(p);
+}
+inline void pop(uint64_t *&p)
+{   intptr_t w;
+    pop(w);
+    p = vector_of_handle(w);
+}
+#else
+// In cases where these are not required I will just defined them as
+// empty procedures and hope that the C++ compiler will inline them and
+// hence lead to them not adding any overhead at all.
+inline void push(intptr_t)
+{}
+inline void pop(intptr_t&)
+{}
+
+
+inline void push(uint64_t *p)
+{}
+inline void pop(uint64_t *&p)
+{}
+
+#endif
+
 #if defined MALLOC
 
 //=========================================================================
@@ -555,14 +596,18 @@ inline size_t number_size(uint64_t *p)
 
 inline intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = p[-1];
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
 inline intptr_t copy_if_no_garbage_collector(uint64_t *p)
 {   size_t n = p[-1];
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -571,7 +616,9 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 {   if (stored_as_fixnum(pp)) return pp;
     uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -834,14 +881,18 @@ inline RES op_dispatch2(intptr_t a1, intptr_t a2)
 
 inline intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = ((uint32_t *)(&p[-1]))[1];
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
 inline intptr_t copy_if_no_garbage_collector(uint64_t *p)
 {   size_t n = number_size(p);
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -850,7 +901,9 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 {   if (stored_as_fixnum(pp)) return pp;
     uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -992,14 +1045,18 @@ inline RES op_dispatch2(intptr_t a1, intptr_t a2)
 
 inline intptr_t always_copy_bignum(uint64_t *p)
 {   size_t n = number_size(p);
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
 
 inline intptr_t copy_if_no_garbage_collector(uint64_t *p)
 {   size_t n = number_size(p);
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -1008,7 +1065,9 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 {   if (stored_as_fixnum(pp)) return pp;
     uint64_t *p = vector_of_handle(pp);
     size_t n = number_size(p);
+    push(p);
     uint64_t *r = reserve(n);
+    pop(p);
     std::memcpy(r, p, n*sizeof(uint64_t));
     return confirm_size(r, n, n);
 }
@@ -2362,7 +2421,9 @@ inline intptr_t uniform_upto(intptr_t aa)
     {   a = vector_of_handle(aa);
         lena = number_size(a);
     }
+    push(a);
     uint64_t *r = reserve(lena);
+    pop(a);
     size_t lenr;
     uniform_upto(a, lena, r, lenr);
     return confirm_size(r, lena, lenr);
@@ -2452,7 +2513,9 @@ inline intptr_t fudge_distribution(intptr_t aa, int n)
     {   a = vector_of_handle(aa);
         lena = number_size(a);
     }
+    push(a);
     uint64_t *r = reserve(lena+1);
+    pop(a);
     size_t lenr;
     fudge_distribution(a, lena, r, lenr, n);
     return confirm_size(r, lena+1, lenr);
@@ -2720,7 +2783,7 @@ inline double Double::op(int64_t a)
 
 inline double Double::op(uint64_t *a)
 {   size_t lena = number_size(a);
-    if (lena == 1) return Float::op((int64_t)a[0]);
+    if (lena == 1) return Double::op((int64_t)a[0]);
 // Now I need to do something similar to that done for the int64_t case
 // but written larger. Specifically I want to split my input number into
 // its top 53 bits and then all the rest. I will take separate paths
@@ -3074,7 +3137,9 @@ inline string_handle bignum_to_string(const uint64_t *a, size_t lena,
 // I will copy my input into a fresh vector. And I will force it to be
 // positive. The made-positive version might have a leading digit with
 // its top bit set - that will not worry me because I view it as unsigned.
+    push(a);
     char *rc = reserve_string(m);
+    pop(a);
 // I have allocated the space that will be needed for the eventual string of
 // characters. I will use that space to save numeric values along the way, so
 // here I cast so I can use that same memory as a vector of 64-bit integers.
@@ -3223,7 +3288,9 @@ inline string_handle bignum_to_string_hex(intptr_t aa)
             m--;
         }
     }
+    push(a);
     char *r = reserve_string(m);
+    pop(a);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -3273,7 +3340,9 @@ inline string_handle bignum_to_string_octal(intptr_t aa)
     {   while (read_u3(a, n, width-1) == 0 && width > 1) width--;
         nn = width;
     }
+    push(a);
     char *r = reserve_string(nn);
+    pop(a);
     char *p = (char *)r;
     if (sign)
     {   *p++ = '~';
@@ -3319,7 +3388,9 @@ inline string_handle bignum_to_string_binary(intptr_t aa)
             m--;
         }
     }
+    push(a);
     char *r = reserve_string(m);
+    pop(a);
     char *p = (char *)r;
     top = a[n-1];
     if (sign)
@@ -3550,7 +3621,9 @@ inline void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 
 intptr_t Minus::op(uint64_t *a)
 {   size_t n = number_size(a);
+    push(a);
     uint64_t *p = reserve(n+1);
+    pop(a);
     size_t final_n;
     bignegate(a, n, p, final_n);
     return confirm_size(p, n+1, final_n);
@@ -3586,11 +3659,15 @@ intptr_t Sub1::op(int64_t a)
 intptr_t Abs::op(uint64_t *a)
 {   size_t n = number_size(a);
     if (!negative(a[n-1]))
-    {   uint64_t *r = reserve(n);
+    {   push(a);
+        uint64_t *r = reserve(n);
+        pop(a);
         std::memcpy(r, a, n*sizeof(uint64_t));
         return confirm_size(r, n, n);
     }
+    push(a);
     uint64_t *r = reserve(n+1);
+    pop(a);
     size_t final_n;
     bignegate(a, n, r, final_n);
     return confirm_size(r, n+1, final_n);
@@ -3618,7 +3695,9 @@ inline void biglognot(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 
 intptr_t Lognot::op(uint64_t *a)
 {   size_t n = number_size(a);
+    push(a);
     uint64_t *p = reserve(n+1);
+    pop(a);
     size_t final_n;
     biglognot(a, n, p, final_n);
     return confirm_size(p, n+1, final_n);
@@ -3627,6 +3706,8 @@ intptr_t Lognot::op(uint64_t *a)
 intptr_t Lognot::op(int64_t a)
 {   return int_to_handle(~a);
 }
+
+// @@@@@@@@@@@ need push/pop from here down
 
 // logand
 
