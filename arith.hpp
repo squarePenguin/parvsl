@@ -1220,6 +1220,22 @@ class Eqn
     static bool op(int64_t, uint64_t *);
     static bool op(uint64_t *, int64_t);
     static bool op(uint64_t *, uint64_t *);
+// Even comparing a floating point number with an integer for equality
+// turns out to be messier than one might have hoped!
+    static bool op(int64_t, float);
+    static bool op(uint64_t *, float);
+    static bool op(float, int64_t);
+    static bool op(float, uint64_t *);
+    static bool op(int64_t, double);
+    static bool op(uint64_t *, double);
+    static bool op(double, int64_t);
+    static bool op(double, uint64_t *);
+#ifdef softfloat_h
+    static bool op(int64_t, float128_t);
+    static bool op(uint64_t *, float128_t);
+    static bool op(float128_t, int64_t);
+    static bool op(float128_t, uint64_t *);
+#endif
 };
 
 class Geq
@@ -1228,6 +1244,23 @@ class Geq
     static bool op(int64_t, uint64_t *);
     static bool op(uint64_t *, int64_t);
     static bool op(uint64_t *, uint64_t *);
+// Comparing a bignum against a floating point value has multiple cases
+// to consider, but needs special implementation so that neither rounding
+// nor overflow not Infinities/NaNs lead to incorrect results.
+    static bool op(int64_t, float);
+    static bool op(uint64_t *, float);
+    static bool op(float, int64_t);
+    static bool op(float, uint64_t *);
+    static bool op(int64_t, double);
+    static bool op(uint64_t *, double);
+    static bool op(double, int64_t);
+    static bool op(double, uint64_t *);
+#ifdef softfloat_h
+    static bool op(int64_t, float128_t);
+    static bool op(uint64_t *, float128_t);
+    static bool op(float128_t, int64_t);
+    static bool op(float128_t, uint64_t *);
+#endif
 };
 
 class Greaterp
@@ -1236,6 +1269,20 @@ class Greaterp
     static bool op(int64_t, uint64_t *);
     static bool op(uint64_t *, int64_t);
     static bool op(uint64_t *, uint64_t *);
+    static bool op(int64_t, float);
+    static bool op(uint64_t *, float);
+    static bool op(float, int64_t);
+    static bool op(float, uint64_t *);
+    static bool op(int64_t, double);
+    static bool op(uint64_t *, double);
+    static bool op(double, int64_t);
+    static bool op(double, uint64_t *);
+#ifdef softfloat_h
+    static bool op(int64_t, float128_t);
+    static bool op(uint64_t *, float128_t);
+    static bool op(float128_t, int64_t);
+    static bool op(float128_t, uint64_t *);
+#endif
 };
 
 class Leq
@@ -1244,6 +1291,20 @@ class Leq
     static bool op(int64_t, uint64_t *);
     static bool op(uint64_t *, int64_t);
     static bool op(uint64_t *, uint64_t *);
+    static bool op(int64_t, float);
+    static bool op(uint64_t *, float);
+    static bool op(float, int64_t);
+    static bool op(float, uint64_t *);
+    static bool op(int64_t, double);
+    static bool op(uint64_t *, double);
+    static bool op(double, int64_t);
+    static bool op(double, uint64_t *);
+#ifdef softfloat_h
+    static bool op(int64_t, float128_t);
+    static bool op(uint64_t *, float128_t);
+    static bool op(float128_t, int64_t);
+    static bool op(float128_t, uint64_t *);
+#endif
 };
 
 class Lessp
@@ -1252,6 +1313,20 @@ class Lessp
     static bool op(int64_t, uint64_t *);
     static bool op(uint64_t *, int64_t);
     static bool op(uint64_t *, uint64_t *);
+    static bool op(int64_t, float);
+    static bool op(uint64_t *, float);
+    static bool op(float, int64_t);
+    static bool op(float, uint64_t *);
+    static bool op(int64_t, double);
+    static bool op(uint64_t *, double);
+    static bool op(double, int64_t);
+    static bool op(double, uint64_t *);
+#ifdef softfloat_h
+    static bool op(int64_t, float128_t);
+    static bool op(uint64_t *, float128_t);
+    static bool op(float128_t, int64_t);
+    static bool op(float128_t, uint64_t *);
+#endif
 };
 
 class Add1
@@ -1296,8 +1371,8 @@ class Lognot
     static intptr_t op(uint64_t *);
 };
 
-// Pow and the shifts have a second argument that must always be of
-// type int64_t.
+// Pow can have a second argument that is a double. Shifts only use
+// the integer arg2 case.
 
 class Pow
 {   public:
@@ -1305,6 +1380,8 @@ class Pow
     static intptr_t op(uint64_t *, int64_t);
     static intptr_t op(int64_t, int32_t);
     static intptr_t op(uint64_t *, int32_t);
+    static double op(int64_t, double);
+    static double op(uint64_t *, double);
 };
 
 class Leftshift
@@ -1370,9 +1447,9 @@ inline string_handle bignum_to_string_binary(intptr_t aa);
 
 class Bignum;
 
-inline void display(const char *label, const uint64_t *a, size_t lena);
+inline void display(const char *label, uint64_t *a, size_t lena);
 inline void display(const char *label, intptr_t a);
-inline void display(const char *label, const Bignum &a);
+inline void display(const char *label, Bignum &a);
 
 
 //=========================================================================
@@ -1426,11 +1503,7 @@ public:
     {   val = string_to_bignum(s);
     }
     Bignum(const Bignum &a)
-    {
-// On the next line in the NEW case (at least) the handle might be a handle
-// of an immediate fixnum, and in that case a.vec() should be considered
-// an invalid operation and this code will need to be adjusted!
-        val = copy_if_no_garbage_collector(a.val);
+    {   val = copy_if_no_garbage_collector(a.val);
     }
 
     uint64_t *vec() const
@@ -1668,6 +1741,13 @@ public:
     }
 };
 
+// I use a suffix "_Z" for bignums, with Z chosen to reminding me that this
+// gives me an Ingeger, wthe "Z" (typically written in a blackboard font)
+// standing for the ring of integers.
+inline Bignum operator "" _Z(const char *s)
+{   return Bignum(s);
+}
+
 inline const string_handle to_string(Bignum x)
 {   return bignum_to_string(x.val);
 }
@@ -1731,6 +1811,12 @@ inline Bignum pow(const Bignum &x, int64_t n)
     else return Bignum(true, op_dispatch1<Pow,intptr_t>(x.val, n));
 }
 
+inline double double_bignum(const Bignum &x);
+
+inline double pow(const Bignum &x, double n)
+{   return std::pow(double_bignum(x), n);
+}
+
 inline Bignum pow(const Bignum &x, int32_t n)
 {   return pow(x, (int64_t)n);
 }
@@ -1792,7 +1878,7 @@ inline double float128_bignum(const Bignum &x)
 //=========================================================================
 //=========================================================================
 
-inline void display(const char *label, const uint64_t *a, size_t lena)
+inline void display(const char *label, uint64_t *a, size_t lena)
 {   std::cout << label << " [" << (int)lena << "]";
     for (size_t i=0; i<lena; i++)
         std::cout << " "
@@ -1820,7 +1906,7 @@ inline void display(const char *label, intptr_t a)
     std::cout << std::endl;
 }
 
-inline void display(const char *label, const Bignum &a)
+inline void display(const char *label, Bignum &a)
 {   display(label, a.val);
 }
 
@@ -2392,13 +2478,15 @@ inline size_t bignum_bits(const uint64_t *a, size_t lena);
 
 // Generate a a value in the range 0 .. a-1 using a uniform distribution
 
-inline void uniform_upto(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
+inline void uniform_upto(uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 {   size_t n = bignum_bits(a, lena);
 // I will repeatedly generate numbers that have as many bits as a until
 // I get one that has a value less than a has. On average that should only
 // take two tries.
     for (;;)
-    {   uniform_positive(r, lenr, n);
+    {   push(a);
+        uniform_positive(r, lenr, n);
+        pop(a);
         if (lena > lenr) return;
         for (size_t len=lena;;)
         {   len--;
@@ -3088,7 +3176,7 @@ inline size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
 // internal debugging because at times I work with values that are known
 // to be positive and so where the top digit must be treated as unsigned...
 
-inline string_handle bignum_to_string(const uint64_t *a, size_t lena,
+inline string_handle bignum_to_string(uint64_t *a, size_t lena,
                                       bool as_unsigned=false)
 {
 // Making one-word numbers a special case simplifies things later on! It may
@@ -3489,6 +3577,111 @@ inline bool Eqn::op(int64_t a, int64_t b)
 {   return (a == b);
 }
 
+inline bool Eqn::op(int64_t a, float b)
+{   return Eqn::op(a, (double)b);
+}
+
+inline bool Eqn::op(uint64_t *a, float b)
+{   return Eqn::op(a, (double)b);
+}
+
+inline bool Eqn::op(float a, int64_t b)
+{   return Eqn::op((double)a, b);
+}
+
+inline bool Eqn::op(float a, uint64_t *b)
+{   return Eqn::op((double)a, b);
+}
+
+inline bool Eqn::op(int64_t a, double b)
+{
+    static const int64_t range = ((int64_t)1)<<53;
+    if (a >= -range && a <= range) return (double)a == b;
+    if (b >= 9223372036854775808.0) return false;
+    else if (b < -9223372036854775808.0) return false;
+    if (std::isnan(b)) return false;
+    return a == (int64_t)b; 
+}
+
+inline bool eqnfloat(uint64_t *a, size_t lena, double b)
+{
+// For an explanation of all this see greaterpfloat()
+    if (std::isnan(b)) return false;
+    if (std::isinf(b)) return false;
+    int64_t top = (int64_t)a[lena-1];
+    if (top >= 0 && b <= 0.0) return false;
+    if (top < 0 && b >= 0.0) return false;
+    uint64_t next = a[lena-2];
+    if (top < 0)
+    {   b = -b;
+        next = ~next;
+        uint64_t carry = 1;
+        for (size_t i=0; i<lena-2; i++)
+        {   if (a[i] != 0)
+            {   carry = 0;
+                break;
+            }
+        }
+        next += carry;
+        if (next == 0) top++;
+        if (carry == 0) next |= 1;
+    }
+    size_t lz;
+    if (top == 0) lz = 64 + nlz(next);
+    else lz = nlz(top);
+    int x;
+    b = std::frexp(b, &x);
+    int64_t ix = 64*((int64_t)lena-2)+128-(int64_t)lz;
+    if (x != ix) return false;
+    b = std::ldexp(b, 53);
+    int64_t ib = (int64_t)b;
+    int sh = (int)lz - 64 + 53;
+    if (sh < 0)
+    {   next |= (((uint64_t)top) << (64+sh)); 
+        top = top >> (-sh);
+    }
+    else if (sh != 0)
+    {   top = (top<<sh) | (next<<(64-sh));
+        next = next<<sh;
+    };
+    if (top != ib) return false;
+    if (next != 0) return false;
+    return true;
+}
+
+inline bool Eqn::op(uint64_t *a, double b)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Eqn::op((int64_t)a[0], b);
+    return eqnfloat(a, lena, b);
+}
+
+inline bool Eqn::op(double a, int64_t b)
+{   return Eqn::op(b, a);
+}
+
+inline bool Eqn::op(double a, uint64_t *b)
+{   return Eqn::op(b, a);
+}
+
+#ifdef softfloat_h
+inline bool Eqn::op(int64_t a, float128_t b)
+{   my_abort("not implemented yet");
+}
+
+inline bool Eqn::op(uint64_t *a, float128_t b)
+{   my_abort("not implemented yet");
+}
+
+inline bool Eqn::op(float128_t a, int64_t b)
+{   return Eqn::op(b, a);
+}
+
+inline bool Eqn::op(float128_t a, uint64_t *b)
+{   return Eqn::op(b, a);
+}
+
+#endif
+
 // greaterp
 
 inline bool biggreaterp(const uint64_t *a, size_t lena,
@@ -3536,6 +3729,144 @@ inline bool Greaterp::op(int64_t a, int64_t b)
 {   return a > b;
 }
 
+// I can always widen a float to a double without loss of any information,
+// so all the cases of comparisons with floats (as distinct from with
+// double) are easy to delegate.
+
+inline bool Greaterp::op(int64_t a, float b)
+{   return Greaterp::op(a, (double)b);
+}
+
+inline bool Greaterp::op(uint64_t *a, float b)
+{   return Greaterp::op(a, (double)b);
+}
+
+inline bool Greaterp::op(float a, int64_t b)
+{   return Greaterp::op((double)a, b);
+}
+
+inline bool Greaterp::op(float a, uint64_t *b)
+{   return Greaterp::op((double)a, b);
+}
+
+inline bool Greaterp::op(int64_t a, double b)
+{
+// If the integer is small enough it can be converted to a double
+// without any rounding, so then I can do the comparison easily.
+    static const int64_t range = ((int64_t)1)<<53;
+    if (a >= -range && a <= range) return (double)a > b;
+// If the floating point value is >= 2^63 or is less < -2^63 it is beyond
+// the range of int64_t, so the result is easy. This situation includes
+// the case of infinities.
+    if (b >= 9223372036854775808.0) return false;
+    else if (b < -9223372036854775808.0) return true;
+// NaNs must always return false from a comparison, so all the cases so
+// far will have yielded correct results. But here I must filter out
+// that situation.
+    if (std::isnan(b)) return false;
+// Because |b| >= 2^53 but < 2^63 it can be converted to an int64_t value
+// without rounding.
+    return a > (int64_t)b; 
+}
+
+// This compares a bignum that has at least 2 words against a double.
+// if great is true the test is either > or >=
+// ifequal is the value to be returned if the two numbers are
+// equal in value, and so supports >= and <=.
+
+inline bool greaterpfloat(uint64_t *a, size_t lena, double b,
+                          bool great,   // > or >=
+                          bool ifequal) // > or <
+{   if (std::isnan(b)) return false;
+    if (std::isinf(b)) return (b<0.0) == great;
+    int64_t top = (int64_t)a[lena-1];
+// here a is a bignum with at least 2 words, and so it is certainly
+// nonzero.
+    if (top >= 0 && b <= 0.0) return great;
+    if (top < 0 && b >= 0.0) return !great;
+// Now both have the same sign.
+    uint64_t next = a[lena-2];
+    if (top < 0)
+    {   great = !great; // (-a)>(-b) is like a<b
+        b = -b;
+        next = ~next;
+        uint64_t carry = 1;
+        for (size_t i=0; i<lena-2; i++)
+        {   if (a[i] != 0)
+            {   carry = 0;
+                break;
+            }
+        }
+        next += carry;
+        if (next == 0) top++;
+        if (carry == 0) next |= 1;
+    }
+// Now I have {top,next} as the top two word of the absolute value of a,
+// and if there had been any lower bits set at all I have forced the
+// bottom bit of next to be 1.
+    size_t lz;
+    if (top == 0) lz = 64 + nlz(next);
+    else lz = nlz(top);
+// I now have between 64 and 128 bits at the top of the integer, and knowing
+// the number of bits means I can compare against the magnitude of the
+// double by checking its exponent;
+    int x;
+    b = std::frexp(b, &x);
+// bit-length of the bignum...
+    int64_t ix = 64*((int64_t)lena-2)+128-(int64_t)lz;
+    if (x != ix) return ((x < ix) == great);
+    b = std::ldexp(b, 53);
+// The following conversion should be exact.
+    int64_t ib = (int64_t)b;
+// Now shift {top,next} so that just 53 bits are used in top and if any bits
+// remain below that next will be nonzero.
+    int sh = (int)lz - 64 + 53; // amount to shift left by.
+    if (sh < 0)
+    {   next |= (((uint64_t)top) << (64+sh)); 
+        top = top >> (-sh);
+    }
+    else if (sh != 0)
+    {   top = (top<<sh) | (next<<(64-sh));
+        next = next<<sh;
+    };
+    if (top != ib) return ((ib < top) == great);
+    if (next == 0) return ifequal;
+    return !great;
+}
+
+inline bool Greaterp::op(uint64_t *a, double b)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Greaterp::op((int64_t)a[0], b);
+    return greaterpfloat(a, lena, b, true, false);
+}
+
+inline bool Greaterp::op(double a, int64_t b)
+{   return Lessp::op(b, a);
+}
+
+inline bool Greaterp::op(double a, uint64_t *b)
+{   return Lessp::op(b, a);
+}
+
+#ifdef softfloat_h
+inline bool Greaterp::op(int64_t a, float128_t b)
+{   my_abort("not implemented yet");
+}
+
+inline bool Greaterp::op(uint64_t *a, float128_t b)
+{   my_abort("not implemented yet");
+}
+
+inline bool Greaterp::op(float128_t a, int64_t b)
+{   return Lessp::op(b, a);
+}
+
+inline bool Greaterp::op(float128_t a, uint64_t *b)
+{   return Lessp::op(b, a);
+}
+
+#endif
+
 // geq
 
 inline bool Geq::op(uint64_t *a, uint64_t *b)
@@ -3553,6 +3884,66 @@ inline bool Geq::op(int64_t a, uint64_t *b)
 inline bool Geq::op(int64_t a, int64_t b)
 {   return a >= b;
 }
+
+inline bool Geq::op(int64_t a, float b)
+{   return Geq::op(a, (double)b);
+}
+
+inline bool Geq::op(uint64_t *a, float b)
+{   return Geq::op(a, (double)b);
+}
+
+inline bool Geq::op(float a, int64_t b)
+{   return Geq::op((double)a, b);
+}
+
+inline bool Geq::op(float a, uint64_t *b)
+{   return Geq::op((double)a, b);
+}
+
+inline bool Geq::op(int64_t a, double b)
+{   static const int64_t range = ((int64_t)1)<<53;
+    if (a >= -range && a <= range) return (double)a >= b;
+    if (b >= 9223372036854775808.0) return false;
+    else if (b < -9223372036854775808.0) return true;
+    if (std::isnan(b)) return false;
+    return a >= (int64_t)b; 
+}
+
+inline bool Geq::op(uint64_t *a, double b)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Geq::op((int64_t)a[0], b);
+    return greaterpfloat(a, lena, b, true, true);
+}
+
+inline bool Geq::op(double a, int64_t b)
+{   return Leq::op(b, a);
+}
+
+inline bool Geq::op(double a, uint64_t *b)
+{   return Leq::op(b, a);
+}
+
+#ifdef softfloat_h
+inline bool Geq::op(int64_t a, float128_t b)
+{   my_abort("not implemented yet");
+    return false;
+}
+
+inline bool Geq::op(uint64_t *a, float128_t b)
+{   my_abort("not implemented yet");
+    return false;
+}
+
+inline bool Geq::op(float128_t a, int64_t b)
+{   return Leq::op(b, a);
+}
+
+inline bool Geq::op(float128_t a, uint64_t *b)
+{   return Leq::op(b, a);
+}
+
+#endif
 
 // lessp
 
@@ -3572,6 +3963,65 @@ inline bool Lessp::op(int64_t a, int64_t b)
 {   return a < b;
 }
 
+inline bool Lessp::op(int64_t a, float b)
+{   return Lessp::op(a, (double)b);
+}
+
+inline bool Lessp::op(uint64_t *a, float b)
+{   return Lessp::op(a, (double)b);
+}
+
+inline bool Lessp::op(float a, int64_t b)
+{    return Lessp::op((double)a, b);
+}
+
+inline bool Lessp::op(float a, uint64_t *b)
+{    return Lessp::op((double)a, b);
+}
+
+inline bool Lessp::op(int64_t a, double b)
+{   static const int64_t range = ((int64_t)1)<<53;
+    if (a >= -range && a <= range) return (double)a < b;
+    if (b >= 9223372036854775808.0) return true;
+    else if (b < -9223372036854775808.0) return false;
+    if (std::isnan(b)) return false;
+    return a < (int64_t)b; 
+}
+
+inline bool Lessp::op(uint64_t *a, double b)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Lessp::op((int64_t)a[0], b);
+    return greaterpfloat(a, lena, b, false, false);
+}
+
+inline bool Lessp::op(double a, int64_t b)
+{    return Greaterp::op(b, a);
+}
+
+inline bool Lessp::op(double a, uint64_t *b)
+{    return Greaterp::op(b, a);
+}
+
+#ifdef softfloat_h
+inline bool Lessp::op(int64_t a, float128_t b)
+{   my_abort("not implemented yet");
+    return false;
+}
+
+inline bool Lessp::op(uint64_t *a, float128_t b)
+{   my_abort("not implemented yet");
+    return false;
+}
+
+inline bool Lessp::op(float128_t a, int64_t b)
+{   return Greaterp::op(b, a);
+}
+
+inline bool Lessp::op(float128_t a, uint64_t *b)
+{   return Greaterp::op(b, a);
+}
+
+#endif
 
 // leq
 
@@ -3590,6 +4040,66 @@ inline bool Leq::op(int64_t a, uint64_t *b)
 inline bool Leq::op(int64_t a, int64_t b)
 {   return a <= b;
 }
+
+inline bool Leq::op(int64_t a, float b)
+{   return Leq::op(a, (double)b);
+}
+
+inline bool Leq::op(uint64_t *a, float b)
+{   return Leq::op(a, (double)b);
+}
+
+inline bool Leq::op(float a, int64_t b)
+{   return Leq::op((double)a, b);
+}
+
+inline bool Leq::op(float a, uint64_t *b)
+{   return Leq::op((double)a, b);
+}
+
+inline bool Leq::op(int64_t a, double b)
+{   static const int64_t range = ((int64_t)1)<<53;
+    if (a >= -range && a <= range) return (double)a <= b;
+    if (b >= 9223372036854775808.0) return true;
+    else if (b < -9223372036854775808.0) return false;
+    if (std::isnan(b)) return false;
+    return a <= (int64_t)b; 
+}
+
+inline bool Leq::op(uint64_t *a, double b)
+{   size_t lena = number_size(a);
+    if (lena == 1) return Lessp::op((int64_t)a[0], b);
+    return greaterpfloat(a, lena, b, false, true);
+}
+
+inline bool Leq::op(double a, int64_t b)
+{   return Geq::op(b, a);
+}
+
+inline bool Leq::op(double a, uint64_t *b)
+{   return Geq::op(b, a);
+}
+
+#ifdef softfloat_h
+inline bool Leq::op(int64_t a, float128_t b)
+{   my_abort("not implemented yet");
+    return false;
+}
+
+inline bool Leq::op(uint64_t *a, float128_t b)
+{   my_abort("not implemented yet");
+    return false;
+}
+
+inline bool Leq::op(float128_t a, int64_t b)
+{   return Geq::op(b, a);
+}
+
+inline bool Leq::op(float128_t a, uint64_t *b)
+{   return Geq::op(b, a);
+}
+
+#endif
 
 
 // Negation, addition and subtraction. These are easy apart from a mess
@@ -3707,8 +4217,6 @@ intptr_t Lognot::op(int64_t a)
 {   return int_to_handle(~a);
 }
 
-// @@@@@@@@@@@ need push/pop from here down
-
 // logand
 
 inline void ordered_biglogand(const uint64_t *a, size_t lena,
@@ -3737,7 +4245,9 @@ intptr_t Logand::op(uint64_t *a, uint64_t *b)
     size_t n;
     if (lena >= lenb) n = lena;
     else n = lenb;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     biglogand(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -3748,7 +4258,9 @@ intptr_t Logand::op(uint64_t *a, uint64_t *b)
 
 intptr_t Logand::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
+    push(a);
     uint64_t *p = reserve(lena);
+    pop(a);
     size_t final_n;
     uint64_t bb[1] = {(uint64_t)b};
     biglogand(a, lena, bb, 1, p, final_n);
@@ -3757,7 +4269,9 @@ intptr_t Logand::op(uint64_t *a, int64_t b)
 
 intptr_t Logand::op(int64_t a, uint64_t *b)
 {   size_t lenb = number_size(b);
+    push(b);
     uint64_t *p = reserve(lenb);
+    pop(b);
     size_t final_n;
     uint64_t aa[1] = {(uint64_t)a};
     biglogand(aa, 1, b, lenb, p, final_n);
@@ -3796,7 +4310,9 @@ intptr_t Logor::op(uint64_t *a, uint64_t *b)
     size_t n;
     if (lena >= lenb) n = lena;
     else n = lenb;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     biglogor(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -3804,7 +4320,9 @@ intptr_t Logor::op(uint64_t *a, uint64_t *b)
 
 intptr_t Logor::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
+    push(a);
     uint64_t *p = reserve(lena);
+    pop(a);
     size_t final_n;
     uint64_t bb[1] = {(uint64_t)b};
     biglogor(a, lena, bb, 1, p, final_n);
@@ -3813,7 +4331,9 @@ intptr_t Logor::op(uint64_t *a, int64_t b)
 
 intptr_t Logor::op(int64_t a, uint64_t *b)
 {   size_t lenb = number_size(b);
+    push(b);
     uint64_t *p = reserve(lenb);
+    pop(b);
     size_t final_n;
     uint64_t aa[1] = {(uint64_t)a};
     biglogor(aa, 1, b, lenb, p, final_n);
@@ -3859,7 +4379,9 @@ intptr_t Logxor::op(uint64_t *a, uint64_t *b)
     size_t n;
     if (lena >= lenb) n = lena;
     else n = lenb;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     biglogxor(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -3867,7 +4389,9 @@ intptr_t Logxor::op(uint64_t *a, uint64_t *b)
 
 intptr_t Logxor::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
+    push(a);
     uint64_t *p = reserve(lena);
+    pop(a);
     size_t final_n;
     uint64_t bb[1] = {(uint64_t)b};
     biglogxor(a, lena, bb, 1, p, final_n);
@@ -3876,7 +4400,9 @@ intptr_t Logxor::op(uint64_t *a, int64_t b)
 
 intptr_t Logxor::op(int64_t a, uint64_t *b)
 {   size_t lenb = number_size(b);
+    push(b);
     uint64_t *p = reserve(lenb);
+    pop(b);
     size_t final_n;
     uint64_t aa[1] = {(uint64_t)a};
     biglogxor(aa, 1, b, lenb, p, final_n);
@@ -3933,7 +4459,9 @@ intptr_t Leftshift::op(uint64_t *a, int64_t n)
     else if (n < 0) return Rightshift::op(a, -n);
     size_t lena = number_size(a);
     size_t nr = lena + (n/64) + 1;
+    push(a);
     uint64_t *p = reserve(nr);
+    pop(a);
     size_t final_n;
     bigleftshift(a, lena, n, p, final_n);
     return confirm_size(p, nr, final_n);
@@ -3999,7 +4527,9 @@ intptr_t Rightshift::op(uint64_t *a, int64_t n)
     size_t nr;
     if (lena > (size_t)n/64) nr = lena - n/64;
     else nr = 1;
+    push(a);
     uint64_t *p = reserve(nr);
+    pop(a);
     size_t final_n;
     bigrightshift(a, lena, n, p, final_n);
     return confirm_size(p, nr, final_n);
@@ -4121,7 +4651,9 @@ intptr_t Plus::op(uint64_t *a, uint64_t *b)
     size_t n;
     if (lena >= lenb) n = lena+1;
     else n = lenb+1;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     bigplus(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -4152,7 +4684,9 @@ intptr_t Plus::op(int64_t a, uint64_t *b)
 {   uint64_t aa[1];
     aa[0] = a;
     size_t lenb = number_size(b);
+    push(b);
     uint64_t *r = reserve(lenb+1);
+    pop(b);
     size_t final_n;
     bigplus(aa, 1, b, lenb, r, final_n);
     return confirm_size(r, lenb+1, final_n);
@@ -4162,7 +4696,9 @@ intptr_t Plus::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
     uint64_t bb[1];
     bb[0] = b;
+    push(a);
     uint64_t *r = reserve(lena+1);
+    pop(a);
     size_t final_n;
     bigplus(a, lena, bb, 1, r, final_n);
     return confirm_size(r, lena+1, final_n);
@@ -4171,7 +4707,9 @@ intptr_t Plus::op(uint64_t *a, int64_t b)
 inline intptr_t bigplus_small(intptr_t aa, int64_t b)
 {   uint64_t *a = vector_of_handle(aa);
     size_t lena = number_size(a);
+    push(a);
     uint64_t *p = reserve(lena+1);
+    pop(a);
     size_t final_n;
     bigplus_small(a, lena, b, p, final_n);
     return confirm_size(p, lena+1, final_n);
@@ -4268,7 +4806,9 @@ intptr_t Difference::op(uint64_t *a, uint64_t *b)
     size_t n;
     if (lena >= lenb) n = lena+1;
     else n = lenb+1;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     bigsubtract(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -4288,7 +4828,9 @@ intptr_t Difference::op(int64_t a, uint64_t *b)
 {   uint64_t aa[1];
     aa[0] = a;
     size_t lenb = number_size(b);
+    push(b);
     uint64_t *r = reserve(lenb+1);
+    pop(b);
     size_t final_n;
     bigsubtract(aa, 1, b, lenb, r, final_n);
     return confirm_size(r, lenb+1, final_n);
@@ -4298,7 +4840,9 @@ intptr_t Difference::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
     uint64_t bb[1];
     bb[0] = b;
+    push(a);
     uint64_t *r = reserve(lena+1);
+    pop(a);
     size_t final_n;
     bigsubtract(a, lena, bb, 1, r, final_n);
     return confirm_size(r, lena+1, final_n);
@@ -4311,7 +4855,9 @@ intptr_t Revdifference::op(uint64_t *a, uint64_t *b)
     size_t n;
     if (lena >= lenb) n = lena+1;
     else n = lenb+1;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     bigsubtract(b, lenb, a, lena, p, final_n);
     return confirm_size(p, n, final_n);
@@ -4331,7 +4877,9 @@ intptr_t Revdifference::op(int64_t a, uint64_t *b)
 {   uint64_t aa[1];
     aa[0] = a;
     size_t lenb = number_size(b);
+    push(b);
     uint64_t *r = reserve(lenb+1);
+    pop(b);
     size_t final_n;
     bigsubtract(b, lenb, aa, 1, r, final_n);
     return confirm_size(r, lenb+1, final_n);
@@ -4341,7 +4889,9 @@ intptr_t Revdifference::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
     uint64_t bb[1];
     bb[0] = b;
+    push(a);
     uint64_t *r = reserve(lena+1);
+    pop(a);
     size_t final_n;
     bigsubtract(bb, 1, a, lena, r, final_n);
     return confirm_size(r, lena+1, final_n);
@@ -4405,7 +4955,9 @@ intptr_t Times::op(uint64_t *a, uint64_t *b)
 {   size_t lena = number_size(a);
     size_t lenb = number_size(b);
     size_t n = lena+lenb;
+    push(a); push(b);
     uint64_t *p = reserve(n);
+    pop(b); pop(a);
     size_t final_n;
     bigmultiply(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
@@ -4425,7 +4977,9 @@ intptr_t Times::op(int64_t a, uint64_t *b)
 {   uint64_t aa[1];
     aa[0] = a;
     size_t lenb = number_size(b);
+    push(b);
     uint64_t *r = reserve(lenb+1);
+    pop(b);
     size_t final_n;
     bigmultiply(aa, 1, b, lenb, r, final_n);
     return confirm_size(r, lenb+1, final_n);
@@ -4435,7 +4989,9 @@ intptr_t Times::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
     uint64_t bb[1];
     bb[0] = b;
+    push(a);
     uint64_t *r = reserve(lena+1);
+    pop(a);
     size_t final_n;
     bigmultiply(a, lena, bb, 1, r, final_n);
     return confirm_size(r, lena+1, final_n);
@@ -4503,7 +5059,9 @@ inline void bigsquare(const uint64_t *a, size_t lena,
 intptr_t Square::op(uint64_t *a)
 {   size_t lena = number_size(a);
     size_t n = 2*lena;
+    push(a);
     uint64_t *p = reserve(n);
+    pop(a);
     size_t final_n;
     bigsquare(a, lena, p, final_n);
     return confirm_size(p, n, final_n);
@@ -4533,7 +5091,9 @@ intptr_t Isqrt::op(uint64_t *a)
 {   size_t lena = number_size(a);
     if (lena == 1) return Isqrt::op((int64_t)a[0]);
     size_t lenx = (lena+1)/2;
+    push(a);
     uint64_t *x = reserve(lenx);
+    pop(a);
     for (size_t i=0; i<lenx; i++) x[i] = 0;
     size_t bitstop = a[lena-1]==0 ? 0 : 64 - nlz(a[lena-1]);
     bitstop /= 2;
@@ -4543,13 +5103,38 @@ intptr_t Isqrt::op(uint64_t *a)
 // I now have a first approximation to the square root as a number that is
 // a power of 2 with about half the bit-length of a. I will degenerate into
 // using generic arithmetic here even though that may have extra costs.
+//
+// I could perhaps reasonably use uint64_t arithmetic for a first few
+// iterations, only looking at the most significant digit of the input.
+// That would save time, however at present I do not expect this function
+// to be time critical in any plausible application, and so I will keep
+// things simple(er).
     Bignum biga(true, vector_to_handle(a));
     Bignum bigx(true, confirm_size(x, lenx, lenx));
 // I will do the first step outside the loop to guarantee that my
 // approximation is an over-estimate before I try the end-test.
-    bigx = (bigx + biga/bigx) >> 1;
+//         bigx = (bigx + biga/bigx) >> 1;
+// The push/pop mess here feels extreme and I should probably re-code this
+// using lower level interfaces.
+    push(bigx.val); push(biga.val);
+    Bignum w1 = biga/bigx;
+    pop(biga.val); pop(bigx.val);
+    push(bigx.val); push(biga.val);
+    w1 = bigx + w1;
+    pop(biga.val); pop(bigx.val);
+    push(bigx.val); push(biga.val);
+    bigx = w1 >> 1;
+    pop(biga.val); pop(bigx.val);
     for (;;)
-    {   Bignum y = (bigx + biga/bigx) >> 1;
+    {   push(bigx.val); push(biga.val);
+        w1 = biga/bigx;
+        pop(biga.val); pop(bigx.val);
+        push(bigx.val); push(biga.val);
+        w1 = bigx + w1;
+        pop(biga.val); pop(bigx.val);
+        push(bigx.val); push(biga.val);
+        Bignum y = w1 >> 1;
+        pop(biga.val); pop(bigx.val);
         if (y >= bigx) break;
         bigx = y;
     }
@@ -4591,7 +5176,7 @@ intptr_t Isqrt::op(int64_t aa)
 // must be at least the size of the result, but it is not clear that any
 // useful saving spece saving can be found down that path.
 
-inline void bigpow(const uint64_t *a, size_t lena, uint64_t n,
+inline void bigpow(uint64_t *a, size_t lena, uint64_t n,
                    uint64_t *v,
                    uint64_t *w,
                    uint64_t *r, size_t &lenr, size_t maxlenr)
@@ -4668,9 +5253,13 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
 // truncating from uint64_t to size_t.
     my_assert(lenr == lenr1);
     uint64_t olenr = lenr;
+    push(a);
     uint64_t *r = reserve(lenr);
+    push(r);
     uint64_t *v = reserve(lenr);
+    push(v);
     uint64_t *w = reserve(lenr);
+    pop(v); pop(r); pop(a);
     bigpow(a, lena, (uint64_t)n, v, w, r, lenr, lenr);
     my_assert(lenr <= olenr);
     abandon(w);
@@ -4701,14 +5290,26 @@ intptr_t Pow::op(int64_t a, int64_t n)
     multiply64(n, bitsa, hi, bitsr);
     my_assert(hi == 0); // Check that size is at least somewhat sane!
     uint64_t lenr1 = 2 + bitsr/64;
+    if (bitsr < 64) // Can do all the work as machine integers.
+    {   int64_t result = 1;
+        for (;;)
+        {   if (n%2 != 0) result *= a;
+            if ((n = n/2) == 0) break;
+            a *= a;
+        }
+        return int_to_handle(result);
+    }
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
 // truncating from uint64_t to size_t.
     my_assert(lenr == lenr1);
     uint64_t olenr = lenr;
     uint64_t *r = reserve(lenr);
+    push(r);
     uint64_t *v = reserve(lenr);
+    push(v);
     uint64_t *w = reserve(lenr);
+    pop(v); pop(r);
     uint64_t aa[1] = {(uint64_t)a};
     bigpow(aa, 1, (uint64_t)n, v, w, r, lenr, lenr);
     my_assert(lenr <= olenr);
@@ -4719,6 +5320,14 @@ intptr_t Pow::op(int64_t a, int64_t n)
 
 intptr_t Pow::op(int64_t a, int32_t n)
 {   return Pow::op(a, (int64_t)n);
+}
+
+double Pow::op(uint64_t *a, double n)
+{   return pow(Double::op(a), n);
+}
+
+double Pow::op(int64_t a, double n)
+{   return pow(Double::op(a), n);
 }
 
 //=========================================================================
@@ -4766,7 +5375,7 @@ intptr_t Pow::op(int64_t a, int32_t n)
 // both. Note that at this stage a may still be negative! The value b is
 // passed in sign and magnitide form as {b, b_negative}
 
-inline void unsigned_short_division(const uint64_t *a, size_t lena,
+inline void unsigned_short_division(uint64_t *a, size_t lena,
                                     uint64_t b, bool b_negative,
                                     bool want_q, uint64_t *&q,
                                     size_t &olenq, size_t &lenq,
@@ -4778,9 +5387,11 @@ inline void unsigned_short_division(const uint64_t *a, size_t lena,
     if (negative(a[lena-1]))
     {   a_negative = true;
 // Take absolute value of a if necessary.
+        push(a);
         aa = reserve(lena);
+        pop(a);
         internal_negate(a, lena, aa);
-        a = (const uint64_t *)aa;
+        a = aa;
     }
 // Now both a and b are positive so I can do the division fairly simply.
 // Allocate space for the quotient if I need that, and then do standard
@@ -4788,7 +5399,9 @@ inline void unsigned_short_division(const uint64_t *a, size_t lena,
     size_t i=lena-1;
     if (want_q)
     {   olenq = lena;
+        push(a);
         q = reserve(olenq);
+        pop(a);
     }
     for (;;)
     {   uint64_t d;
@@ -4816,6 +5429,7 @@ inline void unsigned_short_division(const uint64_t *a, size_t lena,
 // the remainder will be strictly smaller then b, and the largest possible
 // value for b is 0xffffffffffffffff. The remainder may need to be returned
 // as a 2-digit bignum.
+        if (want_q) push(q);
         if (a_negative)
         {   hi = -hi;
             if (positive(hi) && hi!=0)
@@ -4843,10 +5457,11 @@ inline void unsigned_short_division(const uint64_t *a, size_t lena,
                 r[0] = hi;
             }
         }
+        if (want_q) pop(q);
     }
 }
 
-inline void signed_short_division(const uint64_t *a, size_t lena,
+inline void signed_short_division(uint64_t *a, size_t lena,
                                   int64_t b,
                                   bool want_q, uint64_t *&q,
                                   size_t &olenq, size_t &lenq,
@@ -4876,8 +5491,8 @@ inline void unsigned_long_division(uint64_t *a, size_t &lena,
 
 // Divide a by b to obtain a quotient q and a remainder r. 
 
-inline void division(const uint64_t *a, size_t lena,
-                     const uint64_t *b, size_t lenb,
+inline void division(uint64_t *a, size_t lena,
+                     uint64_t *b, size_t lenb,
                      bool want_q, uint64_t *&q, size_t &olenq, size_t &lenq,
                      bool want_r, uint64_t *&r, size_t &olenr, size_t &lenr)
 {   my_assert(want_q || want_r);
@@ -4917,7 +5532,9 @@ inline void division(const uint64_t *a, size_t lena,
         {   if (want_q)
             {   lenq = lena;
                 olenq = lena;
+                push(a);
                 q = reserve(lena);
+                pop(a);
 // The next line took me some while to arrive at!
                 uint64_t carry = !negative(a[lena-1]) || a[0]==0 ? 1 : 0;
                 for (size_t i=1; i<lena; i++)
@@ -4937,7 +5554,9 @@ inline void division(const uint64_t *a, size_t lena,
                 {   padr = 0;
                     lenr++;
                 }
+                if (want_q) push(q);
                 r = reserve(lenr);
+                if (want_q) pop(q);
                 olenr = lenr;
                 r[0] = rr;
                 if (lenr != 1) r[1] = padr;
@@ -4954,7 +5573,6 @@ inline void division(const uint64_t *a, size_t lena,
 // it during long division.
     uint64_t *bb = NULL;
     size_t lenbb = lenb;
-//@@    olenr = lenb;
     bool b_negative = negative(b[lenb-1]);
     if (b_negative)
     {
@@ -4965,8 +5583,10 @@ inline void division(const uint64_t *a, size_t lena,
 // a positive value but it would have its top bit set so it would require
 // and extra leading 0. Because the value I generate here is to be treated
 // as unsigned this leading top bit does not matter and so the absolute value
-// of b fits in the same amount of space that b did with no risk of overflow.  
+// of b fits in the same amount of space that b did with no risk of overflow.
+        push(a); push(b);
         bb = reserve(lenb);
+        pop(b); pop(a);
         olenr = lenb;
         internal_negate(b, lenb, bb);
         if (bb[lenbb-1] == 0) lenbb--;
@@ -4988,7 +5608,9 @@ inline void division(const uint64_t *a, size_t lena,
             lenq = 1;
         }
         if (want_r)
-        {   r = reserve(lena);
+        {   push(a);
+            r = reserve(lena);
+            pop(a);
             olenr = lena;
             internal_copy(a, lena, r);
             lenr = lena;
@@ -5004,24 +5626,34 @@ inline void division(const uint64_t *a, size_t lena,
 // it yet. I delay creation of that copy until now because that lets my
 // avoid a spurious allocation in the various small cases.
     if (!b_negative)
-    {   bb = reserve(lenb);
+    {   push(a); push(b);
+        bb = reserve(lenb);
+        pop(b); pop(a);
         olenr = lenb;
         internal_copy(b, lenbb, bb);
     }
+#ifdef DEBUG_OVERRUN
     if (debug_arith) my_assert(bb[olenr] == 0xaaaaaaaaaaaaaaaa);
+#endif
 // If I actually return the quotient I may need to add a leading 0 or -1 to
 // make its 2s complement representation valid. Hence the "+2" rather than
 // the more obvious "+1" here.
     if (want_q)
     {   lenq = lena - lenb + 2;
+        push(a); push(b); push(bb);
         q = reserve(lenq);
+        pop(bb); pop(b); pop(a);
         olenq = lenq;
     }
 // I will need space where I store something that starts off as a scaled
 // copy of the dividend and gradually have values subtracted from it until
 // it ends up as the remainder.
     lenr = lena;
+    push(a); push(b); push(bb);
+    if (want_q) push(q);
     r = reserve(lenr+1);
+    if (want_q) pop(q);
+    pop(bb); pop(b); pop(a);
     bool a_negative = negative(a[lena-1]);
     if (a_negative) internal_negate(a, lena, r);
     else internal_copy(a, lena, r);
@@ -5397,7 +6029,9 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
 // that might work. Specifically I will implement a straightforward
 // Euclidean GCD in a way that may allocate (and release) memory for
 // intermediate results over and over again.
+    push(b);
     intptr_t absa = Abs::op(a);
+    pop(b);
     intptr_t absb = Abs::op(b);
     if (op_dispatch2<Greaterp,bool>(absb, absa))
     {   intptr_t w = absa;
@@ -5405,8 +6039,13 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
         absb = w;
     }
 // Now absa >= absb
+//
+// @@@ Here I really want to do a Lehmer style reduction...
+//
     while (!stored_as_fixnum(absb) && number_size(vector_of_handle(absb))!=1)
-    {   intptr_t w = op_dispatch2<Remainder,intptr_t>(absa, absb);
+    {   push(absb);
+        intptr_t w = op_dispatch2<Remainder,intptr_t>(absa, absb);
+        pop(absb);
         absa = absb;
         absb = w;
     }
@@ -5459,34 +6098,24 @@ intptr_t Gcd::op(int64_t a, int64_t b)
 }
 
 intptr_t Lcm::op(uint64_t *a, uint64_t *b)
-{   intptr_t g = Gcd::op(a, b);
-    if (stored_as_fixnum(g))
-    {   int64_t gg = int_of_handle(g);
-        if (gg == 1) return Times::op(a, b);
-        intptr_t q = Quotient::op(b, gg);
-        return Times::op(vector_to_handle(a), q);
+{   push(a); push(b);
+    intptr_t g = Gcd::op(a, b);
+    pop(b);
+    if (stored_as_fixnum(g) && int_of_handle(g)==1)
+    {   pop(a);
+        return Times::op(a, b);
     }
-    else
-    {   intptr_t q = Quotient::op(b, vector_of_handle(g));
-        if (stored_as_fixnum(q)) return Times::op(a, int_of_handle(q));
-        else return Times::op(a, vector_of_handle(q));
-    }
+    intptr_t q = op_dispatch2<Quotient,intptr_t>(vector_to_handle(b), g);
+    pop(a);
+    return op_dispatch2<Times,intptr_t>(vector_to_handle(a), q);
 }
 
 intptr_t Lcm::op(uint64_t *a, int64_t b)
-{   intptr_t g = Gcd::op(a, b);
-// The GCD can be a bignum if b = MIN_FIXNUM.
-    if (stored_as_fixnum(g))
-    {   int64_t gg = int_of_handle(g);
-        if (gg == 1) return Times::op(a, b);
-        intptr_t q = Quotient::op(b, gg);
-        return Times::op(vector_to_handle(a), q);
-    }
-    else
-    {   intptr_t q = Quotient::op(b, vector_of_handle(g));
-        if (stored_as_fixnum(q)) return Times::op(a, int_of_handle(q));
-        else return Times::op(a, vector_of_handle(q));
-    }
+{   push(a);
+    intptr_t g = Gcd::op(a, b);
+    intptr_t q = op_dispatch2<Quotient,intptr_t>(int_to_handle(b), g);
+    pop(a);
+    return op_dispatch2<Times,intptr_t>(vector_to_handle(a), q);
 }
 
 intptr_t Lcm::op(int64_t a, uint64_t *b)
@@ -5495,7 +6124,7 @@ intptr_t Lcm::op(int64_t a, uint64_t *b)
 
 intptr_t Lcm::op(int64_t a, int64_t b)
 {   intptr_t g = Gcd::op(a, b);
-// The GCD can be a bignum if b = MIN_FIXNUM.
+// The GCD can be a bignum if a = b = MIN_FIXNUM.
     if (stored_as_fixnum(g))
     {   int64_t gg = int_of_handle(g);
         if (gg == 1) return Times::op(a, b);

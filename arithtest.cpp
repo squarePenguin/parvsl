@@ -97,12 +97,12 @@ int main(int argc, char *argv[])
 // basic arithmetic is in order.
 
     std::cout << "Some simple tests involving powers of 10" << std::endl;
-    Bignum a = "10000000000000000000000000";
+    Bignum a = 10000000000000000000000000_Z;
     std::cout << "a = " << a << std::endl;
     std::cout << "a*a = " << (a*a) << std::endl;
-    std::cout << "a*100 = " << (a*Bignum(100)) << std::endl;
-    std::cout << "100*a = " << (Bignum(100)*a) << std::endl;
-    std::cout << "100*100 = " << (Bignum(100)*Bignum(100)) << std::endl;
+    std::cout << "a*100 = " << (a*100_Z) << std::endl;
+    std::cout << "100*a = " << (100_Z*a) << std::endl;
+    std::cout << "100*100 = " << (100_Z*100_Z) << std::endl;
     std::cout << "End of simple tests" << std::endl << std::endl;
 
 #endif
@@ -248,8 +248,8 @@ int main(int argc, char *argv[])
         Bignum p = pow(Bignum(2), (int)r);
         Bignum c2 = a * p;
         Bignum c3 = a >> r;
-        Bignum w = a & ~(p-1);
-        Bignum c4 = (a & ~(p-1))/p;
+        Bignum w = a & ~(p-1_Z);
+        Bignum c4 = (a & ~(p-1_Z))/p;
         if (c1==c2 && c3==c4) continue;
         std::cout << "FAILED on test " << i << std::hex << std::endl;
         std::cout << "a            " << a << std::endl;
@@ -259,7 +259,7 @@ int main(int argc, char *argv[])
         std::cout << "by " << std::dec << p << std::hex << std::endl;
         display(" by", p);
         std::cout << "p            " << p << std::endl;
-        std::cout << "a&~(p-1)     " << (a&~(p-1)) << std::endl;
+        std::cout << "a&~(p-1)     " << (a&~(p-1_Z)) << std::endl;
         std::cout << "c1 a<<r      " << c1 << std::endl;
         std::cout << "c2 a*2^r     " << c2 << std::endl;
         std::cout << "c3 a>>r      " << c3 << std::endl;

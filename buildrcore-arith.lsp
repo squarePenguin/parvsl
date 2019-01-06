@@ -623,10 +623,28 @@ rds(xxx := open("$reduce/packages/support/build.red", 'input));
 (load!-package!-sources 'int 'int)
 (load!-package!-sources 'matrix 'matrix)
 (load!-package!-sources 'solve 'solve)
+(load!-package!-sources 'desir 'solve)
+(load!-package!-sources 'ineq 'solve)
+(load!-package!-sources 'modsr 'solve)
+(load!-package!-sources 'rsolve 'solve)
+(load!-package!-sources 'odesolve 'odesolve)
+(load!-package!-sources 'roots 'roots)
+(load!-package!-sources 'roots2 'roots)
+(load!-package!-sources 'dipoly 'dipoly)
+(load!-package!-sources 'groebner 'groebner)
 
 (load!-package!-sources 'entry 'support)
 (load!-package!-sources 'remake 'support)
 
+(load!-package!-sources 'specfn 'specfn)
+(load!-package!-sources 'specfn2 'specfn)
+(load!-package!-sources 'specfaux 'specfn)
+(load!-package!-sources 'specbess 'specfn)
+(load!-package!-sources 'sfgamma 'specfn)
+
+
+% The next line is a HACK and is (I hope) temporary.
+(setq largest!-small!-modulus (expt 10 100))
 (initreduce)
 (preserve 'begin "Rcore" nil)
 (stop 0)

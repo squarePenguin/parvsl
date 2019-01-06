@@ -75,10 +75,10 @@ vsl.img:	vsl library.lsp vsl.lsp
 fastvsl.img:	fastvsl library.lsp vsl.lsp
 	time ./fastvsl -z library.lsp | tee fastvsl.img.log
 
-vsl-arith.img:	vsl-arith library.lsp arith.lsp
+vsl-arith.img:	vsl-arith library-arith.lsp vsl-arith.lsp
 	time ./vsl-arith -z library-arith.lsp | tee vsl-arith.img.log
 
-fastvsl-arith.img:	fastvsl-arith library.lsp vsl-arith.lsp
+fastvsl-arith.img:	fastvsl-arith library-arith.lsp vsl-arith.lsp
 	time ./fastvsl-arith -z library-arith.lsp | tee fastvsl-arith.img.log
 
 parvsl.img:	parvsl library.lsp vsl.lsp
@@ -137,7 +137,7 @@ rcore:	vsl
 		-Dnoinlines=t \
 		buildrcore.lsp | tee rcore.log
 
-rcore-arith:	vsl-arith
+rcore-arith:	vsl-arith library-arith.lsp vsl-arith.lsp
 	mkdir -p rcore-arith.img.modules
 	rm -f rcore-arith.img.modules/* rcore-arith.img inline-defs.dat
 	time ./vsl-arith -z -ircore-arith.img -D@srcdir=. -D@reduce=.. \
@@ -158,7 +158,7 @@ fastrcore:	fastvsl
 		-Dnoinlines=t \
 		buildrcore.lsp | tee fastrcore.log
 
-fastrcore-arith:	fastvsl-arith
+fastrcore-arith:	fastvsl-arith library-arith.lsp vsl-arith.lsp
 	mkdir -p fastrcore-arith.img.modules
 	rm -f fastrcore-arith.img.modules/* fastrcore-arith.img inline-defs.dat
 	time ./fastvsl-arith -z -ifastrcore-arith.img -D@srcdir=. -D@reduce=.. \
