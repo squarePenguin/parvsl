@@ -4112,11 +4112,6 @@ LispObject Leq(LispObject lits, LispObject x, LispObject y)
     return (x == y ? lisptrue : nil);
 }
 
-LispObject Lneq(LispObject lits, LispObject x, LispObject y)
-{
-    return (x != y ? lisptrue : nil);
-}
-
 LispObject Leqcar(LispObject lits, LispObject x, LispObject y)
 {
     return ((isCONS(x) && (qcar(x) == y)) ? lisptrue : nil);
@@ -4148,6 +4143,11 @@ LispObject Lequal(LispObject lits, LispObject x, LispObject y)
             return lisptrue;
         }
     }
+}
+
+LispObject Lneq(LispObject lits, LispObject x, LispObject y)
+{
+    return (Lequal(lits, x, y) == nil ? lisptrue : nil);
 }
 
 LispObject Lmemq(LispObject lits, LispObject a, LispObject l)
@@ -4572,6 +4572,8 @@ LispObject Lgetd(LispObject lits, LispObject x)
              qdefn3(x) == undefined3 &&
              qdefn4(x) == undefined4 &&
              qdefn5up(x) == undefined5up) return nil;
+    else if ((qflags(x) & flagMACRO) != 0)
+        return list2star(macro, symlambda, r);
     else if (qdefn0(x) == interpreted0 &&
              (qdefn1(x) == interpreted1 ||
               qdefn1(x) == interpretspecform) &&
@@ -4579,9 +4581,7 @@ LispObject Lgetd(LispObject lits, LispObject x)
              qdefn3(x) == interpreted3 &&
              qdefn4(x) == interpreted4 &&
              qdefn5up(x) == interpreted5up)
-        return list2star((qflags(x) & flagMACRO) ? macro : expr,
-            symlambda,
-            r);
+        return list2star(expr, symlambda, r);
 //***            cons(shallow_copy(qcar(r)), qcdr(r)));
     else return cons(subr, x);
 }
@@ -5630,7 +5630,7 @@ public:
 };
 
 static LispObject Nmsd(LispObject a)
-{   return number_dispatcher::iunary<LispObject,Msder>("msd", a);
+{   return packfixnum(number_dispatcher::iunary<int64_t,Msder>("msd", a));
 }
 
 // ====== lsd ======
@@ -5647,7 +5647,7 @@ public:
 };
 
 static LispObject Nlsd(LispObject a)
-{   return number_dispatcher::iunary<LispObject,Lsder>("lsd", a);
+{   return packfixnum(number_dispatcher::iunary<int64_t,Lsder>("lsd", a));
 }
 
 // ====== bitcount ======
@@ -5664,7 +5664,7 @@ public:
 };
 
 static LispObject Nbitcount(LispObject a)
-{   return number_dispatcher::iunary<LispObject,Bitcounter>("bitcount", a);
+{   return packfixnum(number_dispatcher::iunary<int64_t,Bitcounter>("bitcount", a));
 }
 
 // ====== lognot ======

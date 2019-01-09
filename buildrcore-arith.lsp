@@ -632,6 +632,8 @@ rds(xxx := open("$reduce/packages/support/build.red", 'input));
 (load!-package!-sources 'roots2 'roots)
 (load!-package!-sources 'dipoly 'dipoly)
 (load!-package!-sources 'groebner 'groebner)
+(load!-package!-sources 'groebnr2 'groebner)
+(load!-package!-sources 'ideals 'groebner)
 
 (load!-package!-sources 'entry 'support)
 (load!-package!-sources 'remake 'support)
