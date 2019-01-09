@@ -18,103 +18,6 @@
 
 (setq f       nil)
 
-% Many combinations of car and cdr are supported. Here I define
-% versions that do up to four accesses. These would of course be
-% trivial to move into C code!
-
-(de caar (x)
-    (car (car x)))
-
-(de cadr (x)
-    (car (cdr x)))
-
-(de cdar (x)
-    (cdr (car x)))
-
-(de cddr (x)
-    (cdr (cdr x)))
-
-(de caaar (x)
-    (car (car (car x))))
-
-(de caadr (x)
-    (car (car (cdr x))))
-
-(de cadar (x)
-    (car (cdr (car x))))
-
-(de caddr (x)
-    (car (cdr (cdr x))))
-
-(de cdaar (x)
-    (cdr (car (car x))))
-
-(de cdadr (x)
-    (cdr (car (cdr x))))
-
-(de cddar (x)
-    (cdr (cdr (car x))))
-
-(de cdddr (x)
-    (cdr (cdr (cdr x))))
-
-(de caaaar (x)
-    (car (car (car (car x)))))
-
-(de caaadr (x)
-    (car (car (car (cdr x)))))
-
-(de caadar (x)
-    (car (car (cdr (car x)))))
-
-(de caaddr (x)
-    (car (car (cdr (cdr x)))))
-
-(de cadaar (x)
-    (car (cdr (car (car x)))))
-
-(de cadadr (x)
-    (car (cdr (car (cdr x)))))
-
-(de caddar (x)
-    (car (cdr (cdr (car x)))))
-
-(de cadddr (x)
-    (car (cdr (cdr (cdr x)))))
-
-(de cdaaar (x)
-    (cdr (car (car (car x)))))
-
-(de cdaadr (x)
-    (cdr (car (car (cdr x)))))
-
-(de cdadar (x)
-    (cdr (car (cdr (car x)))))
-
-(de cdaddr (x)
-    (cdr (car (cdr (cdr x)))))
-
-(de cddaar (x)
-    (cdr (cdr (car (car x)))))
-
-(de cddadr (x)
-    (cdr (cdr (car (cdr x)))))
-
-(de cdddar (x)
-    (cdr (cdr (cdr (car x)))))
-
-(de cddddr (x)
-    (cdr (cdr (cdr (cdr x)))))
-
-% "not" and "eqcar" are used while processing some parts of
-% this file and so get defined early.
-
-(de not (x)
-   (null x))
-
-(de eqcar (a b)                % Is (car a) the same as b?
-   (and (not (atom a)) (eq (car a) b)))
-
 % The vsl kernel checks for a function called macroexpand_list
 % whenever it is about to define a function, and expects it to
 % expand macros in all the expressions in a list. So before
@@ -157,12 +60,6 @@
 
 % Back to defining what are sometimes merely alternate
 % names for very basic operations.
-
-(de idp (x)
-   (symbolp x))
-
-(de pairp (x)
-   (null (atom x)))
 
 (de prog1 (a b)
    a)
@@ -215,21 +112,6 @@
       ((atom (cdr l)) l)
       (t (lastpair (cdr l)))))
 
-%(de member (a l)
-%   (cond
-%      ((atom l) nil)
-%      ((equal a (car l)) l)
-%      (t (member a (cdr l)))))
-
-% "member" checks it a value is present in a list using the
-% "equal" test, while "memq" uses "eq".
-
-%(de memq (a l)
-%   (cond
-%      ((atom l) nil)
-%      ((eq a (car l)) l)
-%      (t (memq a (cdr l)))))
-
 (de delete (a l)
    (cond
       ((atom l) l)
@@ -247,9 +129,6 @@
       ((atom a) b)
       ((member (car a) b) (union (cdr a) b))
       (t (cons (car a) (union (cdr a) b)))))
-
-(de neq (a b)                  % Not equal.
-   (null (equal a b)))
 
 (de assoc (a l)                % Look item up in association list using equal.
    (cond
@@ -678,12 +557,6 @@ top (cond ((atom a) (return (reversip r))))
 (de remflag (l tag)
    (dolist (v l) (remprop v tag)))
 
-(de flagp (v tag) (get v tag))
-
-(de prin2 (x) (princ x))
-
-(de explode2 (x) (explodec x))
-
 (de mkquote (x) (list 'quote x))
 
 (de apply1 (fn a1) (apply fn (list a1)))
@@ -711,13 +584,17 @@ top (cond ((atom a) (return (reversip r))))
 % assumptions about the character-code that is in use.
 
 (de liter (x)
-   (let!* ((c (char!-code x)))
-      (or (and (leq 65 c) (leq c 90))
-          (and (leq 97 c) (leq c 122)))))
+   (if (symbolp x)
+      (let!* ((c (char!-code x)))
+         (or (and (leq 65 c) (leq c 90))
+             (and (leq 97 c) (leq c 122))))
+      nil))
 
 (de digit (x)
-   (let!* ((c (char!-code x)))
-      (and (leq 48 c) (leq c 57))))
+   (if (symbolp x)
+      (let!* ((c (char!-code x)))
+         (and (leq 48 c) (leq c 57)))
+      nil))
 
 (de tolower (x)
    (let!* ((c (char!-code x)))
@@ -832,52 +709,7 @@ top (cond ((atom a) (return (reversip r))))
       (t (append (sort_flatten (cadr x))
          (cons (car x) (sort_flatten (cddr x)))))))
 
-(de gcdn (a b)
-   (cond
-      ((minusp a) (gcdn (minus a) b))
-      ((minusp b) (gcdn a (minus b)))
-      ((greaterp b a) (gcdn b a))
-      ((zerop b) a)
-      (t (gcdn b (remainder a b)))))
-
-(de lcmn (a b) (times a (quotient b (gcdn a b))))
-
-(de abs (x)
-   (if (minusp x) (minus x) x))
-
-(de max2 (a b)
-   (if (greaterp a b) a b))
-
-(de min2 (a b)
-   (if (lessp a b) a b))
-
-(de evenp (x) (zerop (remainder x 2)))
-
-(de msd (n)
-   (prog (r)
-      (setq r 0)
-      (while (not (zerop n))
-         (setq n (quotient n 2))
-         (setq r (add1 r)))
-      (return r)))
-
-(de lsd (n)
-   (if (zerop n)
-      0
-      (prog (r)
-         (setq r 0)
-         (while (zerop (remainder n 2))
-            (setq n (quotient n 2))
-            (setq r (add1 r)))
-         (return r))))
-
-(de ash (a n) (leftshift a n))
-(de ashift (a n) (leftshift a n))
-
-(de ash1 (a n)
-   (if (minusp a) (minus (leftshift (minus a) n)) (leftshift a n)))
-
-(de remd (x) nil)
+(de remd(a) nil)
 
 % The "fasl" scheme here is used when building large programs.
 % Code gets put in files in a directory called "modules".
@@ -1098,8 +930,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de gctime () 0)
 
-(de eqn (a b) (equal a b))
-
 (cond
   ((null (getd 'setpchar))
    (de setpchar (u) nil)))
@@ -1117,20 +947,6 @@ top (cond ((atom a) (return (reversip r))))
          (setq n (add1 n))
          (setq l (cdr l)))
       (return v)))
-
-(de frexp (x)
-   (prog (n)
-      (if (zerop x) (return '(0 . 0.0)))
-      (setq n 0)
-      (while (geq x 1.0)
-             (setq x (times x 0.5))
-             (setq n (add1 n)))
-      (while (lessp x 0.5)
-             (setq x (times x 2.0))
-             (setq n (sub1 n)))
-      (return (cons n x))))
-
-(de verbos (x) nil)
 
 (de window!-heading (x) (print x))
 
@@ -1201,10 +1017,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de find!-gnuplot ()
   "gnuplot")
-
-(de prin1 (x) (prin x))
-
-(de iequal (x y) (equal x y))
 
 (de string2list (x) (explodecn x))
 

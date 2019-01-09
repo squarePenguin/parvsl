@@ -167,6 +167,8 @@
 //   as C style strings that must be disposed of using "delete". The use of
 //   C rather than C++ style strings because I hope that makes storage
 //   management interaction clearer.
+//   In this case DEBUG_OVERRUN can enable simple checks against memory block
+//   overflow.
 // LISP:
 //   The arrangements here are based on the arrangements I have in my VSL
 //   and CSL Lisp implementations. I still hope that between the above options
@@ -226,7 +228,8 @@
 // If no explicit options have been set I will building using memory
 // allocation via C++ "new".
 
-#define NEW  1
+#define NEW           1
+#define DEBUG_OVERRUN 1
 
 #endif
 
@@ -687,30 +690,37 @@ public:
 // function will compile this into a single machine code instruction.
     static uint64_t *allocate(size_t n)
     {
-// If I am debugging I will always allocate an extra word that will lie
+#ifdef DEBUG_OVERRUN
+// If I am debugging I can allocate an extra word that will lie
 // just beyond what would have been the end of my block, and I will
 // fill everything with a pattern that might let me spot some cases where
-// I write beyond the proper size of data.
-        int bits = log_next_power_of_2(debug_arith ? n+1 : n);
+// I write beyond the proper size of data. This option is only supported
+// when storage allocation is uing NEW.
+        int bits = log_next_power_of_2(n+1);
+#else
+        int bits = log_next_power_of_2(n);
+#endif
         my_assert(n<=(((size_t)1)<<bits) && n>0);
         uint64_t *r = freechain_table[bits];
         if (r == NULL)
         {   r = new uint64_t[((size_t)1)<<bits];
             my_assert(r != NULL);
+#ifdef DEBUG_OVERRUN
             if (debug_arith)
             {   std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
                 r[0] = 0;
             }
+#endif
         }
         else
         {   freechain_table[bits] = (uint64_t *)r[1];
-            if (debug_arith)
-            {   my_assert(r[0] == -(uint64_t)1);
-                std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
-                r[0] = 0;
-            }
+#ifdef DEBUG+OVERRUN
+            my_assert(r[0] == -(uint64_t)1);
+            std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
+            r[0] = 0;
+#endif
         }
-// Just the first 32-bits of the header word record the clock capacity.
+// Just the first 32-bits of the header word record the block capacity.
 // The casts here look (and indeed are) ugly, but when I store data into
 // memory as a 32-bit value that is how I will read it later on, and the
 // messy notation here does not correspond to complicated computation.
@@ -745,7 +755,9 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 {   my_assert(final>0 && n>=final);
 // Verify that the word just beyond where anything should have been
 // stored has not been clobbered.
+#ifdef DEBUG_OVERRUN
     if (debug_arith) my_assert(p[n] == 0xaaaaaaaaaaaaaaaaU);
+#endif
     if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
         fc.abandon(&p[-1]);
@@ -1401,6 +1413,12 @@ class Rightshift
 };
 
 class Integer_length
+{   public:
+    static size_t op(int64_t);
+    static size_t op(uint64_t *);
+};
+
+class Low_bit
 {   public:
     static size_t op(int64_t);
     static size_t op(uint64_t *);
@@ -2081,7 +2099,7 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     lo = (uint64_t)r;
 }
 
-// divide (hi,lo) by divisor and generate a quotient and a remainder. The
+// divide {hi,lo} by divisor and generate a quotient and a remainder. The
 // version of the code that is able to use __int128 can serve as clean
 // documentation of the intent.
 
@@ -2092,6 +2110,21 @@ inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
     q = dividend / divisor;
     r = dividend % divisor;
 }
+
+// Find the quotient and remainder when {a0,a1} is divided by {b0,b1},
+// putting the result in q and {r0,r1}. This is used from the GCD code and
+// in the case a>=b and b0!=0 (well actually b0>4).
+
+inline void quotrem128(uint64_t a0, uint64_t a1,
+                       uint64_t b0, uint64_t b1,
+                       uint64_t &q, uint64_t &r0, uint64_t &r1)
+{   my_assert(b0 > 4);
+    q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
+    UINT128 rr = pack128(a0, a1) % pack128(b0, b1);
+    r0 = (uint64_t)(rr >> 64);
+    r1 = (uint64_t)rr;
+}
+   
 
 #else // __SIZEOF_INT128__
 
@@ -2216,6 +2249,17 @@ again2:
     }
     q = (q1 << 32) | q0;      // assemble and return quotient & remainder
     r = (un21*base + un0 - q0*c) >> s;
+}
+
+inline void remainder128(uint64_t a0, unit64_t a1,
+                         uint64_t b0, unit64_t b1;
+                         uint64_t &q, uint64_t &r0, uint64_t &r1);
+{   my_assert(b0 > 4);
+// This is still to be re-worked!
+    q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
+    UINT128 rr = (uint64_t)(pack128(a0, a1) % pack128(b0, b1));
+    r0 = (uint64_t)(rr >> 64);
+    r1 = (uint64_t)rr;
 }
 
 #endif // __SIZEOF_INT128__
@@ -4569,6 +4613,20 @@ size_t Integer_length::op(int64_t aa)
 
 }
 
+size_t Low_bit::op(uint64_t *a)
+{   return bignum_bits(a, number_size(a));
+}
+
+size_t Low_bit::op(int64_t aa)
+{   uint64_t a;
+    if (aa == 0) return 0;
+    else if (a < 0) a = ~(uint64_t)aa;
+    else a = aa;
+    aa = aa & (-aa); // keeps only the lowest bit
+    return (size_t)(64-nlz(a));
+
+}
+
 size_t Logcount::op(uint64_t *a)
 {   size_t lena = number_size(a);
     size_t r = 0;
@@ -5658,7 +5716,9 @@ inline void division(uint64_t *a, size_t lena,
     if (a_negative) internal_negate(a, lena, r);
     else internal_copy(a, lena, r);
     unsigned_long_division(r, lenr, bb, lenbb, want_q, q, olenq, lenq);
+#ifdef DEBUG_OVERRUN
     if (debug_arith) my_assert(r[lena+1] == 0xaaaaaaaaaaaaaaaa);
+#endif
 // While performing the long division I will have had three vectors that
 // were newly allocated. r starts off containing a copy of a but ends up
 // holding the remainder. It is rather probable that this remainder will
@@ -6016,10 +6076,29 @@ intptr_t Divide::op(uint64_t *a, uint64_t *b, intptr_t &rem)
 
 #endif
 
-inline void biggcd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
-                   uint64_t *r, size_t &lenr)
+void remainder_for_gcd(uint64_t *a,  size_t &lena, uint64_t *b, size_t lenb)
 {
-    my_abort("not implented yet");
+// This is a copy of the kernel of the long division code just for use
+// in my GCD routine. Its input will be two positive integere a and b.
+// The vector that a is stored in will have (at least) one word spare at the
+// end to let the number temporarily expand into. As positive numbers
+// neither a nor b will have a zero leading digit. |a| will be at least as
+// big as |b| and b will use at least 2 words. This replaces a with
+// (a%b). It temporarily corrupts b by scaling it, but puts that right
+// before exiting. There is no extra storage allocation performed.
+    int ss = nlz(b[lenb-1]);
+    a[lena] = scale_for_division(a, lena, ss);
+    lena++;
+    my_assert(scale_for_division(b, lenb, ss) == 0);
+    size_t lenq = lena-lenb; // potential length of quotient.
+    size_t m = lenq-1;
+    for (;;)
+    {   (void)next_quotient_digit(a, lena, b, lenb);
+        if (m == 0) break;
+        m--;
+    }
+    unscale_for_division(a, lena, ss);
+    unscale_for_division(b, lenb, ss);
 }
 
 intptr_t Gcd::op(uint64_t *a, uint64_t *b)
@@ -6033,25 +6112,138 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
     intptr_t absa = Abs::op(a);
     pop(b);
     intptr_t absb = Abs::op(b);
-    if (op_dispatch2<Greaterp,bool>(absb, absa))
-    {   intptr_t w = absa;
-        absa = absb;
-        absb = w;
+    my_assert(!stored_as_fixnum(absa));
+    my_assert(!stored_as_fixnum(absb));
+    uint64_t *av = vector_of_handle(absa), *bv = vector_of_handle(absb);
+    if (Lessp::op(av, bv))
+    {   uint64_t *w = av;
+        av = bv;
+        bv = w;
     }
-// Now absa >= absb
-//
-// @@@ Here I really want to do a Lehmer style reduction...
-//
-    while (!stored_as_fixnum(absb) && number_size(vector_of_handle(absb))!=1)
-    {   push(absb);
-        intptr_t w = op_dispatch2<Remainder,intptr_t>(absa, absb);
-        pop(absb);
-        absa = absb;
-        absb = w;
+// Now av >= bv.
+    size_t lena = number_size(av), lenb = number_size(bv); 
+    size_t olena = lena, olenb = lenb;
+    bool swapped = false;
+// Remove any leading zero digits, and if that reduces the situation to
+// a 1-word case follow it.
+    if (bv[lenb-1] == 0) lenb--;
+    uint64_t bb = bv[0];
+    if (lenb == 1)
+    {   uint64_t hi = 0, q;
+        for (size_t i=lena-1;;i--)
+        {   divide64(hi, av[i], bb, q, hi);
+            if (i == 0) break;
+        }
+        while (hi != 0)
+        {   uint64_t cc = bb % hi;
+            bb = hi;
+            hi = cc;
+        }
+        return unsigned_int_to_bignum(bb);
     }
-    if (stored_as_fixnum(absa))
-        return Gcd::op(int_of_handle(absa), int_of_handle(absb));
-    else return Gcd::op(vector_of_handle(absa), int_of_handle(absb));
+    if (av[lena-1] == 0) lena--;
+// Now at last a and b and genuine unsigned vectors without leading digits
+// and with a > b.
+    while (lenb != 1)
+    {
+#ifdef LEHMER
+        if (lena==lenb || lena==lenb+1)
+        {
+// Here I know that a>=b and the lengths of a and b are about the same.
+// I want high bits from each of a and b.
+            uint64_t a0=av[lena-1], a1=av[lena-2], a2;
+            if (lena>2) a2 = av[lena-2];
+            uint64_t b0, b1, b2;
+            if (lenb == lena)
+            {   b0=bv[lenb-1]; b1=bv[lenb-2];
+                if (lenb>2) b2 = bv[lenb-2];
+            }
+            else
+            {   b0=0; b1=bv[lenb-1]; b2=bv[lenb-2];
+            }
+// I will collect the top 128 bits of a and corresponding bits from b.
+            int lz = nlz(a0);
+            if (nlz != 0)
+            {   a0 = (a0<<lz) | (a1>>(64-lz));
+                a1 = (a1<<lz) | (a2>>(64-lz));
+                b0 = (b0<<lz) | (b1>>(64-lz));
+                b1 = (b1<<lz) | (b2>>(64-lz));
+            }
+// Now it may be that b has been a LOT smaller than a and so I will
+// just want to do a simple remainder step after all. I test for this
+// by ensuring that q={a0,a1}/{b0,b1} will be at least somewhat less than
+// a full 64-bit value. The cut-off value "4" used here is a bit arbitrary!
+// But for random inputs q will usually be a rather small integer so the
+// case of a huge value should only really arise as a very first step in
+// any remainder sequence.
+            if (b0 > 4)
+            {   uint64_t v0hi = 0, v0lo = 1, v1hi = 0, v1lo = 0;
+                while (b0 != 0)
+                {   uint64_t q, r0, r1;
+                    quotrem128(a0, a1, b0, b1, q, r0, r1);
+                    std::cout << std::hex << "{" << a0 << "," << a1 << "} / {" << b0 << "," << b1 << "}" << " = " << std::dec << q << std::endl;
+                    std::cout << std::hex << "r={" << r0 << "," << r1 << "}" <<std::dec << std::endl;
+                    a0 = b0; a1 = b1;
+                    b0 = r0; b1 = r1;
+// {r1,r2} = {v0hi, v0lo}
+                    r0 = v0hi; r1 = v0lo;
+                    v0hi = v1hi; v0lo = v1lo;
+// {v0hi,v0lo} = {v1hi, v1lo}
+// (v1hi,v1lo} = {r1,r2} + q*{v0hi,v0lo}
+                    v1hi = r0;
+                    multiplyadd64(v0lo, q, r1, r0, v1lo);
+                    v1hi += r0 + q*v0hi;
+                    std::cout << std::hex << "v={" << v1hi << "," << v1lo << "}" << std::endl;
+                }
+// Now b0==0,and it MAY be that b1==0 too. Bit it might not be!
+                if (b1 != 0)
+                {   uint64_t q, r;
+                    std::cout << std::hex << "{" << a0 << "," << a1 << "} % {"
+                              << b0 << "," << b1 << "}" << std::endl;
+// Well the very next step can still have a0 non-zero.
+                    divide64(a0, a1, b1, q, r);
+                    std::cout << std::dec << "   q =" << q << std::endl;
+                    a1 = b1; b1 = r;
+// Now both a and b are single precision
+                    while (b1 != 0)
+                    {   q = a1/b1;
+                        std::cout << std::hex << a1 << " % " << b1 << std::dec << "  q=" << q << std::endl;
+                        a0 = a1; a1 = b1; b1 = a0 - q*a1;
+                    }
+                }
+                std::cout << std::dec << "Done" << std::endl;
+                std::exit(0);
+            }
+        }
+#endif
+        remainder_for_gcd(av, lena, bv, lenb);
+        uint64_t *ax = av;
+        av = bv;
+        bv = ax;
+        size_t lenax = lena;
+        lena = lenb;
+        lenb = lenax;
+        swapped = !swapped;
+    }
+    if (bv[0] == 0)
+    {   if (negative(av[lena-1])) av[lena++] = 0;
+        abandon(bv);
+        return confirm_size(av, (swapped ? olenb : olena), lena);
+    }
+    bb = bv[0];
+    uint64_t hi = 0, q;
+    for (size_t i=lena-1;;i--)
+    {   divide64(hi, av[i], bb, q, hi);
+        if (i == 0) break;
+    }
+    while (hi != 0)
+    {   uint64_t cc = bb % hi;
+        bb = hi;
+        hi = cc;
+    }
+    abandon(av);
+    abandon(bv);
+    return unsigned_int_to_bignum(bb);
 }
 
 intptr_t Gcd::op(uint64_t *a, int64_t bb)
@@ -6064,7 +6256,9 @@ intptr_t Gcd::op(uint64_t *a, int64_t bb)
     bool signa = negative(a[lena-1]);
     uint64_t hi = 0, q;
     for (size_t i=lena-1;;i--)
-        divide64(hi, (signa ? ~a[i] : a[i]), b, q, hi);
+    {   divide64(hi, (signa ? ~a[i] : a[i]), b, q, hi);
+        if (i == 0) break;
+    }
 // Now if a had been positive we have hi=a%b. If a had been negative we
 // have (~a)%b == (-a-1)%b which is about |a|%b -1
     if (signa) hi = (hi+1)%b;

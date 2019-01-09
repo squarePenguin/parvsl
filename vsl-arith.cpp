@@ -467,7 +467,7 @@ INLINE const int MAX_LISPFILES = 30;
 #define symraise   listbases[23]
 #define symlower   listbases[24]
 #define dfprint    listbases[25]
-#define bignum     listbases[26]
+//#define bignum     listbases[26]
 #define symfluid   listbases[27]
 #define symglobal  listbases[28]
 const int BASES_SIZE = MAX_LISPFILES+29;
@@ -832,6 +832,7 @@ void allocateheap()
 // Now I have enough to let me define various allocation functions.
 
 extern void reclaim(int line);
+extern LispObject error2(const char *s, const char *s1, LispObject a);
 extern LispObject error1(const char *s, LispObject a);
 extern LispObject error0(const char *s);
 extern LispObject quiet_error();
@@ -1016,10 +1017,6 @@ static inline LispObject makevector(int maxindex)
     qheader(r) = tagHDR + typeVEC + packlength(len);
     for (i=0; i<=maxindex; i++) elt(r, i) = nil;
     return r;
-}
-
-static inline LispObject boxint64(int64_t a)
-{   return (LispObject)arith::int_to_bignum(a);
 }
 
 static LispObject Lallocate_string(LispObject data, LispObject a1)
@@ -1886,6 +1883,7 @@ static inline LispObject copycontent(LispObject s)
 
 INLINE const int printPLAIN = 1;
 INLINE const int printESCAPES = 2;
+INLINE const int printHEX = 4;
 
 // I suspect that linelength and linepos need to be maintained
 // independently for each output stream. At present that is not
@@ -2137,9 +2135,10 @@ void internalprint(LispObject x)
 #undef RAWSTRING
                         return;
                     case typeBIGNUM:
-                        {   uint64_t *v = arith::vector_of_handle(x);
-                            size_t lenv = arith::number_size(v);
-                            LispObject ss = arith::bignum_to_string(v, lenv);
+                        {   LispObject ss =
+                                (printflags&printHEX) != 0 ?
+                                     arith::bignum_to_string_hex(x) :
+                                     arith::bignum_to_string(x);
                             len = veclength(qheader(ss));
                             s = qstring(ss);
                             checkspace(len);
@@ -2204,7 +2203,11 @@ void internalprint(LispObject x)
             for (i=0; i<len; i++) wrch(printbuffer[i]);
             return;
         case tagFIXNUM:
-            snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, (int64_t)qfixnum(x));
+            if ((printflags & printHEX) != 0)
+                snprintf(printbuffer, sizeof(printbuffer),
+                         "%" PRIx64, (int64_t)qfixnum(x));
+            else snprintf(printbuffer, sizeof(printbuffer),
+                         "%" PRId64, (int64_t)qfixnum(x));
             checkspace(len = strlen(printbuffer));
             for (i=0; i<len; i++) wrch(printbuffer[i]);
             return;
@@ -2237,6 +2240,39 @@ LispObject print(LispObject a)
     return a;
 }
 
+LispObject printc(LispObject a)
+{   printflags = printPLAIN;
+    internalprint(a);
+    wrch('\n');
+    return a;
+}
+
+LispObject prinhex(LispObject a)
+{   printflags = printESCAPES | printHEX;
+    internalprint(a);
+    return a;
+}
+
+LispObject princhex(LispObject a)
+{   printflags = printPLAIN | printHEX;
+    internalprint(a);
+    return a;
+}
+
+LispObject printhex(LispObject a)
+{   printflags = printESCAPES | printHEX;
+    internalprint(a);
+    wrch('\n');
+    return a;
+}
+
+LispObject printchex(LispObject a)
+{   printflags = printPLAIN | printHEX;
+    internalprint(a);
+    wrch('\n');
+    return a;
+}
+
 void errprint(LispObject a)
 {   int saveout = lispout, saveflags = printflags;
     lispout = 1; printflags = printESCAPES;
@@ -2250,13 +2286,6 @@ void errprin(LispObject a)
     lispout = 1; printflags = printESCAPES;
     internalprint(a);
     lispout = saveout; printflags = saveflags;
-}
-
-LispObject printc(LispObject a)
-{   printflags = printPLAIN;
-    internalprint(a);
-    wrch('\n');
-    return a;
 }
 
 int curchar = '\n', symtype = 0;
@@ -2567,6 +2596,19 @@ LispObject error1(const char *msg, LispObject data)
     {   linepos = printf("\n+++ Error: %s: ", msg);
 #ifdef DEBUG
         if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s: ", msg);
+#endif // DEBUG
+        errprint(data);
+    }
+    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+                 unwindERROR;
+    return nil;
+}
+
+LispObject error2(const char *msg, const char *s1, LispObject data)
+{   if ((backtraceflag & backtraceHEADER) != 0)
+    {   linepos = printf("\n+++ Error: %s (%s): ", msg, s1);
+#ifdef DEBUG
+        if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s (%s): ", msg, s1);
 #endif // DEBUG
         errprint(data);
     }
@@ -3580,13 +3622,287 @@ LispObject Lvector_5up(LispObject lits, LispObject a1, LispObject a2,
 }
 
 LispObject Lcar(LispObject lits, LispObject x)
-{
-    if (isCONS(x)) return qcar(x);
+{   if (isCONS(x)) return qcar(x);
     else return error1("car of an atom", x);
 }
 
 LispObject Lcdr(LispObject lits, LispObject x)
-{
+{   if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcadar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcddar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaaaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdaaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcadaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcddaar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaadar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdadar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaddar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdddar(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaaadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdaadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcadadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcddadr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcaaddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcdaddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcar(x);
+    else return error1("car of an atom", x);
+    if (isCONS(x)) return qcdr(x);
+    else return error1("cdr of an atom", x);
+}
+
+LispObject Lcadddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) return qcar(x);
+    else return error1("car of an atom", x);
+}
+
+LispObject Lcddddr(LispObject lits, LispObject x)
+{   if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
+    if (isCONS(x)) x = qcdr(x);
+    else return error1("cdr of an atom", x);
     if (isCONS(x)) return qcdr(x);
     else return error1("cdr of an atom", x);
 }
@@ -3628,12 +3944,12 @@ LispObject Lcons(LispObject lits, LispObject x, LispObject y)
 
 LispObject Latom(LispObject lits, LispObject x)
 {
-    return (isCONS(x) && qcar(x) != bignum ? nil : lisptrue);
+    return (isCONS(x) ? nil : lisptrue);
 }
 
-LispObject Lbignump(LispObject lits, LispObject x)
+LispObject Lpairp(LispObject lits, LispObject x)
 {
-    return (isCONS(x) && qcar(x) == bignum ? lisptrue : nil);
+    return (isCONS(x) ? lisptrue : nil);
 }
 
 LispObject Lsymbolp(LispObject lits, LispObject x)
@@ -3672,6 +3988,13 @@ LispObject Lfixp(LispObject lits, LispObject x)
 LispObject Lfloatp(LispObject lits, LispObject x)
 {
     return (isFLOAT(x) ? lisptrue : nil);
+}
+
+LispObject Lfrexp(LispObject lits, LispObject a)
+{   double d = 0.0;
+    int x = 0;
+    if (isFLOAT(x)) d = std::frexp(qfloat(a), &x);
+    return cons(packfixnum(x), boxfloat(d));
 }
 
 LispObject Lfix(LispObject lits, LispObject x)
@@ -3787,6 +4110,16 @@ LispObject Llength(LispObject lits, LispObject a)
 LispObject Leq(LispObject lits, LispObject x, LispObject y)
 {
     return (x == y ? lisptrue : nil);
+}
+
+LispObject Lneq(LispObject lits, LispObject x, LispObject y)
+{
+    return (x != y ? lisptrue : nil);
+}
+
+LispObject Leqcar(LispObject lits, LispObject x, LispObject y)
+{
+    return ((isCONS(x) && (qcar(x) == y)) ? lisptrue : nil);
 }
 
 LispObject Lequal(LispObject lits, LispObject x, LispObject y)
@@ -4067,12 +4400,10 @@ LispObject Lmkvect(LispObject lits, LispObject x)
     return makevector(n);
 }
 
-extern LispObject boxint64(int64_t a);
-
 LispObject Lupbv(LispObject lits, LispObject x)
 {
     if (!isVEC(x)) return error1("bad arg to upbv", x);
-    return boxint64(veclength(qheader(x))/sizeof(LispObject)-1);
+    return arith::int_to_handle(veclength(qheader(x))/sizeof(LispObject)-1);
 }
 
 LispObject Lputv(LispObject lits, LispObject x, LispObject y, LispObject z)
@@ -4334,7 +4665,7 @@ static class D {} xD;   // for double precision floats
 
 
 template <class R, class T, class U, typename V>
-static inline R binary(U lhsType, V lhsVal, LispObject b)
+static inline R binary(const char *fname, U lhsType, V lhsVal, LispObject b)
 {   using namespace number_dispatcher;
     switch (b & TAGBITS)
     {
@@ -4348,10 +4679,10 @@ static inline R binary(U lhsType, V lhsVal, LispObject b)
         case typeBIGNUM:
             return T::op(lhsType, lhsVal, xB, arith::vector_of_handle(b));
         default:
-            return error1("Non-numeric argument", b);
+            return error2("Non-numeric argument", fname, b);
         }
     default:
-        return error1("Non-numeric argument", b);
+        return error2("Non-numeric argument", fname, b);
     }
 }
 
@@ -4361,24 +4692,24 @@ static inline R binary(U lhsType, V lhsVal, LispObject b)
 // op op() that implement it.
 
 template <class R, class T>
-static inline R binary(LispObject a, LispObject b)
+static inline R binary(const char *fname, LispObject a, LispObject b)
 {   using namespace number_dispatcher;
     switch (a & TAGBITS)
     {
     case tagFIXNUM:
-        return binary<R,T,I,int64_t>(xI, qfixnum(a), b);
+        return binary<R,T,I,int64_t>(fname, xI, qfixnum(a), b);
     case tagFLOAT:
-        return binary<R,T,D,double>(xD, qfloat(a), b);
+        return binary<R,T,D,double>(fname, xD, qfloat(a), b);
     case tagATOM:
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return binary<R,T,B,uint64_t *>(xB, arith::vector_of_handle(a), b);
+            return binary<R,T,B,uint64_t *>(fname, xB, arith::vector_of_handle(a), b);
         default:
-            return error1("Non-numeric argument", a);
+            return error2("Non-numeric argument", fname, a);
         }
     default:
-        return error1("Non-numeric argument", a);
+        return error2("Non-numeric argument", fname, a);
     }
 }
 
@@ -4386,7 +4717,7 @@ static inline R binary(LispObject a, LispObject b)
 // integer arguments, and so which have lighter weight dispatch.
 
 template <class R, class T, class U, typename V>
-static inline R ibinary(U lhsType, V lhsVal, LispObject b)
+static inline R ibinary(const char *fname, U lhsType, V lhsVal, LispObject b)
 {   using namespace number_dispatcher;
     switch (b & TAGBITS)
     {
@@ -4398,30 +4729,30 @@ static inline R ibinary(U lhsType, V lhsVal, LispObject b)
         case typeBIGNUM:
             return T::op(lhsType, lhsVal, xB, arith::vector_of_handle(b));
         default:
-            return error1("Non-integer argument", b);
+            return error2("Non-integer argument", fname, b);
         }
     default:
-        return error1("Non-integer argument", b);
+        return error2("Non-integer argument", fname, b);
     }
 }
 
 template <class R, class T>
-static inline R ibinary(LispObject a, LispObject b)
+static inline R ibinary(const char *fname, LispObject a, LispObject b)
 {   using namespace number_dispatcher;
     switch (a & TAGBITS)
     {
     case tagFIXNUM:
-        return ibinary<R,T,I,int64_t>(xI, qfixnum(a), b);
+        return ibinary<R,T,I,int64_t>(fname, xI, qfixnum(a), b);
     case tagATOM:
         switch (qheader(a) & TYPEBITS)
         {
         case typeBIGNUM:
-            return ibinary<R,T,B,uint64_t *>(xB, arith::vector_of_handle(a), b);
+            return ibinary<R,T,B,uint64_t *>(fname, xB, arith::vector_of_handle(a), b);
         default:
-            return error1("Non-integer argument", a);
+            return error2("Non-integer argument", fname, a);
         }
     default:
-        return error1("Non-integer argument", a);
+        return error2("Non-integer argument", fname, a);
     }
 }
 
@@ -4429,7 +4760,7 @@ static inline R ibinary(LispObject a, LispObject b)
 
 
 template <class R, class T>
-static inline R unary(LispObject a)
+static inline R unary(const char *fname, LispObject a)
 {   using namespace number_dispatcher;
     switch (a & TAGBITS)
     {
@@ -4443,17 +4774,17 @@ static inline R unary(LispObject a)
         case typeBIGNUM:
             return T::op(xB, arith::vector_of_handle(a));
         default:
-            return error1("Non-numeric argument", a);
+            return error2("Non-numeric argument", fname, a);
         }
     default:
-        return error1("Non-numeric argument", a);
+        return error2("Non-numeric argument", fname, a);
     }
 }
 
 // Integer unary operations
 
 template <class R, class T>
-static inline R iunary(LispObject a)
+static inline R iunary(const char *fname, LispObject a)
 {   using namespace number_dispatcher;
     switch (a & TAGBITS)
     {
@@ -4465,20 +4796,20 @@ static inline R iunary(LispObject a)
         case typeBIGNUM:
             return T::op(xB, arith::vector_of_handle(a));
         default:
-            return error1("Non-integer argument", a);
+            return error2("Non-integer argument", fname, a);
         }
     default:
-        return error1("Non-integer argument", a);
+        return error2("Non-integer argument", fname, a);
     }
 }
 
 // Things like "leftshift" that take and integer and a fixnum.
 
 template <class R, class T>
-static inline R shiftlike(LispObject a, LispObject b)
+static inline R shiftlike(const char *fname, LispObject a, LispObject b)
 {   using namespace number_dispatcher;
     if ((b & TAGBITS) != tagFIXNUM)
-        return error1("second argument should be a small integer", b);
+        return error2("second argument should be a small integer", fname, b);
     intptr_t n = qfixnum(b);
     switch (a & TAGBITS)
     {
@@ -4490,17 +4821,17 @@ static inline R shiftlike(LispObject a, LispObject b)
         case typeBIGNUM:
             return T::op(xB, arith::vector_of_handle(a), n);
         default:
-            return error1("Non-integer argument", a);
+            return error2("Non-integer argument", fname, a);
         }
     default:
-        return error1("Non-integer argument", a);
+        return error2("Non-integer argument", fname, a);
     }
 }
 
 // Things like "expt" that take and integer and a fixnum.
 
 template <class R, class T>
-static inline R exptlike(LispObject a, LispObject b)
+static inline R exptlike(const char *fname, LispObject a, LispObject b)
 {   using namespace number_dispatcher;
     if ((b & TAGBITS) == tagFIXNUM)
     {   intptr_t n = qfixnum(b);
@@ -4602,7 +4933,7 @@ public:
 };
 
 static LispObject Nplus2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Adder>(a, b);
+{   return number_dispatcher::binary<LispObject,Adder>("plus", a, b);
 }
 
 
@@ -4651,7 +4982,7 @@ public:
 };
 
 static LispObject Ndifference2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Subtracter>(a, b);
+{   return number_dispatcher::binary<LispObject,Subtracter>("difference", a, b);
 }
 
 
@@ -4699,7 +5030,7 @@ public:
 };
 
 static LispObject Ntimes2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Multiplier>(a, b);
+{   return number_dispatcher::binary<LispObject,Multiplier>("times", a, b);
 }
 
 // ====== quotient =====
@@ -4746,7 +5077,7 @@ public:
 };
 
 static LispObject Nquotient2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Quotienter>(a, b);
+{   return number_dispatcher::binary<LispObject,Quotienter>("quotient", a, b);
 }
 
 // ====== remainder =====
@@ -4801,7 +5132,7 @@ public:
 };
 
 static LispObject Nremainder2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Remainderer>(a, b);
+{   return number_dispatcher::binary<LispObject,Remainderer>("remainder", a, b);
 }
 
 // ====== divide =====
@@ -4852,7 +5183,63 @@ public:
 };
 
 static LispObject Ndivide2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<LispObject,Divider>(a, b);
+{   return number_dispatcher::binary<LispObject,Divider>("divide", a, b);
+}
+
+
+// ====== gcdn =====
+
+class Gcdner
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Gcd::op(a, b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Gcd::op(a, b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Gcd::op(a, b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Gcd::op(a, b);
+    }
+};
+
+static LispObject Ngcdn(LispObject a, LispObject b)
+{   return number_dispatcher::ibinary<LispObject,Gcdner>("gcdn", a, b);
+}
+
+
+// ====== lcmn =====
+
+class Lcmner
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                                number_dispatcher::I t2, int64_t b)
+    {   return arith::Lcm::op(a, b);
+    }
+    static inline LispObject op(number_dispatcher::I t1, int64_t a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Lcm::op(a, b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::I t2, int64_t b)
+    {   return arith::Lcm::op(a, b);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a,
+                         number_dispatcher::B t2, uint64_t *b)
+    {   return arith::Lcm::op(a, b);
+    }
+};
+
+static LispObject Nlcmn(LispObject a, LispObject b)
+{   return number_dispatcher::ibinary<LispObject,Lcmner>("lcmn", a, b);
 }
 
 
@@ -4880,7 +5267,7 @@ public:
 };
 
 static LispObject Nlogand2(LispObject a, LispObject b)
-{   return number_dispatcher::ibinary<LispObject,Ander>(a, b);
+{   return number_dispatcher::ibinary<LispObject,Ander>("logand", a, b);
 }
 
 
@@ -4908,7 +5295,7 @@ public:
 };
 
 static LispObject Nlogor2(LispObject a, LispObject b)
-{   return number_dispatcher::ibinary<LispObject,Orer>(a, b);
+{   return number_dispatcher::ibinary<LispObject,Orer>("logor", a, b);
 }
 
 // ====== xor =====
@@ -4935,7 +5322,7 @@ public:
 };
 
 static LispObject Nlogxor2(LispObject a, LispObject b)
-{   return number_dispatcher::ibinary<LispObject,Xorer>(a, b);
+{   return number_dispatcher::ibinary<LispObject,Xorer>("logxor", a, b);
 }
 
 // ====== greaterp ======
@@ -4982,7 +5369,7 @@ public:
 };
 
 static inline bool Bgreaterp2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<bool,Greaterper>(a, b);
+{   return number_dispatcher::binary<bool,Greaterper>("greaterp", a, b);
 }
 
 
@@ -5030,7 +5417,7 @@ public:
 };
 
 static inline bool Bgeq2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<bool,Geqer>(a, b);
+{   return number_dispatcher::binary<bool,Geqer>("geq", a, b);
 }
 
 
@@ -5079,7 +5466,7 @@ public:
 };
 
 static inline bool Blessp2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<bool,Lessper>(a, b);
+{   return number_dispatcher::binary<bool,Lessper>("lessp", a, b);
 }
 
 // ====== leq ======
@@ -5126,7 +5513,7 @@ public:
 };
 
 static inline bool Bleq2(LispObject a, LispObject b)
-{   return number_dispatcher::binary<bool,Leqer>(a, b);
+{   return number_dispatcher::binary<bool,Leqer>("leq", a, b);
 }
 
 // ====== add1 ======
@@ -5146,7 +5533,7 @@ public:
 };
 
 static LispObject Nadd1(LispObject a)
-{   return number_dispatcher::unary<LispObject,Add1er>(a);
+{   return number_dispatcher::unary<LispObject,Add1er>("add1", a);
 }
 
 // ====== sub1 ======
@@ -5166,7 +5553,7 @@ public:
 };
 
 static LispObject Nsub1(LispObject a)
-{   return number_dispatcher::unary<LispObject,Sub1er>(a);
+{   return number_dispatcher::unary<LispObject,Sub1er>("sub1", a);
 }
 
 // ====== minus ======
@@ -5186,7 +5573,7 @@ public:
 };
 
 static LispObject Nminus(LispObject a)
-{   return number_dispatcher::unary<LispObject,Minuser>(a);
+{   return number_dispatcher::unary<LispObject,Minuser>("minus", a);
 }
 
 // ====== minusp ======
@@ -5206,9 +5593,79 @@ public:
 };
 
 static inline bool Bminusp(LispObject a)
-{   return number_dispatcher::unary<bool,Minusper>(a);
+{   return number_dispatcher::unary<bool,Minusper>("minusp", a);
 }
 
+// ====== abs ======
+
+class Abser
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Abs::op(a);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a)
+    {   return boxfloat(a<0.0 ? -a : a);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Abs::op(a);
+    }
+};
+
+static LispObject Nabs(LispObject a)
+{   return number_dispatcher::unary<LispObject,Abser>("abs", a);
+}
+
+// ====== msd ======
+
+class Msder
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Integer_length::op(a);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Integer_length::op(a);
+    }
+};
+
+static LispObject Nmsd(LispObject a)
+{   return number_dispatcher::iunary<LispObject,Msder>("msd", a);
+}
+
+// ====== lsd ======
+
+class Lsder
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Low_bit::op(a);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Low_bit::op(a);
+    }
+};
+
+static LispObject Nlsd(LispObject a)
+{   return number_dispatcher::iunary<LispObject,Lsder>("lsd", a);
+}
+
+// ====== bitcount ======
+
+class Bitcounter
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Logcount::op(a);
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Logcount::op(a);
+    }
+};
+
+static LispObject Nbitcount(LispObject a)
+{   return number_dispatcher::iunary<LispObject,Bitcounter>("bitcount", a);
+}
 
 // ====== lognot ======
 
@@ -5224,7 +5681,7 @@ public:
 };
 
 static LispObject Nlognot(LispObject a)
-{   return number_dispatcher::iunary<LispObject,Lognoter>(a);
+{   return number_dispatcher::iunary<LispObject,Lognoter>("lognot", a);
 }
 
 // ====== leftshift ======
@@ -5241,7 +5698,7 @@ public:
 };
 
 static LispObject Nleftshift(LispObject a, LispObject b)
-{   return number_dispatcher::shiftlike<LispObject,Leftshifter>(a, b);
+{   return number_dispatcher::shiftlike<LispObject,Leftshifter>("leftshift", a, b);
 }
 
 
@@ -5259,12 +5716,16 @@ public:
 };
 
 static LispObject Nrightshift(LispObject a, LispObject b)
-{   return number_dispatcher::shiftlike<LispObject,Rightshifter>(a, b);
+{   return number_dispatcher::shiftlike<LispObject,Rightshifter>("rightshift", a, b);
 }
 
 
 LispObject Lminus(LispObject lits, LispObject x)
 {   return Nminus(x);
+}
+
+LispObject Labs_1(LispObject lits, LispObject x)
+{   return Nabs(x);
 }
 
 // ====== expt ======
@@ -5293,7 +5754,7 @@ public:
 };
 
 static LispObject Nexpt(LispObject a, LispObject b)
-{   return number_dispatcher::exptlike<LispObject,Expter>(a, b);
+{   return number_dispatcher::exptlike<LispObject,Expter>("expt", a, b);
 }
 
 
@@ -5305,6 +5766,18 @@ LispObject Lminusp(LispObject lits, LispObject x)
         (isBIGNUM(x) &&
          arith::Minusp::op(arith::vector_of_handle(x)))) return lisptrue;
     else return nil;
+}
+
+LispObject Lmsd(LispObject lits, LispObject x)
+{   return Nmsd(x);
+}
+
+LispObject Llsd(LispObject lits, LispObject x)
+{   return Nlsd(x);
+}
+
+LispObject Lbitcount(LispObject lits, LispObject x)
+{   return Nbitcount(x);
 }
 
 LispObject Llognot(LispObject lits, LispObject x)
@@ -5324,15 +5797,31 @@ LispObject Ldifference(LispObject lits, LispObject x, LispObject y)
 }
 
 LispObject Lquotient(LispObject lits, LispObject x, LispObject y)
-{   return Nquotient2(x, y);
+{   if (y == packfixnum(0) ||
+        (isFLOAT(y) && qfloat(y) == 0.0)) return error0("division by zero");
+    return Nquotient2(x, y);
 }
 
 LispObject Lremainder(LispObject lits, LispObject x, LispObject y)
-{   return Nremainder2(x, y);
+{   if (y == packfixnum(0) ||
+        (isFLOAT(y) && qfloat(y) == 0.0)) return error0("division by zero");
+    return Nremainder2(x, y);
 }
 
 LispObject Ldivide(LispObject lits, LispObject x, LispObject y)
-{   return Ndivide2(x, y);
+{   if (y == packfixnum(0) ||
+        (isFLOAT(y) && qfloat(y) == 0.0)) return error0("division by zero");
+    return Ndivide2(x, y);
+}
+
+LispObject Lgcdn(LispObject lits, LispObject x, LispObject y)
+{   if (x == packfixnum(0)) return Labs_1(lits, y);
+    else if (y == packfixnum(0)) return Labs_1(lits, x);
+    return Ngcdn(x, y);
+}
+
+LispObject Llcmn(LispObject lits, LispObject x, LispObject y)
+{   return Nlcmn(x, y);
 }
 
 LispObject Lleftshift(LispObject lits, LispObject x, LispObject y)
@@ -5810,6 +6299,26 @@ LispObject Lprintc(LispObject lits, LispObject x)
     return printc(x);
 }
 
+LispObject Lprinhex(LispObject lits, LispObject x)
+{
+    return prinhex(x);
+}
+
+LispObject Lprinthex(LispObject lits, LispObject x)
+{
+    return printhex(x);
+}
+
+LispObject Lprinchex(LispObject lits, LispObject x)
+{
+    return princhex(x);
+}
+
+LispObject Lprintchex(LispObject lits, LispObject x)
+{
+    return printchex(x);
+}
+
 LispObject Lterpri(LispObject lits)
 {
     wrch('\n');
@@ -6272,6 +6781,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_1),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_1),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_1),         \
+    SETUP_TABLE_SELECT("abs",               Labs_1),            \
     SETUP_TABLE_SELECT("plus",              Lplus_1),           \
     SETUP_TABLE_SELECT("times",             Ltimes_1),          \
     SETUP_TABLE_SELECT("logand",            Llogand_1),         \
@@ -6282,10 +6792,38 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
     SETUP_TABLE_SELECT("atan",              Latan),             \
     SETUP_TABLE_SELECT("atom",              Latom),             \
-    SETUP_TABLE_SELECT("bignump",           Lbignump),          \
+    SETUP_TABLE_SELECT("pairp",             Lpairp),            \
     SETUP_TABLE_SELECT("boundp",            Lboundp),           \
     SETUP_TABLE_SELECT("car",               Lcar),              \
     SETUP_TABLE_SELECT("cdr",               Lcdr),              \
+    SETUP_TABLE_SELECT("caar",              Lcaar),             \
+    SETUP_TABLE_SELECT("cdar",              Lcdar),             \
+    SETUP_TABLE_SELECT("cadr",              Lcadr),             \
+    SETUP_TABLE_SELECT("cddr",              Lcddr),             \
+    SETUP_TABLE_SELECT("caaar",             Lcaaar),            \
+    SETUP_TABLE_SELECT("cdaar",             Lcdaar),            \
+    SETUP_TABLE_SELECT("cadar",             Lcadar),            \
+    SETUP_TABLE_SELECT("cddar",             Lcddar),            \
+    SETUP_TABLE_SELECT("caadr",             Lcaadr),            \
+    SETUP_TABLE_SELECT("cdadr",             Lcdadr),            \
+    SETUP_TABLE_SELECT("caddr",             Lcaddr),            \
+    SETUP_TABLE_SELECT("cdddr",             Lcdddr),            \
+    SETUP_TABLE_SELECT("caaaar",            Lcaaaar),           \
+    SETUP_TABLE_SELECT("cdaaar",            Lcdaaar),           \
+    SETUP_TABLE_SELECT("cadaar",            Lcadaar),           \
+    SETUP_TABLE_SELECT("cddaar",            Lcddaar),           \
+    SETUP_TABLE_SELECT("caadar",            Lcaadar),           \
+    SETUP_TABLE_SELECT("cdadar",            Lcdadar),           \
+    SETUP_TABLE_SELECT("caddar",            Lcaddar),           \
+    SETUP_TABLE_SELECT("cdddar",            Lcdddar),           \
+    SETUP_TABLE_SELECT("caaadr",            Lcaaadr),           \
+    SETUP_TABLE_SELECT("cdaadr",            Lcdaadr),           \
+    SETUP_TABLE_SELECT("cadadr",            Lcadadr),           \
+    SETUP_TABLE_SELECT("cddadr",            Lcddadr),           \
+    SETUP_TABLE_SELECT("caaddr",            Lcaaddr),           \
+    SETUP_TABLE_SELECT("cdaddr",            Lcdaddr),           \
+    SETUP_TABLE_SELECT("cadddr",            Lcadddr),           \
+    SETUP_TABLE_SELECT("cddddr",            Lcddddr),           \
     SETUP_TABLE_SELECT("char-code",         Lcharcode),         \
     SETUP_TABLE_SELECT("char-downcase",     Lchar_downcase),    \
     SETUP_TABLE_SELECT("char-upcase",       Lchar_upcase),      \
@@ -6299,6 +6837,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("eval",              Leval),             \
     SETUP_TABLE_SELECT("exp",               Lexp),              \
     SETUP_TABLE_SELECT("explode",           Lexplode),          \
+    SETUP_TABLE_SELECT("explode2",          Lexplodec),         \
     SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
     SETUP_TABLE_SELECT("exploden",          Lexploden),         \
     SETUP_TABLE_SELECT("explodecn",         Lexplodecn),        \
@@ -6336,8 +6875,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("minus",             Lminus),            \
     SETUP_TABLE_SELECT("minusp",            Lminusp),           \
     SETUP_TABLE_SELECT("numberp",           Lnumberp),          \
+    SETUP_TABLE_SELECT("msd",               Lmsd),              \
+    SETUP_TABLE_SELECT("lsd",               Llsd),              \
     SETUP_TABLE_SELECT("sub1",              Lsub1),             \
     SETUP_TABLE_SELECT("floatp",            Lfloatp),           \
+    SETUP_TABLE_SELECT("frexp",             Lfrexp),            \
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("floor",             Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
@@ -6349,16 +6891,21 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
     SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
+    SETUP_TABLE_SELECT("not",               Lnull),             \
     SETUP_TABLE_SELECT("null",              Lnull),             \
     SETUP_TABLE_SELECT("onep",              Lonep),             \
     SETUP_TABLE_SELECT("plist",             Lplist),            \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_1),       \
-    SETUP_TABLE_SELECT("prin",              Lprin),             \
-    SETUP_TABLE_SELECT("princ",             Lprinc),            \
     SETUP_TABLE_SELECT("prin1",             Lprin),             \
     SETUP_TABLE_SELECT("prin2",             Lprinc),            \
+    SETUP_TABLE_SELECT("prin",              Lprin),             \
+    SETUP_TABLE_SELECT("princ",             Lprinc),            \
     SETUP_TABLE_SELECT("print",             Lprint),            \
     SETUP_TABLE_SELECT("printc",            Lprintc),           \
+    SETUP_TABLE_SELECT("prinhex",           Lprinhex),          \
+    SETUP_TABLE_SELECT("princhex",          Lprinchex),         \
+    SETUP_TABLE_SELECT("printhex",          Lprinthex),         \
+    SETUP_TABLE_SELECT("printchex",         Lprintchex),        \
     SETUP_TABLE_SELECT("rdf",               Lrdf),              \
     SETUP_TABLE_SELECT("rds",               Lrds),              \
     SETUP_TABLE_SELECT("reclaim",           Lreclaim_1),        \
@@ -6370,6 +6917,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("sqrt",              Lsqrt),             \
     SETUP_TABLE_SELECT("stop",              Lstop_1),           \
     SETUP_TABLE_SELECT("stringp",           Lstringp),          \
+    SETUP_TABLE_SELECT("idp",               Lsymbolp),          \
     SETUP_TABLE_SELECT("symbolp",           Lsymbolp),          \
     SETUP_TABLE_SELECT("trace",             Ltrace),            \
     SETUP_TABLE_SELECT("unfluid",           Lunfluid),          \
@@ -6412,6 +6960,9 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
     SETUP_TABLE_SELECT("cons",              Lcons),             \
     SETUP_TABLE_SELECT("eq",                Leq),               \
+    SETUP_TABLE_SELECT("neq",               Lneq),               \
+    SETUP_TABLE_SELECT("eqcar",             Leqcar),            \
+    SETUP_TABLE_SELECT("eqn",               Lequal),            \
     SETUP_TABLE_SELECT("equal",             Lequal),            \
     SETUP_TABLE_SELECT("error",             Lerror_2),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_2),       \
@@ -6432,6 +6983,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("expt",              Lexpt),             \
     SETUP_TABLE_SELECT("geq",               Lgeq),              \
     SETUP_TABLE_SELECT("greaterp",          Lgreaterp),         \
+    SETUP_TABLE_SELECT("ash",               Lleftshift),        \
     SETUP_TABLE_SELECT("ashift",            Lleftshift),        \
     SETUP_TABLE_SELECT("lshift",            Lleftshift),        \
     SETUP_TABLE_SELECT("leftshift",         Lleftshift),        \
@@ -6439,8 +6991,11 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("lessp",             Llessp),            \
     SETUP_TABLE_SELECT("quotient",          Lquotient),         \
     SETUP_TABLE_SELECT("remainder",         Lremainder),        \
+    SETUP_TABLE_SELECT("gcdn",              Lgcdn),             \
+    SETUP_TABLE_SELECT("lcmn",              Llcmn),             \
     SETUP_TABLE_SELECT("rshift",            Lrightshift),       \
     SETUP_TABLE_SELECT("rightshift",        Lrightshift),       \
+    SETUP_TABLE_SELECT("flagp",             Lget),              \
     SETUP_TABLE_SELECT("get",               Lget),              \
     SETUP_TABLE_SELECT("gethash",           Lgethash),          \
     SETUP_TABLE_SELECT("getv",              Lgetv),             \
@@ -6448,6 +7003,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("imin",              Lmin_2),            \
     SETUP_TABLE_SELECT("max",               Lmax_2),            \
     SETUP_TABLE_SELECT("min",               Lmin_2),            \
+    SETUP_TABLE_SELECT("max2",              Lmax_2),            \
+    SETUP_TABLE_SELECT("min2",              Lmin_2),            \
     SETUP_TABLE_SELECT("member",            Lmember),           \
     SETUP_TABLE_SELECT("memq",              Lmemq),             \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_2),         \
@@ -6728,7 +7285,6 @@ void setup()
     qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
     qflags(dfprint) |= flagFLUID;
     Lput(nil, dfprint, symfluid, lisptrue);
-    bignum = lookup("~bignum", 7, 3);
     qvalue(symraise = lookup("*raise", 6, 3)) = nil;
     qvalue(symlower = lookup("*lower", 6, 3)) = lisptrue;
     qflags(symraise) |= flagFLUID;
@@ -7300,9 +7856,8 @@ int warm_start_1(gzFile f, int *errcode)
                         continue;
                     }
                 case typeBIGNUM:
-// No relocation, but I need to fix up byte orders... This will all
-// change soon as I move to supporting C-coded bignums using 32-bit
-// digits, so I will not put a lot of work into it just now.
+// No relocation, but I need to fix up byte orders... the data is
+// a vector of uint64_t values.
                     fr1 += ALIGN8(sizeof(LispObject) + veclength(h));
 //@@ This does NOT cope with overlapping data in this case.
                     if (fr1 > lim1)
