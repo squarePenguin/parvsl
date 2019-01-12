@@ -1360,7 +1360,6 @@ void inner_reclaim(LispObject *C_stack)
 // section has its "starts" bit set, and so the loop can never zoom down and
 // drop beyond the bottom of a segment.
             block_header *block_a = find_block(a);
-            LispObject initial_a = a;
             while (!getheapstarts(a))
             {
                 a -= 8;
@@ -1368,7 +1367,6 @@ void inner_reclaim(LispObject *C_stack)
                 assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
                 assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
             }
-if (initial_a == 123456) printf("ook\n"); // to get it used.
             if (!getpinned(a))
             {   LispObject h;
 // ensureheapspace is here to arrange to skip past any of the pinned items
@@ -1911,7 +1909,7 @@ int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch1(int c)
-{
+{   if (c == '\r') return;
     if (lispout == -1)
     {   char w[4];
 // This bit is for the benefit of explode and explodec.
@@ -4093,6 +4091,11 @@ LispObject Latan(LispObject lits, LispObject x)
     return boxfloat(atan(floatval(x)));
 }
 
+LispObject Latan_2(LispObject lits, LispObject x, LispObject y)
+{
+    return boxfloat(atan2(floatval(x), floatval(y)));
+}
+
 LispObject Lnull(LispObject lits, LispObject x)
 {
     return (x == nil ? lisptrue : nil);
@@ -4224,7 +4227,34 @@ LispObject Ldate(LispObject lits)
     today1[7] = today[22];
     today1[8] = today[23];
     today1[9] = 0;             // Now as in 03-Apr-09
-    return makestring(today1, 10);
+    return makestring(today1, 9);
+}
+
+LispObject Ldate_and_time_0(LispObject lits)
+{   time_t t = time(NULL);
+    char today[32];
+    strcpy(today, ctime(&t));  // e.g. "Sun Sep 16 01:03:52 1973\n"
+    today[24] = 0;             // loses final '\n'
+    return makestring(today, 24);
+}
+
+LispObject Ldate_and_time_1(LispObject lits, LispObject a1)
+{   time_t t = time(NULL);
+    char today[32], today1[32];
+    strcpy(today, ctime(&t));  // e.g. "Sun Sep 16 01:03:52 1973\n"
+    //       012345678901234567890123
+    today[24] = 0;             // loses final '\n'
+    today1[0] = today[8]==' ' ? '0' : today[8];
+    today1[1] = today[9];
+    today1[2] = '-';
+    today1[3] = today[4];
+    today1[4] = today[5];
+    today1[5] = today[6];
+    today1[6] = '-';
+    today1[7] = today[22];
+    today1[8] = today[23];
+    today1[9] = 0;             // Now as in 03-Apr-09
+    return makestring(today1, 9);
 }
 
 LispObject Llist2string(LispObject lits, LispObject a)
@@ -5616,15 +5646,49 @@ static LispObject Nabs(LispObject a)
 {   return number_dispatcher::unary<LispObject,Abser>("abs", a);
 }
 
+// ====== evenp ======
+
+class Evenper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Evenp::op(a);
+    }
+    static inline bool op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Evenp::op(a);
+    }
+};
+
+static LispObject Bevenp(LispObject a)
+{   return number_dispatcher::iunary<bool,Evenper>("evenp", a);
+}
+
+// ====== oddp ======
+
+class Oddper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Oddp::op(a);
+    }
+    static inline bool op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Oddp::op(a);
+    }
+};
+
+static LispObject Boddp(LispObject a)
+{   return number_dispatcher::iunary<bool,Oddper>("oddp", a);
+}
+
 // ====== msd ======
 
 class Msder
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    static inline int64_t op(number_dispatcher::I t1, int64_t a)
     {   return arith::Integer_length::op(a);
     }
-    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    static inline int64_t op(number_dispatcher::B t1, uint64_t *a)
     {   return arith::Integer_length::op(a);
     }
 };
@@ -5638,10 +5702,10 @@ static LispObject Nmsd(LispObject a)
 class Lsder
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    static inline int64_t op(number_dispatcher::I t1, int64_t a)
     {   return arith::Low_bit::op(a);
     }
-    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    static inline int64_t op(number_dispatcher::B t1, uint64_t *a)
     {   return arith::Low_bit::op(a);
     }
 };
@@ -5766,6 +5830,14 @@ LispObject Lminusp(LispObject lits, LispObject x)
         (isBIGNUM(x) &&
          arith::Minusp::op(arith::vector_of_handle(x)))) return lisptrue;
     else return nil;
+}
+
+LispObject Levenp(LispObject lits, LispObject x)
+{   return Bevenp(x) ? lisptrue : nil;
+}
+
+LispObject Loddp(LispObject lits, LispObject x)
+{   return Boddp(x) ? lisptrue : nil;
 }
 
 LispObject Lmsd(LispObject lits, LispObject x)
@@ -6372,12 +6444,12 @@ LispObject Lexplodecn(LispObject lits, LispObject x)
 }
 
 LispObject Lreadch(LispObject lits)
-{   char ch[4];
-    if (curchar == EOF) return eofsym;
-    ch[0] = qvalue(symlower) != nil ? tolower(curchar) :
-            qvalue(symraise) != nil ? toupper(curchar) : curchar;
+{   int c = rdch();
+    if (c == EOF) return eofsym;
+    char ch[4];
+    ch[0] = qvalue(symlower) != nil ? tolower(c) :
+            qvalue(symraise) != nil ? toupper(c) : c;
     ch[1] = 0;
-    curchar = rdch();
     return lookup(ch, 1, 1);
 }
 
@@ -6738,6 +6810,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 
 #define SETUP0                                                  \
     SETUP_TABLE_SELECT("date",              Ldate),             \
+    SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_0),  \
     SETUP_TABLE_SELECT("list",              Llist_0),           \
     SETUP_TABLE_SELECT("iplus",             Lplus_0),           \
     SETUP_TABLE_SELECT("itimes",            Ltimes_0),          \
@@ -6774,6 +6847,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 #define SETUP0a
 
 #define SETUP1                                                  \
+    SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_1),  \
     SETUP_TABLE_SELECT("list",              Llist_1),           \
     SETUP_TABLE_SELECT("list*",             Lliststar_1),       \
     SETUP_TABLE_SELECT("iplus",             Lplus_1),           \
@@ -6781,6 +6855,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_1),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_1),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_1),         \
+    SETUP_TABLE_SELECT("evenp",             Levenp),            \
+    SETUP_TABLE_SELECT("oddp",              Loddp),             \
     SETUP_TABLE_SELECT("abs",               Labs_1),            \
     SETUP_TABLE_SELECT("plus",              Lplus_1),           \
     SETUP_TABLE_SELECT("times",             Ltimes_1),          \
@@ -6995,6 +7071,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("lcmn",              Llcmn),             \
     SETUP_TABLE_SELECT("rshift",            Lrightshift),       \
     SETUP_TABLE_SELECT("rightshift",        Lrightshift),       \
+    SETUP_TABLE_SELECT("atan",              Latan_2),           \
+    SETUP_TABLE_SELECT("atan2",             Latan_2),           \
     SETUP_TABLE_SELECT("flagp",             Lget),              \
     SETUP_TABLE_SELECT("get",               Lget),              \
     SETUP_TABLE_SELECT("gethash",           Lgethash),          \
@@ -8139,9 +8217,8 @@ static char *get_prompt(EditLine *el)
 void setup_prompt() {
     stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
     if (stdin_tty) {
-        el_struct = el_init("vsl", stdin, stdout, stderr);
+        el_struct = el_init("vsl", stdin, stdout, stdout);
         el_history = history_init();
-
         atexit(el_tidy);
         history(el_history, &el_history_event, H_SETSIZE, 1000);
         el_set(el_struct, EL_PROMPT, get_prompt);

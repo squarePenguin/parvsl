@@ -1364,16 +1364,14 @@ void inner_reclaim(LispObject *C_stack)
 // secure in the knowledge that program counters and return addresses
 // that reference into it will be coped with gracefully.
         if (inheap1(a))
-        {
-            a &= ~(LispObject)TAGBITS;
+        {   a &= ~(LispObject)TAGBITS;
 // The next line is going to assume that the very first location in any heap
 // section has its "starts" bit set, and so the loop can never zoom down and
 // drop beyond the bottom of a segment.
             block_header *block_a = find_block(a);
             LispObject initial_a = a;
             while (!getheapstarts(a))
-            {
-                a -= 8;
+            {   a -= 8;
                 block_header *block_b = find_block(a);
                 assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
                 assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
@@ -1944,7 +1942,6 @@ void wrch(int c)
     }
 }
 
-static bool stdin_tty = false;
 static EditLine *el_struct;
 static History *el_history;
 static HistEvent el_history_event;
@@ -1978,7 +1975,9 @@ int rdch()
     }
     else
     {   int c;
-        if (lispfiles[lispin] == stdin && stdin_tty)
+        if (lispfiles[lispin] == stdin &&
+            isatty(fileno(stdin)) &&
+            isatty(fileno(stdout)))
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s = el_gets(el_struct, &n);
@@ -2594,9 +2593,7 @@ LispObject interpreted0(LispObject b)
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
     if (bvl != nil)    // Could legally be (&rest v)
-    {
         return error1("Not enough arguments provided", bvl);
-    }
     r = nil;
     while (isCONS(b))
     {   r = eval(qcar(b));
@@ -2615,9 +2612,7 @@ LispObject interpreted1(LispObject b, LispObject a1)
     r = qcar(bvl);
     bvl = qcdr(bvl);
     if (bvl != nil)  // Could legally be (v1 &rest v2)
-    {
         return error1("Not enough arguments provided", bvl);
-    }
     bvl = r;
     save1 = qvalue(bvl);
     qvalue(bvl) = a1;
@@ -5681,12 +5676,12 @@ LispObject Lexplodecn(LispObject lits, LispObject x)
 }
 
 LispObject Lreadch(LispObject lits)
-{   char ch[4];
-    if (curchar == EOF) return eofsym;
-    ch[0] = qvalue(symlower) != nil ? tolower(curchar) :
-            qvalue(symraise) != nil ? toupper(curchar) : curchar;
+{   int c = rdch();
+    if (c == EOF) return eofsym;
+    char ch[4];
+    ch[0] = qvalue(symlower) != nil ? tolower(c) :
+            qvalue(symraise) != nil ? toupper(c) : c;
     ch[1] = 0;
-    curchar = rdch();
     return lookup(ch, 1, 1);
 }
 
@@ -6380,7 +6375,7 @@ void setup()
     Lput(nil, nil, symglobal, lisptrue);
     Lput(nil, lisptrue, symglobal, lisptrue);
     Lput(nil, undefined, symglobal, lisptrue);
-    qvalue(echo = lookup("*echo", 5, 3)) = interactive ? nil : lisptrue;
+    qvalue(echo = lookup("*echo", 5, 3)) = nil;
     qflags(echo) |= flagFLUID;
     Lput(nil, echo, symfluid, lisptrue);
     {   LispObject nn;
@@ -6728,8 +6723,7 @@ int warm_start_1(gzFile f, int *errcode)
 // Now back to dealing with the image heap.
     total_size = 0;
     for (i=0; i<image_nblocks; i++)
-    {
-        image_offsets[i] = total_size*64;
+    {   image_offsets[i] = total_size*64;
         total_size += image_bitmapsizes[i];
     }
     for (;i<16; i++) image_offsets[i] = total_size*64;
@@ -7024,7 +7018,7 @@ int warm_start_1(gzFile f, int *errcode)
     }
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
-     qvalue(echo) = interactive ? nil : lisptrue;
+     qvalue(echo) = nil;
      return 0;
 }
 
@@ -7259,8 +7253,8 @@ void write_image(gzFile f)
     }
 }
 
-static void el_tidy() {
-    el_end(el_struct);
+static void el_tidy()
+{   el_end(el_struct);
     history_end(el_history);
 }
 
@@ -7268,10 +7262,9 @@ static char *get_prompt(EditLine *el)
 {   return the_prompt;
 }
 
-void setup_prompt() {
-    stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
-    if (stdin_tty) {
-        el_struct = el_init("vsl", stdin, stdout, stderr);
+void setup_prompt()
+{   if (isatty(fileno(stdin)) && isatty(fileno(stdout)))
+    {   el_struct = el_init("vsl", stdin, stdout, stderr);
         el_history = history_init();
 
         atexit(el_tidy);
@@ -7902,8 +7895,7 @@ int main(int argc, char *argv[])
                 my_exit(EXIT_FAILURE);
             }
             if ((i = warm_start(f, &errcode)) != 0)
-            {
-                gzerror(f, &errcode);
+            {   gzerror(f, &errcode);
                 gzclose(f);
 // First case is when gzread has not reported any problems but when the
 // internal logic in warm_start has detected some inconsiency.

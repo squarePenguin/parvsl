@@ -1043,6 +1043,8 @@ top (cond ((atom a) (return (reversip r))))
 (de printprompt (u) nil)
 (flag '(printprompt) 'lose)
 
+(flag '(evenp oddp) 'lose)
+
 "End of vsl.lsp"
 
 % End of vsl.lsp
