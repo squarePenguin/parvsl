@@ -47,14 +47,15 @@ using namespace arith;
 // The tests come in sections, and these preprocessor symbols can be used
 // to select which sections get run.
 
-#define TEST_SOME_BASICS 1
-#define TEST_RANDOM 1
-#define TEST_BITWISE 1
-#define TEST_SHIFTS 1
-#define TEST_PLUS_AND_TIMES 1
-#define TEST_DIVISION 1
-#define TEST_ISQRT 1
-#define TEST_FLOAT
+//#define TEST_SOME_BASICS 1
+//#define TEST_RANDOM 1
+//#define TEST_BITWISE 1
+//#define TEST_SHIFTS 1
+//#define TEST_PLUS_AND_TIMES 1
+//#define TEST_DIVISION 1
+#define TEST_GCD 1
+//#define TEST_ISQRT 1
+//#define TEST_FLOAT
 
 // This function is to test if the least significant bit in the representation
 // of a floating point value is zero. It is used when verifying the correct
@@ -401,6 +402,58 @@ int main(int argc, char *argv[])
               << timing << " sec" << std::endl;
 
 #endif // TEST_DIVISION
+
+#ifdef TEST_GCD
+
+// Set up three values a, b and g. Let g'=gcd(a,b), g''=gcd(a*g,b*g) and
+// check if g''=g*g', and if g'' divides evenly into both a*g and b*g.
+
+    maxbits = 400;
+    ntries = 50*MILLION;
+
+    std::cout << "Start of GCD testing" << std::endl;
+    clk = clock(); clong = 0;
+
+    for (int i=1; i<=ntries; i++)
+    {   if ((i & 0xfffff) == 0)
+        {   clock_t now = clock();
+            clong += now - clk;
+            clk = now;
+        }
+        Bignum a, b, g;
+        do
+        {   a = random_upto_bits_bignum(maxbits);
+            b = random_upto_bits_bignum(maxbits);
+            g = random_upto_bits_bignum(maxbits);
+            uint64_t rr = mersenne_twister();
+            a = fudge_distribution_bignum(a, (int)(rr & 0xf));
+            b = fudge_distribution_bignum(b, (int)((rr>>4) & 0xf));
+            g = fudge_distribution_bignum(g, (int)((rr>>8) & 0xf));
+        } while (a==0 || b==0 || g==0);
+        Bignum g1 = gcd(a, b);
+        Bignum A = a*g;
+        Bignum B = b*g;
+        Bignum g2 = gcd(A, B);
+        if (g2 == g1*abs(g) &&
+            A%g2 == 0 &&
+            B%g2 == 0) continue;
+        std::cout << "FAILED on test " << i << std::endl;
+        std::cout << "a  " << a << std::endl;
+        std::cout << "b  " << b << std::endl;
+        std::cout << "g  " << g << std::endl;
+        std::cout << "A  " << A << std::endl;
+        std::cout << "B  " << B << std::endl;
+        std::cout << "g1 " << g1 << std::endl;
+        std::cout << "g2 " << g2 << std::endl;
+        std::cout << "Failed " << std::endl;
+        return 1;
+    }
+
+    timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
+    std::cout << "Division tests completed in "
+              << timing << " sec" << std::endl;
+
+#endif // TEST_GCD
 
 #ifdef TEST_ISQRT
 

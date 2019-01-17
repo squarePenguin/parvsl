@@ -1043,7 +1043,31 @@ top (cond ((atom a) (return (reversip r))))
 (de printprompt (u) nil)
 (flag '(printprompt) 'lose)
 
+(cond
+  ((null (getd 'evenp))
+   (de evenp (u) (zerop (remainder u 2)))))
+
+(cond
+  ((null (getd 'oddp))
+   (de oddp (u) (null (zerop (remainder u 2))))))
+
 (flag '(evenp oddp) 'lose)
+
+% At present the C++ version of gcdn is broken, so here is a Lisp version.
+% I have left the broken version available but named "gcdn1" so that testing
+% can be easier.
+
+(remflag '(gcdn lcmn) 'lose)
+
+(de gcdn (u v)
+  (cond ((zerop v) (abs u))
+        (t (gcdn v (remainder u v)))))
+
+(de lcmn (u v) (times u (quotient v (gcdn u v))))
+
+(flagp '(gcdn lcmn) 'lose)
+
+% (de date!-and!-time () "17-01-19")
 
 "End of vsl.lsp"
 

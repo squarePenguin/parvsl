@@ -714,7 +714,7 @@ public:
         }
         else
         {   freechain_table[bits] = (uint64_t *)r[1];
-#ifdef DEBUG+OVERRUN
+#ifdef DEBUG_OVERRUN
             my_assert(r[0] == -(uint64_t)1);
             std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
             r[0] = 0;
@@ -3577,7 +3577,7 @@ inline bool Minusp::op(int64_t a)
 }
 
 inline bool Evenp::op(uint64_t *a)
-{   return (a[number_size(a)-1] & 1) == 0;
+{   return (a[0] & 1) == 0;
 }
 
 inline bool Evenp::op(int64_t a)
@@ -3585,7 +3585,7 @@ inline bool Evenp::op(int64_t a)
 }
 
 inline bool Oddp::op(uint64_t *a)
-{   return (a[number_size(a)-1] & 1) != 0;
+{   return (a[0] & 1) != 0;
 }
 
 inline bool Oddp::op(int64_t a)
@@ -3739,6 +3739,29 @@ inline bool biggreaterp(const uint64_t *a, size_t lena,
 // then comparing those digits tells me all I need to know.
     if ((int64_t)a0 > (int64_t)b0) return true;
     if ((int64_t)a0 < (int64_t)b0) return false;
+// Otherwise I need to scan down through digits...
+    lena--;
+    while (lena != 0)
+    {   lena--;
+        a0 = a[lena];
+        b0 = b[lena];
+        if (a0 > b0) return true;
+        if (a0 < b0) return false;
+    }
+    return false;
+}
+
+inline bool biggreaterp_unsigned(const uint64_t *a, size_t lena,
+                                 const uint64_t *b, size_t lenb)
+{   uint64_t a0 = a[lena-1], b0 = b[lenb-1];
+// If one of the numbers has more digits than the other then the sign of
+// the longer one gives my the answer.
+    if (lena > lenb) return positive(a0);
+    else if (lenb > lena) return negative(b0);
+// When the two numbers are the same length but the top digits differ
+// then comparing those digits tells me all I need to know.
+    if (a0 > b0) return true;
+    if (a0 < b0) return false;
 // Otherwise I need to scan down through digits...
     lena--;
     while (lena != 0)
@@ -6086,9 +6109,12 @@ void remainder_for_gcd(uint64_t *a,  size_t &lena, uint64_t *b, size_t lenb)
 // big as |b| and b will use at least 2 words. This replaces a with
 // (a%b). It temporarily corrupts b by scaling it, but puts that right
 // before exiting. There is no extra storage allocation performed.
+    my_assert(lena>=lenb);
+    my_assert(lenb>=2);
     int ss = nlz(b[lenb-1]);
     a[lena] = scale_for_division(a, lena, ss);
     lena++;
+// now lena>lenb strictly.
     my_assert(scale_for_division(b, lenb, ss) == 0);
     size_t lenq = lena-lenb; // potential length of quotient.
     size_t m = lenq-1;
@@ -6108,21 +6134,27 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
 // that might work. Specifically I will implement a straightforward
 // Euclidean GCD in a way that may allocate (and release) memory for
 // intermediate results over and over again.
-    push(b);
-    intptr_t absa = Abs::op(a);
-    pop(b);
-    intptr_t absb = Abs::op(b);
-    my_assert(!stored_as_fixnum(absa));
-    my_assert(!stored_as_fixnum(absb));
-    uint64_t *av = vector_of_handle(absa), *bv = vector_of_handle(absb);
-    if (Lessp::op(av, bv))
+    size_t lena = number_size(a), lenb = number_size(b); 
+    push(a); push(b);
+    uint64_t *av = reserve(lena+1);
+    if (negative(a[lena-1])) internal_negate(a, lena, av);
+    else internal_copy(a, lena, av);
+    pop(b); pop(a);
+    push(a); push(b); push(av);
+    uint64_t *bv = reserve(lenb+1);
+    if (negative(b[lenb-1])) internal_negate(b, lenb, bv);
+    else internal_copy(b, lenb, bv);
+    pop(av); pop(b); pop(a);
+    if (biggreaterp_unsigned(bv, lenb, av, lena))
     {   uint64_t *w = av;
         av = bv;
         bv = w;
+        size_t lenw = lena;
+        lena = lenb;
+        lenb = lenw;
     }
 // Now av >= bv.
-    size_t lena = number_size(av), lenb = number_size(bv); 
-    size_t olena = lena, olenb = lenb;
+    size_t olena = lena+1, olenb = lenb+1;
     bool swapped = false;
 // Remove any leading zero digits, and if that reduces the situation to
 // a 1-word case follow it.
@@ -6139,6 +6171,8 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
             bb = hi;
             hi = cc;
         }
+        abandon(av);
+        abandon(bv);
         return unsigned_int_to_bignum(bb);
     }
     if (av[lena-1] == 0) lena--;
@@ -6225,10 +6259,15 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
         lenb = lenax;
         swapped = !swapped;
     }
+    if (swapped)
+    {   size_t olenax = olena;
+        olena = olenb;
+        olenb = olenax;
+    }
     if (bv[0] == 0)
     {   if (negative(av[lena-1])) av[lena++] = 0;
         abandon(bv);
-        return confirm_size(av, (swapped ? olenb : olena), lena);
+        return confirm_size(av, olena, lena);
     }
     bb = bv[0];
     uint64_t hi = 0, q;

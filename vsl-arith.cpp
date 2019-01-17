@@ -390,7 +390,7 @@ static inline bool isEQHASHX(LispObject x)
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-INLINE const size_t MEM = 512;
+INLINE const size_t MEM = 1024;
 #endif // MEM
 
 INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
@@ -411,7 +411,7 @@ LispObject *C_stackbase;
 // Hmm - a full copy of everything that makes up Reduce involved around
 // 40K distinct symbols...
 
-INLINE const size_t OBHASH_SIZE   = 10007;
+INLINE const size_t OBHASH_SIZE   = 15013;
 INLINE const int MAX_LISPFILES = 30;
 
 // Some Lisp values that I will use frequently...
@@ -1909,7 +1909,7 @@ int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch1(int c)
-{   if (c == '\r') return;
+{   //????if (c == '\r') return;
     if (lispout == -1)
     {   char w[4];
 // This bit is for the benefit of explode and explodec.
@@ -1945,9 +1945,10 @@ void wrch1(int c)
     }
 }
 
+
 void wrch(int ch)
 {   if (blank_pending)
-    {   wrch1(' ');
+    {   if (lispout < 0 || linepos != 0) wrch1(' ');
         blank_pending = false;
     }
     wrch1(ch);
@@ -2056,10 +2057,10 @@ void internalprint(LispObject x)
                 x = qcdr(x);
             }
             if (x != nil)
-            {   blank_pending = 1;
+            {   blank_pending = true;
                 checkspace(1);
                 wrch('.');
-                blank_pending = 1;
+                blank_pending = true;
                 internalprint(x);
             }
             checkspace(1);
@@ -2164,8 +2165,11 @@ void internalprint(LispObject x)
                             wrch('[');
                         }
                         else for (i=0; i<len; i++)
-                        {   checkspace(1);
-                            wrch(sep);
+                        {   if (sep==' ') blank_pending = true;
+                            else
+                            {   checkspace(1);
+                                wrch(sep);
+                            }
                             sep = ' ';
                             internalprint(elt(x, i));
                         }
@@ -2942,21 +2946,24 @@ LispObject eval(LispObject x)
             {
             case 0:
                 if (flags & flagTRACED)
-                {   linepos += printf("Calling: ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Calling: ");
                     printf("%s\n", fname); linepos = 0;
 //                  errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                 }
                 x = (*qdefn0(f))(qlits(f));
                 if (unwindflag == unwindBACKTRACE)
-                {   linepos += printf("Call to ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   errprin(f);
+                {   if (linepos!=0) wrch('\n');
+                    errprin(f);
                     linepos += printf(" = ");
                     if (unwindflag != unwindNONE) return nil;
                     errprint(x);
@@ -2967,7 +2974,8 @@ LispObject eval(LispObject x)
                 x = eval(qcar(aa));
                 if (unwindflag != unwindNONE) return nil;
                 if (flags & flagTRACED)
-                {   linepos += printf("Calling: ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Calling: ");
                     errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                     linepos += printf("Arg1: ");
@@ -2976,14 +2984,16 @@ LispObject eval(LispObject x)
                 }
                 x = (*qdefn1(f))(qlits(f), x);
                 if (unwindflag == unwindBACKTRACE)
-                {   linepos += printf("Call to ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   errprin(f);
+                {   if (linepos!=0) wrch('\n');
+                    errprin(f);
                     linepos += printf(" = ");
                     if (unwindflag != unwindNONE) return nil;
                     errprint(x);
@@ -2996,7 +3006,8 @@ LispObject eval(LispObject x)
                 aa = eval(qcar(qcdr(aa)));
                 if (unwindflag != unwindNONE) return nil;
                 if (flags & flagTRACED)
-                {   linepos += printf("Calling: ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Calling: ");
                     errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                     linepos += printf("Arg1: ");
@@ -3008,14 +3019,16 @@ LispObject eval(LispObject x)
                 }
                 x = (*qdefn2(f))(qlits(f), x, aa);
                 if (unwindflag == unwindBACKTRACE)
-                {   linepos += printf("Call to ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   errprin(f);
+                {   if (linepos!=0) wrch('\n');
+                    errprin(f);
                     linepos += printf(" = ");
                     if (unwindflag != unwindNONE) return nil;
                     errprint(x);
@@ -3031,7 +3044,8 @@ LispObject eval(LispObject x)
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   linepos += printf("Calling: ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Calling: ");
                         errprint(f);
                         if (unwindflag != unwindNONE) return nil;
                         linepos += printf("Arg1: ");
@@ -3046,14 +3060,16 @@ LispObject eval(LispObject x)
                     }
                     x = (*qdefn3(f))(qlits(f), x, a2, aa);
                     if (unwindflag == unwindBACKTRACE)
-                    {   linepos += printf("Call to ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
                         linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   errprin(f);
+                    {   if (linepos!=0) wrch('\n');
+                        errprin(f);
                         linepos += printf(" = ");
                         if (unwindflag != unwindNONE) return nil;
                         errprint(x);
@@ -3073,7 +3089,8 @@ LispObject eval(LispObject x)
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   linepos += printf("Calling: ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Calling: ");
                         errprint(f);
                         if (unwindflag != unwindNONE) return nil;
                         linepos += printf("Arg1: ");
@@ -3091,14 +3108,16 @@ LispObject eval(LispObject x)
                     }
                     x = (*qdefn4(f))(qlits(f), x, a2, a3, aa);
                     if (unwindflag == unwindBACKTRACE)
-                    {   linepos += printf("Call to ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
                         linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   errprin(f);
+                    {   if (linepos!=0) wrch('\n');
+                        errprin(f);
                         linepos += printf(" = ");
                         if (unwindflag != unwindNONE) return nil;
                         errprint(x);
@@ -3121,7 +3140,8 @@ LispObject eval(LispObject x)
                     aa = evlis(qcdr(aa));
                     if (unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   linepos += printf("Calling: ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Calling: ");
                         errprint(f);
                         if (unwindflag != unwindNONE) return nil;
                         linepos += printf("Arg1: ");
@@ -3142,14 +3162,16 @@ LispObject eval(LispObject x)
                     }
                     x = (*qdefn5up(f))(qlits(f), x, a2, a3, a4, aa);
                     if (unwindflag == unwindBACKTRACE)
-                    {   linepos += printf("Call to ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
                         linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   errprin(f);
+                    {   if (linepos!=0) wrch('\n');
+                        errprin(f);
                         linepos += printf(" = ");
                         if (unwindflag != unwindNONE) return nil;
                         errprint(x);
@@ -4242,7 +4264,7 @@ LispObject Ldate_and_time_1(LispObject lits, LispObject a1)
 {   time_t t = time(NULL);
     char today[32], today1[32];
     strcpy(today, ctime(&t));  // e.g. "Sun Sep 16 01:03:52 1973\n"
-    //       012345678901234567890123
+                               //       012345678901234567890123
     today[24] = 0;             // loses final '\n'
     today1[0] = today[8]==' ' ? '0' : today[8];
     today1[1] = today[9];
@@ -5659,7 +5681,7 @@ public:
     }
 };
 
-static LispObject Bevenp(LispObject a)
+static bool Bevenp(LispObject a)
 {   return number_dispatcher::iunary<bool,Evenper>("evenp", a);
 }
 
@@ -5676,7 +5698,7 @@ public:
     }
 };
 
-static LispObject Boddp(LispObject a)
+static bool Boddp(LispObject a)
 {   return number_dispatcher::iunary<bool,Oddper>("oddp", a);
 }
 
@@ -6409,39 +6431,48 @@ LispObject Lnreverse(LispObject lits, LispObject x)
 
 LispObject Lexplode(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -1;
     work1 = nil;
     prin(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
 LispObject Lexplodec(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -1;
     work1 = nil;
     princ(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
 LispObject Lexploden(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -3;
     work1 = nil;
     prin(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
 LispObject Lexplodecn(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -3;
     work1 = nil;
     princ(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
+
 
 LispObject Lreadch(LispObject lits)
 {   int c = rdch();
@@ -6810,7 +6841,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 
 #define SETUP0                                                  \
     SETUP_TABLE_SELECT("date",              Ldate),             \
-    SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_0),  \
+    SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_0), \
     SETUP_TABLE_SELECT("list",              Llist_0),           \
     SETUP_TABLE_SELECT("iplus",             Lplus_0),           \
     SETUP_TABLE_SELECT("itimes",            Ltimes_0),          \
@@ -7068,6 +7099,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("quotient",          Lquotient),         \
     SETUP_TABLE_SELECT("remainder",         Lremainder),        \
     SETUP_TABLE_SELECT("gcdn",              Lgcdn),             \
+    SETUP_TABLE_SELECT("gcdn1",             Lgcdn),             \
     SETUP_TABLE_SELECT("lcmn",              Llcmn),             \
     SETUP_TABLE_SELECT("rshift",            Lrightshift),       \
     SETUP_TABLE_SELECT("rightshift",        Lrightshift),       \
@@ -8217,7 +8249,7 @@ static char *get_prompt(EditLine *el)
 void setup_prompt() {
     stdin_tty = isatty(fileno(stdin)) && isatty(fileno(stdout));
     if (stdin_tty) {
-        el_struct = el_init("vsl", stdin, stdout, stdout);
+        el_struct = el_init("vsl", stdin, stdout, stderr);
         el_history = history_init();
         atexit(el_tidy);
         history(el_history, &el_history_event, H_SETSIZE, 1000);
@@ -8935,10 +8967,12 @@ int main(int argc, char *argv[])
         else if (qcar(work1) == lisptrue) coldstart = 0;
         else
         {   int save = lispout;
+            int savepos = linepos;
             lispout = -2;
             internalprint(work1);
             wrch(0);
             lispout = save;
+            linepos = savepos;
             coldstart = 0;
         }
     }
