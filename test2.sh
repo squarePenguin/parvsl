@@ -1,9 +1,22 @@
 #! /bin/bash
 
-time $TO/bin/redcsl -w ../packages/$1/$2.tst | tee csl-$2.log
-time ./fastvsl-arith -i fastrcore-arith.img  ../packages/$1/$2.tst | tee arith-$2.log
+pkg=${2:-"$1"}
+printf "Testing package $pkg from directory $1%n"
+
+time $O/bin/redcsl -w <<XXX | tee csl-$pkg.log
+off echo,int;
+load_package $pkg;
+in "../packages/$1/$pkg.tst";
+quit;
+XXX
+
+time ./fastvsl-arith -i fastreduce-arith.img  <<XXX | tee arith-$pkg.log
+off echo,int;
+load_package $pkg;
+in "../packages/$1/$pkg.tst";
+quit;
+XXX
 
 echo "==============================================================="
 echo $1
-diff -b csl-$2.log arith-$2.log | tee $2.diff
- 
+diff -b csl-$pkg.log arith-$pkg.log | tee $pkg.diff

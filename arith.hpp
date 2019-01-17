@@ -3577,7 +3577,7 @@ inline bool Minusp::op(int64_t a)
 }
 
 inline bool Evenp::op(uint64_t *a)
-{   return (a[number_size(a)-1] & 1) == 0;
+{   return (a[0] & 1) == 0;
 }
 
 inline bool Evenp::op(int64_t a)
@@ -3585,7 +3585,7 @@ inline bool Evenp::op(int64_t a)
 }
 
 inline bool Oddp::op(uint64_t *a)
-{   return (a[number_size(a)-1] & 1) != 0;
+{   return (a[0] & 1) != 0;
 }
 
 inline bool Oddp::op(int64_t a)

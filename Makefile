@@ -126,6 +126,20 @@ debug_reduce:	vsl
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
 
+reduce-arith:	vsl-arith
+	mkdir -p reduce-arith.img.modules
+	rm -f reduce-arith.img.modules/* reduce-arith.img inline-defs.dat
+	time ./vsl-arith -z -ireduce-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce-arith.lsp | tee reduce-arith.log
+
+fastreduce-arith:	fastvsl-arith
+	mkdir -p fastreduce-arith.img.modules
+	rm -f fastreduce-arith.img.modules/* fastreduce-arith.img inline-defs.dat
+	time ./fastvsl-arith -z -ifastreduce-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce-arith.lsp | tee fastreduce-arith.log
+
 # rcore is a core of Reduce. Building it will be a LOT cheaper than
 # building the full copy of Reduce, so this will be good for testing an
 # much evaluation.
