@@ -523,29 +523,6 @@ top (cond ((atom a) (return (reversip r))))
 (de small!-modular!-quotient (a b)
    (error "small-modular-quotient not implemented yet" (cons a b)))
 
-% "fluid" and "global" are concepts that mainly belong with
-% a compiler, but versions are provided here even if they
-% are not terribly useful.
-% (de ensure_defined (v)
-%    (when (not (boundp v))
-%          (eval (list 'setq v nil))))
-% (de fluid (x)
-%    (remflag x 'global)
-%    (flag x 'fluid)
-%    (dolist (v x) (ensure_defined v)))
-% (de global (x)
-%    (remflag x 'fluid)
-%    (flag x 'global)
-%    (dolist (v x) (ensure_defined v)))
-% (de unfluid (x)
-%    (remflag x 'fluid))
-% (de unglobal (x)
-%    (remflag x 'global))
-
-(de fluidp (x) (flagp x 'fluid))
-
-(de globalp (x) (flagp x 'global))
-
 % Now some more general-purpose small functions. Including
 % cases that are alternative names for built-in ones that
 % it is convenient to have for the support of some historic
@@ -1043,15 +1020,7 @@ top (cond ((atom a) (return (reversip r))))
 (de printprompt (u) nil)
 (flag '(printprompt) 'lose)
 
-(cond
-  ((null (getd 'evenp))
-   (de evenp (u) (zerop (remainder u 2)))))
-
-(cond
-  ((null (getd 'oddp))
-   (de oddp (u) (null (zerop (remainder u 2))))))
-
-(flag '(evenp oddp) 'lose)
+(flag '(oddp evenp) 'lose)
 
 % At present the C++ version of gcdn is broken, so here is a Lisp version.
 % I have left the broken version available but named "gcdn1" so that testing
@@ -1066,8 +1035,6 @@ top (cond ((atom a) (return (reversip r))))
 (de lcmn (u v) (times u (quotient v (gcdn u v))))
 
 (flagp '(gcdn lcmn) 'lose)
-
-% (de date!-and!-time () "17-01-19")
 
 "End of vsl.lsp"
 

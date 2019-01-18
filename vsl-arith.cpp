@@ -320,19 +320,18 @@ INLINE const size_t SYMSIZE = 12;
 
 // Bits within the flags field of a symbol. Uses explained later on.
 
-INLINE const LispObject flagTRACED    = 0x080;
-INLINE const LispObject flagSPECFORM  = 0x100;
-INLINE const LispObject flagMACRO     = 0x200;
-INLINE const LispObject flagGLOBAL    = 0x400;
-INLINE const LispObject flagFLUID     = 0x800;
+INLINE const LispObject flagTRACED    = 0x0080;
+INLINE const LispObject flagSPECFORM  = 0x0100;
+INLINE const LispObject flagMACRO     = 0x0200;
+INLINE const LispObject flagGLOBAL    = 0x0400;
+INLINE const LispObject flagFLUID     = 0x0800;
+INLINE const LispObject flagGENSYM    = 0x1000;
 // There are LOTS more bits available for flags etc here if needbe!
 
 // Other atoms have a header that gives info about them. Well as a special
 // case I will allow that something tagged with tagATOM but with zero as
 // its address is a special marker value...
 
-// I will INSIAT that the definition of tagATOM s in the same compilation
-// unit as this is.
 INLINE const LispObject NULLATOM = tagATOM + 0;
 
 static inline LispObject &qheader(LispObject x)
@@ -468,8 +467,8 @@ INLINE const int MAX_LISPFILES = 30;
 #define symlower   listbases[24]
 #define dfprint    listbases[25]
 //#define bignum     listbases[26]
-#define symfluid   listbases[27]
-#define symglobal  listbases[28]
+//#define symfluid   listbases[27]
+//#define symglobal  listbases[28]
 const int BASES_SIZE = MAX_LISPFILES+29;
 
 #define filecursym (&listbases[29])
@@ -4203,14 +4202,18 @@ LispObject Lboundp(LispObject lits, LispObject x)
 }
 
 LispObject Lgensym_0(LispObject lits)
-{   return allocatesymbol(nil);
+{   LispObject r = allocatesymbol(nil);
+    qflags(r) |= flagGENSYM;
+    return r;
 }
 
 // I want to have gensyms where I can control their name at least a bit,
 // but do not have that implemented yet...
 
 LispObject Lgensym_1(LispObject lits, LispObject a1)
-{   return allocatesymbol(nil);
+{   LispObject r = allocatesymbol(nil);
+    qflags(r) |= flagGENSYM;
+    return r;
 }
 
 LispObject Lcharcode (LispObject lits, LispObject x)
@@ -4404,8 +4407,8 @@ LispObject Lfluid(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symglobal);
-        Lput(lits, v, symfluid, lisptrue);
+        qflags(v) &= ~flagGLOBAL;
+        qflags(v) |= flagFLUID;
         if (qvalue(v) == undefined) qvalue(v) = nil;
     }
     return nil;
@@ -4416,8 +4419,8 @@ LispObject Lglobal(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symfluid);
-        Lput(lits, v, symglobal, lisptrue);
+        qflags(v) &= ~flagFLUID;
+        qflags(v) |= flagGLOBAL;
         if (qvalue(v) == undefined) qvalue(v) = nil;
     }
     return nil;
@@ -4428,7 +4431,7 @@ LispObject Lunfluid(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symfluid);
+        qflags(v) &= ~flagFLUID;
     }
     return nil;
 }
@@ -4438,9 +4441,24 @@ LispObject Lunglobal(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symglobal);
+        qflags(v) &= ~flagGLOBAL;
     }
     return nil;
+}
+
+LispObject Lfluidp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagFLUID)!=0) return lisptrue;
+    else return nil;
+}
+
+LispObject Lglobalp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagGLOBAL)!=0) return lisptrue;
+    else return nil;
+}
+
+LispObject Lgensymp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagGENSYM)!=0) return lisptrue;
+    else return nil;
 }
 
 LispObject Lmkvect(LispObject lits, LispObject x)
@@ -6952,12 +6970,14 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
     SETUP_TABLE_SELECT("fluid",             Lfluid),            \
+    SETUP_TABLE_SELECT("fluidp",            Lfluidp),           \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
     SETUP_TABLE_SELECT("fp-subnorm",        Lfp_subnorm),       \
     SETUP_TABLE_SELECT("fp-signbit",        Lfp_signbit),       \
     SETUP_TABLE_SELECT("global",            Lglobal),           \
+    SETUP_TABLE_SELECT("globalp",           Lglobalp),          \
     SETUP_TABLE_SELECT("iadd1",             Ladd1),             \
     SETUP_TABLE_SELECT("iceiling",          Lceiling),          \
     SETUP_TABLE_SELECT("ifix",              Lfix),              \
@@ -6990,6 +7010,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("floor",             Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
+    SETUP_TABLE_SELECT("gensymp",           Lgensymp),          \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("linelength",        Llinelength),       \
@@ -7354,19 +7375,20 @@ void setup()
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
     qvalue(lisptrue) = lisptrue;
-    symfluid = lookup("fluid", 5, 3);
-    symglobal = lookup("global", 6, 3);
-    Lput(nil, nil, symglobal, lisptrue);
-    Lput(nil, lisptrue, symglobal, lisptrue);
-    Lput(nil, undefined, symglobal, lisptrue);
+//    symfluid = lookup("fluid", 5, 3);
+//    symglobal = lookup("global", 6, 3);
+//    Lput(nil, nil, symglobal, lisptrue);
+//    Lput(nil, lisptrue, symglobal, lisptrue);
+//    Lput(nil, undefined, symglobal, lisptrue);
+
     qvalue(echo = lookup("*echo", 5, 3)) = nil;
 // interactive ? nil : lisptrue;
     qflags(echo) |= flagFLUID;
-    Lput(nil, echo, symfluid, lisptrue);
+//    Lput(nil, echo, symfluid, lisptrue);
     {   LispObject nn;
         qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
         qflags(nn) |= flagFLUID;
-        Lput(nil, nn, symfluid, lisptrue);
+//        Lput(nil, nn, symfluid, lisptrue);
     }
     qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
@@ -7374,14 +7396,14 @@ void setup()
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
     qflags(lispsystem) |= flagGLOBAL;
-    Lput(nil, lispsystem, symglobal, lisptrue);
+//    Lput(nil, lispsystem, symglobal, lisptrue);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
     qflags(eofsym) |= flagGLOBAL;
-    Lput(nil, eofsym, symglobal, lisptrue);
+//    Lput(nil, eofsym, symglobal, lisptrue);
     qvalue(eofsym) = eofsym;
     symlambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
@@ -7394,13 +7416,13 @@ void setup()
     pipe = lookup("pipe", 4, 3);
     qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
     qflags(dfprint) |= flagFLUID;
-    Lput(nil, dfprint, symfluid, lisptrue);
+//    Lput(nil, dfprint, symfluid, lisptrue);
     qvalue(symraise = lookup("*raise", 6, 3)) = nil;
     qvalue(symlower = lookup("*lower", 6, 3)) = lisptrue;
     qflags(symraise) |= flagFLUID;
     qflags(symlower) |= flagFLUID;
-    Lput(nil, symraise, symfluid, lisptrue);
-    Lput(nil, symlower, symfluid, lisptrue);
+//    Lput(nil, symraise, symfluid, lisptrue);
+//    Lput(nil, symlower, symfluid, lisptrue);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)

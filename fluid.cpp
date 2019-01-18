@@ -289,6 +289,40 @@ LispObject &value_of_unknown_variable(LispObject sym)
 // would be less overhead than the use of windows thread_local, and at least
 // not too much worse than the costs in Linux and on the Macintosh.
 
+// An issue that I do not have my mind straight about yet is the interaction
+// between threads and preserve/restart. So what I will describe here is
+// an explanation of my first two ideas:
+// (1) When you preserve an image every thread exits, and so all variables
+//     that have been bound in any manner at all revert to their global
+//     unbound state. When the image is restarted it can have been directed
+//     to load a loadable module and then call a nominated function with
+//     a single argument that had been passed to the preserve() function.
+//     The consequence is that when the system restarts it has just its
+//     main thread, and if any others are required then the restart function
+//     must start them up. This is liable to be simplest to implement!
+// (2) When any thread is to be started the call that creates the thread
+//     can specify a number of fluid variables that are to be bound to
+//     given values in the new thread, together with an expression to be
+//     evaluated within the thread context. This expression will typically
+//     be an invocation of the thread's "main function". When an image is
+//     to be dumped the thread is closed down just as far as exiting from
+//     its main function. The current values associated with all the
+//     "thread fluids" will be preserved (they may have changed by virtual of
+//     being assigned to within the thread). When the system is restarted
+//     the thread is resumed by re-calling the thread main function, but all
+//     the special fluid variables that had been listed when it was first
+//     started will retain their values from when the image was created.
+//     The idea is that the code can use those to retain some context, and
+//     my hope would be that that would make use of the thread system easier
+//     in contexts such as implementing work farms or user interface
+//     components or server threads.
+//     Well even when this case is supported it will be useful to be able
+//     to create some threads so that they get restarted from a checkpointed
+//     system but others that do not.
+// I believe that prototyping several threaded applications is necessary
+// before final decisions about this can be made!
+
+ACN 18-Jan-2019
 
 -- end --
 

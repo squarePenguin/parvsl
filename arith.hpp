@@ -5378,7 +5378,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
             if ((n = n/2) == 0) break;
             a *= a;
         }
-        return int_to_handle(result);
+        return int_to_bignum(result);
     }
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
