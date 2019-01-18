@@ -401,7 +401,7 @@ LispObject obhash[OBHASH_SIZE];
 
 #ifdef BIGNUM
 #define LISP 1
-#include "arith1.cpp"
+#include "arith.hpp"
 #endif
 
 // ... and non-LispObject values that need to be saved as part of a

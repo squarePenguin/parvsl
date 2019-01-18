@@ -81,10 +81,10 @@ vsl-arith.img:	vsl-arith library-arith.lsp vsl-arith.lsp
 fastvsl-arith.img:	fastvsl-arith library-arith.lsp vsl-arith.lsp
 	time ./fastvsl-arith -z library-arith.lsp | tee fastvsl-arith.img.log
 
-parvsl.img:	parvsl library.lsp vsl.lsp
+parvsl.img:	parvsl parlibrary.lsp parvsl.lsp
 	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
 
-fastparvsl.img:	fastparvsl library.lsp vsl.lsp
+fastparvsl.img:	fastparvsl parlibrary.lsp parvsl.lsp
 		time ./fastparvsl -z parlibrary.lsp | tee fastparvsl.img.log
 
 # In much the way that vsl.img (and friends) is a Lisp built on top of

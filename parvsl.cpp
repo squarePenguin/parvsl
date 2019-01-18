@@ -3253,7 +3253,7 @@ void fluid_symbol(LispObject s) {
         qflags(s) &= ~flagGLOBAL; // disable global
 
         par::symval(s) = val;
-    } 
+    }
 
     qflags(s) |= flagFLUID;
 
@@ -6678,6 +6678,7 @@ int warm_start_1(gzFile f, int *errcode)
                     if (fr1+11*sizeof(LispObject) < lim1)
                         qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
                     fr1 += SYMSIZE*sizeof(LispObject);
+                    
 // Now if the symbol was split across two heap segments I need to relocate
 // the parts of it at the start of the next heap block. What a mess!
                     if (fr1 > lim1 )
@@ -6691,12 +6692,20 @@ int warm_start_1(gzFile f, int *errcode)
                         w = fr1 + tagSYMBOL;
                         if (fr1+sizeof(LispObject) >= newblock) {
                             qvalue(w) = relocate(qvalue(w));
-                            if ((qflags(w) & flagGLOBAL) == 0) {
+                            // during warm_start, all values are still stored globally
+                            // we first relocate them then copy to thread_local
+                            // TODO VB: separate function
+                            if (!is_global(w)) {
                                 // reallocate on thread_local storage
                                 int loc = par::allocate_symbol();
                                 LispObject val = qvalue(w);
                                 qvalue(w) = packfixnum(loc);
-                                par::symval(w) = val;
+                                if (is_fluid(w)) {
+                                    par::symval(w) = val;
+                                    par::fluid_globals[loc] = val;
+                                } else {
+                                    par::local_symbol(loc) = val;
+                                }
                             }
                         }
                         if (fr1+2*sizeof(LispObject) >= newblock)
@@ -7004,19 +7013,22 @@ void write_image(gzFile f)
             if (isSYMBOL(x) && !is_global(x)) {
                 // If it wasn't a global symbol, the value is thread_local;
                 int loc = qfixnum(qvalue(x));
-
                 if (is_fluid(x)) {
                     // VB: I'm basically assuming here that we only care about the global
                     // value of a fluid on preserve. This further assumes preserve is called
                     // only in the global scope.
                     qvalue(x) = par::fluid_globals[loc];
+
+                    // TODO: this is a hack. need to keep both values
+                    if (qvalue(x) == undefined) {
+                        qvalue(x) = par::local_symbol(loc);
+                    }
                 } else {
                     qvalue(x) = par::local_symbol(loc);
                 }
             }
         }
     }
-
     hexdump();
     switch (write_image_1(f, &errcode))
     {
