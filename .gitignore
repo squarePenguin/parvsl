@@ -1,52 +1,19 @@
-# Tex files
-_region_*
-
-*.aux
-*.log
-
-vsl
-*.idx
-*.img
-*.ind
-*.toc
-*.gz
-*.bbl
-*.blg
-*.ilg
-*.img.modules
-testlogs/
-.vscode
-bt
-
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
 *.exe
-*.out
-*.app
+*.o
+*.bak
+*.stackdump
+crbuild
+crlibm/autom4te.cache
+crlibm/autom4te.cache/*
+*.log
+*.diff
+*.img
+*.img.modules
+gmon.out
+*~
+*.ps
+*.pdf
+xx*
+bad*
+
+

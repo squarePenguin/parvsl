@@ -4063,7 +4063,7 @@ LispObject Lfloatp(LispObject lits, LispObject x)
 LispObject Lfrexp(LispObject lits, LispObject a)
 {   double d = 0.0;
     int x = 0;
-    if (isFLOAT(x)) d = std::frexp(qfloat(a), &x);
+    if (isFLOAT(a)) d = std::frexp(qfloat(a), &x);
     return cons(packfixnum(x), boxfloat(d));
 }
 
