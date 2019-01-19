@@ -1034,7 +1034,16 @@ top (cond ((atom a) (return (reversip r))))
 
 (flagp '(gcdn lcmn) 'lose)
 
+(flag '(
+    sqrt      exp        log        log2       log10      sin
+    cos       tan        sec        csc        cot        sind
+    cosd      tand       secd       cscd       cotd       sinh
+    cosh      tanh       sech       csch       coth       asin
+    acos      atan       asec       acsc       acot       asind
+    acosd     atand      asecd      acscd      acotd      asinh
+    acosh     atanh      asech      acsch      acoth)
+    'lose)
+
 "End of vsl.lsp"
 
-% End of vsl.lsp
-
+% End of vsl.lsp        

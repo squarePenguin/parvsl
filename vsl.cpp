@@ -1981,9 +1981,9 @@ int rdch()
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s = el_gets(el_struct, &n);
+                if (s == NULL) return EOF;
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
-                if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
                 strncpy(input_line, s, n);
                 input_line[INPUT_LINE_SIZE-1] = 0;

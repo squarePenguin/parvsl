@@ -157,6 +157,7 @@ extern "C"
 // most other libraries will get that case exactly right anyway.
 
 double SQRT(double a)  { return  sqrt(a); }
+double TANH(double x)  { return  tanh(x); }
 
 double SIN(double a)   { return   sin_rn(a); }
 double COS(double a)   { return   cos_rn(a); }
@@ -175,6 +176,7 @@ double POW(double a, double b)   { return   pow_rn(a, b); }
 #else // CRLIBM
 
 double SQRT(double a)  { return  sqrt(a); }
+double TANH(double x)  { return  tanh(x); }
 
 double SIN(double a)   { return   sin(a); }
 double COS(double a)   { return   cos(a); }
@@ -191,6 +193,187 @@ double LOG10(double a) { return log10(a); }
 double POW(double a, double b)   { return   pow(a, b); }
 
 #endif // CRLIBM
+
+// There are a load of elementary functions not provided by standard
+// libraries. I deal with that here.
+
+static const double _pi = 3.14159265358979323846;
+static const double _log_2 = 0.6931471805599453094;
+static const double _half_pi = ((12868.0 - 0.036490896206895257)/8192.0);
+
+double ASINH(double x)
+{   bool sign;
+    if (x < 0.0) x = -x, sign = true;
+    else sign = false;
+    if (x < 1.0e-3)
+    {   double xx = x*x;
+        x = x*(1 - xx*((1.0/6.0) - (3.0/40.0)*xx));
+    }
+    else if (x < 1.0e9)
+    {   x += sqrt(1.0 + x*x);
+        x = LOG(x);
+    }
+    else x = LOG(x) + _log_2;
+    if (sign) x = -x;
+    return x;
+}
+
+static double acosh_coeffs[] =
+{   -0.15718655513711019382e-5,          // x^11
+    +0.81758779765416234142e-5,          // x^10
+    -0.24812280287135584149e-4,          // x^9
+    +0.62919005027033514743e-4,          // x^8
+    -0.15404104307204835991e-3,          // x^7
+    +0.38339903706706128921e-3,          // x^6
+    -0.98871347029548821795e-3,          // x^5
+    +0.26854094489454297811e-2,          // x^4
+    -0.78918167367399344521e-2,          // x^3
+    +0.26516504294146930609e-1,          // x^2
+    -0.11785113019775570984,             // x
+    +1.41421356237309504786              // 1
+
+};
+
+double ACOSH(double x)
+{   bool sign;
+    if (x < -1.0) x = -x, sign = true;
+    else if (1.0 < x) sign = false;
+    else return 0.0;
+    if (x < 1.5)
+    {   int i;
+        double r = acosh_coeffs[0];
+        x = (x - 0.5) - 0.5;
+//
+// This is a minimax approximation to acosh(1+x)/sqrt(x) over the
+// range x=0 to 0.5
+//
+        for (i=1; i<=11; i++) r = x*r + acosh_coeffs[i];
+        x = sqrt(x)*r;
+    }
+    else if (x < 1.0e9)
+    {   x += sqrt((x - 1.0)*(x + 1.0));
+        x = LOG(x);
+    }
+    else x = LOG(x) + _log_2;
+    if (sign) return -x;
+    else return x;
+}
+
+double ATANH(double z)
+{   if (z > -0.01 && z < -0.01)
+    {   double zz = z*z;
+        return z * (1 + zz*((1.0/3.0) + zz*((1.0/5.0) + zz*(1.0/7.0))));
+    }
+    z = (1.0 + z) / (1.0 - z);
+    if (z < 0.0) z = -z;
+    return LOG(z) / 2.0;
+}
+
+static const double n180pi = 57.2957795130823208768;   // 180/pi
+static const double pi180  =  0.017453292519943295769; // pi/180
+
+double arg_reduce_degrees(double a, int *quadrant)
+//
+// Reduce argument to the range -45 to 45, and set quadrant to the
+// relevant quadant.  Returns arg converted to radians.
+//
+{   double w = a / 90.0;
+    int32_t n = (int)w;
+    w = a - 90.0*n;
+    while (w < -45.0)
+    {   n--;
+        w = a - 90.0*n;
+    }
+    while (w >= 45.0)
+    {   n++;
+        w = a - 90.0*n;
+    }
+    *quadrant = (int)(n & 3);
+    return pi180*w;
+}
+
+double SIND(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0: return SIN(a);
+        case 1: return COS(a);
+        case 2: return SIN(-a);
+        case 3: return -COS(a);
+    }
+}
+
+double COSD(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0: return COS(a);
+        case 1: return SIN(-a);
+        case 2: return -COS(a);
+        case 3: return SIN(a);
+    }
+}
+
+double TAND(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0:
+        case 2: return TAN(a);
+        case 1:
+        case 3: return 1.0/TAN(-a);
+    }
+}
+
+static double COTD(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0:
+        case 2: return 1.0/TAN(a);
+        case 1:
+        case 3: return TAN(-a);
+    }
+}
+
+double ACOT(double a)
+{   if (a >= 0.0)
+        if (a > 1.0) return ATAN(1.0/a);
+        else return _half_pi - ATAN(a);
+    else if (a < -1.0) return _pi - ATAN(-1.0/a);
+    else return _half_pi + ATAN(-a);
+}
+
+double ACOTD(double a)
+{   if (a >= 0.0)
+        if (a > 1.0) return n180pi*ATAN(1.0/a);
+        else return 90.0 - n180pi*ATAN(a);
+    else if (a < -1.0) return 180.0 - n180pi*ATAN(-1.0/a);
+    else return 90.0 + n180pi*ATAN(-a);
+}
+
+double CSC(double x)     { return 1.0/SIN(x); }
+double SEC(double x)     { return 1.0/COS(x); }
+double COT(double x)     { return 1.0/TAN(x); }
+double CSCH(double x)    { return 1.0/SINH(x); }
+double SECH(double x)    { return 1.0/COSH(x); }
+double COTH(double x)    { return 1.0/TANH(x); }
+double ACSC(double x)    { return ASIN(1.0/x); }
+double ASEC(double x)    { return ACOS(1.0/x); }
+double ACSCH(double x)   { return ASINH(1.0/x); }
+double ASECH(double x)   { return ACOSH(1.0/x); }
+double ACOTH(double x)   { return ATANH(1.0/x); }
+double ASIND(double x)   { return (180.0/_pi)*ASIN(x); }
+double ACOSD(double x)   { return (180.0/_pi)*ACOS(x); }
+double ATAND(double x)   { return (180.0/_pi)*ATAN(x); }
+double CSCD(double x)    { return 1.0/SIND(x); }
+double SECD(double x)    { return 1.0/COSD(x); }
+double ACSCD(double x)   { return ASIND(1.0/x); }
+double ASECD(double x)   { return ACOSD(1.0/x); }
 
 
 // This version is an extension of the minimal vsl system. It uses
@@ -2356,9 +2539,6 @@ void internalprint(LispObject x)
                 }
         case tagFLOAT:
             {   double d =  *((double *)(x - tagFLOAT));
-//                if (isnan(d)) strcpy(printbuffer, "NaN");
-//                else if (isfinite(d)) snprintf(printbuffer, sizeof(printbuffer), "%.14g", d);
-//                else strcpy(printbuffer, "inf");
                 fp_sprint(printbuffer, d, print_precision, 'e');
             }
             len = strlen(printbuffer);
@@ -4236,40 +4416,209 @@ LispObject Lfp_signbit(LispObject lits, LispObject arg)
     return std::signbit(d) ? lisptrue : nil;
 }
 
-LispObject Lcos(LispObject lits, LispObject x)
-{
-    return boxfloat(COS(floatval(x)));
-}
-
-LispObject Lsin(LispObject lits, LispObject x)
-{
-    return boxfloat(SIN(floatval(x)));
-}
-
 LispObject Lsqrt(LispObject lits, LispObject x)
-{
-    return boxfloat(SQRT(floatval(x)));
-}
-
-LispObject Llog(LispObject lits, LispObject x)
-{
-    return boxfloat(LOG(floatval(x)));
+{   return boxfloat(SQRT(floatval(x)));
 }
 
 LispObject Lexp(LispObject lits, LispObject x)
-{
-    return boxfloat(EXP(floatval(x)));
+{   return boxfloat(EXP(floatval(x)));
+}
+
+LispObject Llog(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0) return error1("argument out of range", x);
+    return boxfloat(LOG(d));
+}
+
+LispObject Llog2(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0) return error1("argument out of range", x);
+    return boxfloat(LOG2(d));
+}
+
+LispObject Llog10(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0) return error1("argument out of range", x);
+    return boxfloat(LOG10(d));
+}
+
+LispObject Lsin(LispObject lits, LispObject x)
+{   return boxfloat(SIN(floatval(x)));
+}
+
+LispObject Lcos(LispObject lits, LispObject x)
+{   return boxfloat(COS(floatval(x)));
+}
+
+LispObject Ltan(LispObject lits, LispObject x)
+{   return boxfloat(TAN(floatval(x)));
+}
+
+LispObject Lsec(LispObject lits, LispObject x)
+{   return boxfloat(SEC(floatval(x)));
+}
+
+LispObject Lcsc(LispObject lits, LispObject x)
+{   return boxfloat(CSC(floatval(x)));
+}
+
+LispObject Lcot(LispObject lits, LispObject x)
+{   return boxfloat(COT(floatval(x)));
+}
+
+LispObject Lsind(LispObject lits, LispObject x)
+{   return boxfloat(SIND(floatval(x)));
+}
+
+LispObject Lcosd(LispObject lits, LispObject x)
+{   return boxfloat(COSD(floatval(x)));
+}
+
+LispObject Ltand(LispObject lits, LispObject x)
+{   return boxfloat(TAND(floatval(x)));
+}
+
+LispObject Lsecd(LispObject lits, LispObject x)
+{   return boxfloat(SECD(floatval(x)));
+}
+
+LispObject Lcscd(LispObject lits, LispObject x)
+{   return boxfloat(CSCD(floatval(x)));
+}
+
+LispObject Lcotd(LispObject lits, LispObject x)
+{   return boxfloat(COTD(floatval(x)));
+}
+
+LispObject Lsinh(LispObject lits, LispObject x)
+{   return boxfloat(SINH(floatval(x)));
+}
+
+LispObject Lcosh(LispObject lits, LispObject x)
+{   return boxfloat(COSH(floatval(x)));
+}
+
+LispObject Ltanh(LispObject lits, LispObject x)
+{   return boxfloat(TANH(floatval(x)));
+}
+
+LispObject Lsech(LispObject lits, LispObject x)
+{   return boxfloat(SECH(floatval(x)));
+}
+
+LispObject Lcsch(LispObject lits, LispObject x)
+{   return boxfloat(CSCH(floatval(x)));
+}
+
+LispObject Lcoth(LispObject lits, LispObject x)
+{   return boxfloat(COTH(floatval(x)));
+}
+
+LispObject Lasin(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ASIN(d));
+}
+
+LispObject Lacos(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOS(d));
 }
 
 LispObject Latan(LispObject lits, LispObject x)
-{
-    return boxfloat(ATAN(floatval(x)));
+{   double d = floatval(x);
+    return boxfloat(ATAN(d));
+}
+
+LispObject Lasec(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ASEC(d));
+}
+
+LispObject Lacsc(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACSC(d));
+}
+
+LispObject Lacot(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ACOT(d));
+}
+
+LispObject Lasind(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ASIND(d));
+}
+
+LispObject Lacosd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOSD(d));
+}
+
+LispObject Latand(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ATAND(d));
+}
+
+LispObject Lasecd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ASECD(d));
+}
+
+LispObject Lacscd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACSCD(d));
+}
+
+LispObject Lacotd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ACOTD(d));
+}
+
+LispObject Lasinh(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ASINH(d));
+}
+
+LispObject Lacosh(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOSH(d));
+}
+
+LispObject Latanh(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ATANH(d));
+}
+
+LispObject Lasech(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ASECH(d));
+}
+
+LispObject Lacsch(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ACSCH(d));
+}
+
+LispObject Lacoth(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOTH(d));
 }
 
 LispObject Latan_2(LispObject lits, LispObject x, LispObject y)
 {   double fx = floatval(x), fy=floatval(y), r;
 #ifdef CRLIBM
-    static const double _pi = 3.14159265358979323846;
 // This implementation will breach the "correctly rounded" ideal at the very
 // least because the division of y by x can round the input to the ATAN
 // function.
@@ -7082,6 +7431,12 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("lor",               Llogor_1),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_1),         \
     SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
+    SETUP_TABLE_SELECT("sin",               Lsin),              \
+    SETUP_TABLE_SELECT("cos",               Lcos),              \
+    SETUP_TABLE_SELECT("exp",               Lexp),              \
+    SETUP_TABLE_SELECT("log",               Llog),              \
+    SETUP_TABLE_SELECT("log2",              Llog2),             \
+    SETUP_TABLE_SELECT("log10",             Llog10),            \
     SETUP_TABLE_SELECT("atan",              Latan),             \
     SETUP_TABLE_SELECT("atom",              Latom),             \
     SETUP_TABLE_SELECT("pairp",             Lpairp),            \
@@ -7123,11 +7478,9 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("close",             Lclose),            \
     SETUP_TABLE_SELECT("code-char",         Lcodechar),         \
     SETUP_TABLE_SELECT("compress",          Lcompress),         \
-    SETUP_TABLE_SELECT("cos",               Lcos),              \
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
     SETUP_TABLE_SELECT("eval",              Leval),             \
-    SETUP_TABLE_SELECT("exp",               Lexp),              \
     SETUP_TABLE_SELECT("explode",           Lexplode),          \
     SETUP_TABLE_SELECT("explode2",          Lexplodec),         \
     SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
@@ -7183,7 +7536,6 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("linelength",        Llinelength),       \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
-    SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
     SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
     SETUP_TABLE_SELECT("not",               Lnull),             \
@@ -7210,8 +7562,46 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_1),   \
     SETUP_TABLE_SELECT("return",            Lreturn_1),         \
     SETUP_TABLE_SELECT("setpchar",          Lsetpchar),         \
-    SETUP_TABLE_SELECT("sin",               Lsin),              \
     SETUP_TABLE_SELECT("sqrt",              Lsqrt),             \
+    SETUP_TABLE_SELECT("exp",               Lexp),              \
+    SETUP_TABLE_SELECT("log",               Llog),              \
+/* Now a horribly large number of elementary functions */       \
+    SETUP_TABLE_SELECT("sin",               Lsin),              \
+    SETUP_TABLE_SELECT("cos",               Lcos),              \
+    SETUP_TABLE_SELECT("sec",               Lsec),              \
+    SETUP_TABLE_SELECT("csc",               Lcsc),              \
+    SETUP_TABLE_SELECT("tan",               Ltan),              \
+    SETUP_TABLE_SELECT("cot",               Lcot),              \
+    SETUP_TABLE_SELECT("sind",              Lsind),             \
+    SETUP_TABLE_SELECT("cosd",              Lcosd),             \
+    SETUP_TABLE_SELECT("secd",              Lsecd),             \
+    SETUP_TABLE_SELECT("cscd",              Lcscd),             \
+    SETUP_TABLE_SELECT("tand",              Ltand),             \
+    SETUP_TABLE_SELECT("cotd",              Lcotd),             \
+    SETUP_TABLE_SELECT("sinh",              Lsinh),             \
+    SETUP_TABLE_SELECT("cosh",              Lcosh),             \
+    SETUP_TABLE_SELECT("sech",              Lsech),             \
+    SETUP_TABLE_SELECT("csch",              Lcsch),             \
+    SETUP_TABLE_SELECT("tanh",              Ltanh),             \
+    SETUP_TABLE_SELECT("coth",              Lcoth),             \
+    SETUP_TABLE_SELECT("asin",              Lasin),             \
+    SETUP_TABLE_SELECT("acos",              Lacos),             \
+    SETUP_TABLE_SELECT("asec",              Lasec),             \
+    SETUP_TABLE_SELECT("acsc",              Lacsc),             \
+    SETUP_TABLE_SELECT("atan",              Latan),             \
+    SETUP_TABLE_SELECT("acot",              Lacot),             \
+    SETUP_TABLE_SELECT("asind",             Lasind),            \
+    SETUP_TABLE_SELECT("acosd",             Lacosd),            \
+    SETUP_TABLE_SELECT("asecd",             Lasecd),            \
+    SETUP_TABLE_SELECT("acscd",             Lacscd),            \
+    SETUP_TABLE_SELECT("atand",             Latand),            \
+    SETUP_TABLE_SELECT("acotd",             Lacotd),            \
+    SETUP_TABLE_SELECT("asinh",             Lasinh),            \
+    SETUP_TABLE_SELECT("acosh",             Lacosh),            \
+    SETUP_TABLE_SELECT("asech",             Lasech),            \
+    SETUP_TABLE_SELECT("acsch",             Lacsch),            \
+    SETUP_TABLE_SELECT("atanh",             Latanh),            \
+    SETUP_TABLE_SELECT("acoth",             Lacoth),            \
     SETUP_TABLE_SELECT("stop",              Lstop_1),           \
     SETUP_TABLE_SELECT("stringp",           Lstringp),          \
     SETUP_TABLE_SELECT("idp",               Lsymbolp),          \
