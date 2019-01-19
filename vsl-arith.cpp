@@ -141,6 +141,57 @@ int devzero_fd = 0;
 //#define popen _popen
 //#endif
 
+#ifdef CRLIBM
+
+// crlibm aims to produce correctly rounded results in all cases.
+// The functions from it selected here are the ones that round to
+// nearest. Using this should guarantee constent floating point results
+// across al platforms.
+
+extern "C"
+{
+#include "crlibm.h"
+}
+
+// sqrt is not provided by crlibm, probably because it believes that
+// most other libraries will get that case exactly right anyway.
+
+double SQRT(double a)  { return  sqrt(a); }
+
+double SIN(double a)   { return   sin_rn(a); }
+double COS(double a)   { return   cos_rn(a); }
+double TAN(double a)   { return   tan_rn(a); }
+double SINH(double a)  { return  sinh_rn(a); }
+double COSH(double a)  { return  cosh_rn(a); }
+double ASIN(double a)  { return  asin_rn(a); }
+double ACOS(double a)  { return  acos_rn(a); }
+double ATAN(double a)  { return  atan_rn(a); }
+double EXP(double a)   { return   exp_rn(a); }
+double LOG(double a)   { return   log_rn(a); }
+double LOG2(double a)  { return  log2_rn(a); }
+double LOG10(double a) { return log10_rn(a); }
+double POW(double a, double b)   { return   pow_rn(a, b); }
+
+#else // CRLIBM
+
+double SQRT(double a)  { return  sqrt(a); }
+
+double SIN(double a)   { return   sin(a); }
+double COS(double a)   { return   cos(a); }
+double TAN(double a)   { return   tan(a); }
+double SINH(double a)  { return  sinh(a); }
+double COSH(double a)  { return  cosh(a); }
+double ASIN(double a)  { return  asin(a); }
+double ACOS(double a)  { return  acos(a); }
+double ATAN(double a)  { return  atan(a); }
+double EXP(double a)   { return   exp(a); }
+double LOG(double a)   { return   log(a); }
+double LOG2(double a)  { return  log2(a); }
+double LOG10(double a) { return log10(a); }
+double POW(double a, double b)   { return   pow(a, b); }
+
+#endif // CRLIBM
+
 
 // This version is an extension of the minimal vsl system. It uses
 // a conservative garbage collector and will support a fuller and
@@ -4084,37 +4135,50 @@ LispObject Lfp_signbit(LispObject lits, LispObject arg)
 
 LispObject Lcos(LispObject lits, LispObject x)
 {
-    return boxfloat(cos(floatval(x)));
+    return boxfloat(COS(floatval(x)));
 }
 
 LispObject Lsin(LispObject lits, LispObject x)
 {
-    return boxfloat(sin(floatval(x)));
+    return boxfloat(SIN(floatval(x)));
 }
 
 LispObject Lsqrt(LispObject lits, LispObject x)
 {
-    return boxfloat(sqrt(floatval(x)));
+    return boxfloat(SQRT(floatval(x)));
 }
 
 LispObject Llog(LispObject lits, LispObject x)
 {
-    return boxfloat(log(floatval(x)));
+    return boxfloat(LOG(floatval(x)));
 }
 
 LispObject Lexp(LispObject lits, LispObject x)
 {
-    return boxfloat(exp(floatval(x)));
+    return boxfloat(EXP(floatval(x)));
 }
 
 LispObject Latan(LispObject lits, LispObject x)
 {
-    return boxfloat(atan(floatval(x)));
+    return boxfloat(ATAN(floatval(x)));
 }
 
 LispObject Latan_2(LispObject lits, LispObject x, LispObject y)
-{
-    return boxfloat(atan2(floatval(x), floatval(y)));
+{   double fx = floatval(x), fy=floatval(y), r;
+#ifdef CRLIBM
+    static const double _pi = 3.14159265358979323846;
+// This implementation will breach the "correctly rounded" ideal at the very
+// least because the division of y by x can round the input to the ATAN
+// function.
+    r = ATAN(fy/fx);
+    if (fx <= 0.0)
+    {   if (fy >= 0.0) r += _pi;
+        else r -= _pi;
+    }
+#else
+    r = atan2(fx, fy);
+#endif
+    return boxfloat(r);
 }
 
 LispObject Lnull(LispObject lits, LispObject x)

@@ -23,6 +23,14 @@ LIBS=-lm -lz -ledit -lncurses -ltermcap
 endif
 endif
 
+# I will expact that if crlibm is to be used that its header is in
+# /usr/local/include
+
+ifneq (,$(wildcard /usr/local/include/crlibm.h))
+CFLAGS += -I/usr/local/include -DCRLIBM=1
+LIBS += -L/usr/local/lib -lcrlibm
+endif
+
 all:	vsl vsl.img
 
 # This first is the VSL Lisp system more or less in its original form.
