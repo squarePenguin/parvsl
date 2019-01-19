@@ -2072,8 +2072,131 @@ void checkspace(int n)
 
 char printbuffer[32];
 
-extern LispObject call1(const char *name, LispObject a1);
-extern LispObject call2(const char *name, LispObject a1, LispObject a2);
+//
+// I want the floating point print style that I use to match the
+// one used by PSL rather carefully. So here is some code so that
+// everything I do about it is in one place.
+//
+
+intptr_t print_precision = 6;
+
+LispObject Lprint_precision(LispObject lits, LispObject a)
+{   intptr_t old = print_precision;
+    if (a == nil) return packfixnum(old);
+    if (!isFIXNUM(a)) error1("print-precision", a);
+    print_precision = qfixnum(a);
+    if (print_precision > 36) print_precision = 36;
+    else if (print_precision < 1) print_precision = 15;
+    return packfixnum(old);
+}
+
+
+//
+// Two crummy little functions to delete and insert chars from strings.
+//
+
+static void char_del(char *s)
+{   while (*s != 0)
+    {   *s = *(s+1);
+        s++;
+    }
+}
+
+static void char_ins(char *s, int c)
+{   char *p = s;
+    while (*p != 0) p++;
+    while (p != s)
+    {   *(p+1) = *p;
+        p--;
+    }
+    *(s+1) = *s;
+    *s = c;
+//  printf("After char_ins \"%s\"\n", s);
+}
+
+static void fp_sprint(char *buff, double x, int prec, int xmark)
+{
+// Note that I am assuming IEEE arithmetic here so the tricks that I use
+// to detect -0.0, NaN and infinities ought to be OK. Just remember that
+// -0.0 is equal to 0.0 and not less than it, so the simple test
+// "x < 0.0" will not pick up the case of -0.0.
+    if (x == 0.0)
+    {   if (xmark != 'e')
+        {   if (1.0/x < 0.0) sprintf(buff, "-0.0%c+00", xmark);
+            else sprintf(buff, "0.0%c+00", xmark);
+        }
+        else if (1.0/x < 0.0) strcpy(buff, "-0.0");
+        else strcpy(buff, "0.0");
+        return;
+    }
+    if (x != x)
+    {   strcpy(buff, "NaN"); // The length of the NaN will not be visible
+        return;
+    }
+    if (x == 2.0*x)
+    {   if (x < 0.0) strcpy(buff, "minusinf"); // Length of infinity not shown.
+        else strcpy(buff, "inf");
+        return;
+    }
+// Limit the precision used for printing based on the type of float involved.
+    switch (xmark)
+    {   case 's': case 'S':
+            if (prec > 7) prec = 7;
+            break;
+        case 'f': case 'F':
+            if (prec > 8) prec = 8;
+            break;
+        default:
+            if (prec > 17) prec = 17;
+    }
+    if (x < 0.0)
+    {   *buff++ = '-';
+        x = -x;
+    }
+// Now I just have strictly positive values to worry about
+    sprintf(buff, "%.*g", prec, x);
+// I will allow for pathologically bad versions of sprintf...
+    if (*buff == '+') char_del(buff);      // Explicit "+" not wanted
+    if (*buff == '.') char_ins(buff, '0'); // turn .nn to 0.nn
+    else if (*buff == 'e')                 // turn Ennn to 0.0Ennn
+    {   char_ins(buff, '0');
+        char_ins(buff, '.');
+        char_ins(buff, '0');
+    }
+// I now have at lesst one digit before any "." or "E"
+    while (*buff != 0 && *buff != '.' && *buff != 'e') buff++;
+    if (*buff == 'e') *buff = xmark;    // force style of exponent mark
+    if (*buff == 0 || *buff == xmark)   // ddd to ddd.0
+    {   char_ins(buff, '0');            // and dddEnnn to ddd.0Ennn
+        char_ins(buff, '.');
+    }
+// I now have a "." in there
+    while (*buff != 0 && *buff != 'e' && *buff != xmark) buff++;
+    if (*(buff-1) == '.') char_ins(buff++, '0');// ddd. to ddd.0
+    while (*(buff-1) == '0' &&                  // ddd.nnn0 to ddd.nnn
+           *(buff-2) != '.') char_del(--buff);
+    if (*buff == 0)
+    {   if (xmark != 'e')
+        {   *buff++ = xmark;
+            *buff++ = '+';
+            *buff++ = '0';
+            *buff++ = '0';
+            *buff = 0;
+        }
+        return; // no E present. Add exponent mark if not default type
+    }
+    if (xmark != 'e') *buff = xmark; 
+    buff++;
+// At this stage I am looking at the exponent part
+    if (*buff == 0) strcpy(buff, "+00");
+    else if (isdigit((unsigned char)*buff)) char_ins(buff, '+');
+// Exponent should now start with explicit + or - sign
+    buff++;
+// Force exponent to have at least 2 digits
+    if (*(buff+1) == 0) char_ins(buff, '0');
+// Three-digit exponent with leading zero gets trimmed here
+    else if (*buff == '0' && *(buff+2) != 0) char_del(buff);
+}
 
 void internalprint(LispObject x)
 {   int sep = '(', esc;
@@ -2233,25 +2356,12 @@ void internalprint(LispObject x)
                 }
         case tagFLOAT:
             {   double d =  *((double *)(x - tagFLOAT));
-                if (isnan(d)) strcpy(printbuffer, "NaN");
-                else if (isfinite(d)) snprintf(printbuffer, sizeof(printbuffer), "%.14g", d);
-                else strcpy(printbuffer, "inf");
+//                if (isnan(d)) strcpy(printbuffer, "NaN");
+//                else if (isfinite(d)) snprintf(printbuffer, sizeof(printbuffer), "%.14g", d);
+//                else strcpy(printbuffer, "inf");
+                fp_sprint(printbuffer, d, print_precision, 'e');
             }
-            s = printbuffer;
-// The C printing of floating point values is not to my taste, so I (slightly)
-// asjust the output here...
-            if (*s == '+' || *s == '-') s++;
-            while (isdigit((int)*s)) s++;
-            if (*s == 0 || *s == 'e')  // No decimal point present!
-            {   len = strlen(s);
-                while (len != 0)       // Move existing text up 2 places
-                {   s[len+2] = s[len];
-                    len--;
-                }
-                s[2] = s[0];
-                s[0] = '.'; s[1] = '0'; // insert ".0"
-            }
-            checkspace(len = strlen(printbuffer));
+            len = strlen(printbuffer);
             for (i=0; i<len; i++) wrch(printbuffer[i]);
             return;
         case tagFIXNUM:
@@ -2348,6 +2458,7 @@ int hexval(int n)
     else if ('A' <= n && n <= 'F') return n - 'A' + 10;
     else return 0;
 }
+static LispObject Nminus(LispObject a);
 static LispObject Nplus2(LispObject a, LispObject b);
 static LispObject Ntimes2(LispObject a, LispObject b);
 
@@ -2492,7 +2603,7 @@ LispObject token()
             {   r = Nplus2(Ntimes2(packfixnum(10), r),
                            packfixnum(boffo[boffop++] - '0'));
             }
-            if (neg) r = call1("minus", r);
+            if (neg) r = Nminus(r);
             return r;
         }
         else
@@ -2690,14 +2801,6 @@ LispObject call1(const char *name, LispObject a1)
         qdefn1(fn) == wrongnumber1) return NULLATOM;
 // Attempting to trace the function used here will be ineffective.
     return (*(LispFn1 *)qdefn1(fn))(qlits(fn), a1);
-}
-
-LispObject call2(const char *name, LispObject a1, LispObject a2)
-{
-    LispObject fn = lookup(name, strlen(name), 2);
-    if (fn == undefined || qdefn2(fn) == undefined2 ||
-        qdefn2(fn) == wrongnumber2) return NULLATOM;
-    return (*(LispFn2 *)qdefn2(fn))(qlits(fn), a1, a2);
 }
 
 LispObject eval(LispObject x);
@@ -7098,6 +7201,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("princhex",          Lprinchex),         \
     SETUP_TABLE_SELECT("printhex",          Lprinthex),         \
     SETUP_TABLE_SELECT("printchex",         Lprintchex),        \
+    SETUP_TABLE_SELECT("set-print-precision",Lprint_precision), \
+    SETUP_TABLE_SELECT("setprintprecision", Lprint_precision),  \
     SETUP_TABLE_SELECT("rdf",               Lrdf),              \
     SETUP_TABLE_SELECT("rds",               Lrds),              \
     SETUP_TABLE_SELECT("reclaim",           Lreclaim_1),        \
@@ -7681,6 +7786,7 @@ int warm_start_1(gzFile f, int *errcode)
     char (*imagesetup_names)[MAX_NAMESIZE];
     void **imagesetup_defs;
     uintptr_t fr1, lim1, total_size, remaining_size;
+    print_precision = read32(f);
 // I have the table of names of entrypoints that are defined by
 // the kernel. Note that the table as present in the saved image may not
 // be the same size as the one in the code I am executing, so I can not
@@ -8183,6 +8289,7 @@ static inline int write_image_1(gzFile f, int *errcode)
     }
 // 16 bytes whose purpose at present escapes me.
     if (gzwrite(f, "0123456789abcdef", 16) != 16) return 1; // junk at present
+    write32(f, print_precision);
 // Next I want to dump the table of entrypoints to functions that are
 // built into the kernel. First I write an integer that indicates how
 // many there are, then the table of their names and then the associated

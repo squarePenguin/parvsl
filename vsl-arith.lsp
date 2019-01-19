@@ -598,8 +598,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (setq !*redefmsg nil)
 
-(de set!-print!-precision (n) n)
-
 (de constantp (x)
    (or (null x)
        (numberp x)
