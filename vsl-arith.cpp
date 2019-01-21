@@ -141,6 +141,240 @@ int devzero_fd = 0;
 //#define popen _popen
 //#endif
 
+#ifdef CRLIBM
+
+// crlibm aims to produce correctly rounded results in all cases.
+// The functions from it selected here are the ones that round to
+// nearest. Using this should guarantee constent floating point results
+// across al platforms.
+
+extern "C"
+{
+#include "crlibm.h"
+}
+
+// sqrt is not provided by crlibm, probably because it believes that
+// most other libraries will get that case exactly right anyway.
+
+double SQRT(double a)  { return  sqrt(a); }
+double TANH(double x)  { return  tanh(x); }
+
+double SIN(double a)   { return   sin_rn(a); }
+double COS(double a)   { return   cos_rn(a); }
+double TAN(double a)   { return   tan_rn(a); }
+double SINH(double a)  { return  sinh_rn(a); }
+double COSH(double a)  { return  cosh_rn(a); }
+double ASIN(double a)  { return  asin_rn(a); }
+double ACOS(double a)  { return  acos_rn(a); }
+double ATAN(double a)  { return  atan_rn(a); }
+double EXP(double a)   { return   exp_rn(a); }
+double LOG(double a)   { return   log_rn(a); }
+double LOG2(double a)  { return  log2_rn(a); }
+double LOG10(double a) { return log10_rn(a); }
+double POW(double a, double b)   { return   pow_rn(a, b); }
+
+#else // CRLIBM
+
+double SQRT(double a)  { return  sqrt(a); }
+double TANH(double x)  { return  tanh(x); }
+
+double SIN(double a)   { return   sin(a); }
+double COS(double a)   { return   cos(a); }
+double TAN(double a)   { return   tan(a); }
+double SINH(double a)  { return  sinh(a); }
+double COSH(double a)  { return  cosh(a); }
+double ASIN(double a)  { return  asin(a); }
+double ACOS(double a)  { return  acos(a); }
+double ATAN(double a)  { return  atan(a); }
+double EXP(double a)   { return   exp(a); }
+double LOG(double a)   { return   log(a); }
+double LOG2(double a)  { return  log2(a); }
+double LOG10(double a) { return log10(a); }
+double POW(double a, double b)   { return   pow(a, b); }
+
+#endif // CRLIBM
+
+// There are a load of elementary functions not provided by standard
+// libraries. I deal with that here.
+
+static const double _pi = 3.14159265358979323846;
+static const double _log_2 = 0.6931471805599453094;
+static const double _half_pi = ((12868.0 - 0.036490896206895257)/8192.0);
+
+double ASINH(double x)
+{   bool sign;
+    if (x < 0.0) x = -x, sign = true;
+    else sign = false;
+    if (x < 1.0e-3)
+    {   double xx = x*x;
+        x = x*(1 - xx*((1.0/6.0) - (3.0/40.0)*xx));
+    }
+    else if (x < 1.0e9)
+    {   x += sqrt(1.0 + x*x);
+        x = LOG(x);
+    }
+    else x = LOG(x) + _log_2;
+    if (sign) x = -x;
+    return x;
+}
+
+static double acosh_coeffs[] =
+{   -0.15718655513711019382e-5,          // x^11
+    +0.81758779765416234142e-5,          // x^10
+    -0.24812280287135584149e-4,          // x^9
+    +0.62919005027033514743e-4,          // x^8
+    -0.15404104307204835991e-3,          // x^7
+    +0.38339903706706128921e-3,          // x^6
+    -0.98871347029548821795e-3,          // x^5
+    +0.26854094489454297811e-2,          // x^4
+    -0.78918167367399344521e-2,          // x^3
+    +0.26516504294146930609e-1,          // x^2
+    -0.11785113019775570984,             // x
+    +1.41421356237309504786              // 1
+
+};
+
+double ACOSH(double x)
+{   bool sign;
+    if (x < -1.0) x = -x, sign = true;
+    else if (1.0 < x) sign = false;
+    else return 0.0;
+    if (x < 1.5)
+    {   int i;
+        double r = acosh_coeffs[0];
+        x = (x - 0.5) - 0.5;
+//
+// This is a minimax approximation to acosh(1+x)/sqrt(x) over the
+// range x=0 to 0.5
+//
+        for (i=1; i<=11; i++) r = x*r + acosh_coeffs[i];
+        x = sqrt(x)*r;
+    }
+    else if (x < 1.0e9)
+    {   x += sqrt((x - 1.0)*(x + 1.0));
+        x = LOG(x);
+    }
+    else x = LOG(x) + _log_2;
+    if (sign) return -x;
+    else return x;
+}
+
+double ATANH(double z)
+{   if (z > -0.01 && z < -0.01)
+    {   double zz = z*z;
+        return z * (1 + zz*((1.0/3.0) + zz*((1.0/5.0) + zz*(1.0/7.0))));
+    }
+    z = (1.0 + z) / (1.0 - z);
+    if (z < 0.0) z = -z;
+    return LOG(z) / 2.0;
+}
+
+static const double n180pi = 57.2957795130823208768;   // 180/pi
+static const double pi180  =  0.017453292519943295769; // pi/180
+
+double arg_reduce_degrees(double a, int *quadrant)
+//
+// Reduce argument to the range -45 to 45, and set quadrant to the
+// relevant quadant.  Returns arg converted to radians.
+//
+{   double w = a / 90.0;
+    int32_t n = (int)w;
+    w = a - 90.0*n;
+    while (w < -45.0)
+    {   n--;
+        w = a - 90.0*n;
+    }
+    while (w >= 45.0)
+    {   n++;
+        w = a - 90.0*n;
+    }
+    *quadrant = (int)(n & 3);
+    return pi180*w;
+}
+
+double SIND(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0: return SIN(a);
+        case 1: return COS(a);
+        case 2: return SIN(-a);
+        case 3: return -COS(a);
+    }
+}
+
+double COSD(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0: return COS(a);
+        case 1: return SIN(-a);
+        case 2: return -COS(a);
+        case 3: return SIN(a);
+    }
+}
+
+double TAND(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0:
+        case 2: return TAN(a);
+        case 1:
+        case 3: return 1.0/TAN(-a);
+    }
+}
+
+static double COTD(double a)
+{   int quadrant;
+    a = arg_reduce_degrees(a, &quadrant);
+    switch (quadrant)
+    {   default:
+        case 0:
+        case 2: return 1.0/TAN(a);
+        case 1:
+        case 3: return TAN(-a);
+    }
+}
+
+double ACOT(double a)
+{   if (a >= 0.0)
+        if (a > 1.0) return ATAN(1.0/a);
+        else return _half_pi - ATAN(a);
+    else if (a < -1.0) return _pi - ATAN(-1.0/a);
+    else return _half_pi + ATAN(-a);
+}
+
+double ACOTD(double a)
+{   if (a >= 0.0)
+        if (a > 1.0) return n180pi*ATAN(1.0/a);
+        else return 90.0 - n180pi*ATAN(a);
+    else if (a < -1.0) return 180.0 - n180pi*ATAN(-1.0/a);
+    else return 90.0 + n180pi*ATAN(-a);
+}
+
+double CSC(double x)     { return 1.0/SIN(x); }
+double SEC(double x)     { return 1.0/COS(x); }
+double COT(double x)     { return 1.0/TAN(x); }
+double CSCH(double x)    { return 1.0/SINH(x); }
+double SECH(double x)    { return 1.0/COSH(x); }
+double COTH(double x)    { return 1.0/TANH(x); }
+double ACSC(double x)    { return ASIN(1.0/x); }
+double ASEC(double x)    { return ACOS(1.0/x); }
+double ACSCH(double x)   { return ASINH(1.0/x); }
+double ASECH(double x)   { return ACOSH(1.0/x); }
+double ACOTH(double x)   { return ATANH(1.0/x); }
+double ASIND(double x)   { return (180.0/_pi)*ASIN(x); }
+double ACOSD(double x)   { return (180.0/_pi)*ACOS(x); }
+double ATAND(double x)   { return (180.0/_pi)*ATAN(x); }
+double CSCD(double x)    { return 1.0/SIND(x); }
+double SECD(double x)    { return 1.0/COSD(x); }
+double ACSCD(double x)   { return ASIND(1.0/x); }
+double ASECD(double x)   { return ACOSD(1.0/x); }
+
 
 // This version is an extension of the minimal vsl system. It uses
 // a conservative garbage collector and will support a fuller and
@@ -320,19 +554,18 @@ INLINE const size_t SYMSIZE = 12;
 
 // Bits within the flags field of a symbol. Uses explained later on.
 
-INLINE const LispObject flagTRACED    = 0x080;
-INLINE const LispObject flagSPECFORM  = 0x100;
-INLINE const LispObject flagMACRO     = 0x200;
-INLINE const LispObject flagGLOBAL    = 0x400;
-INLINE const LispObject flagFLUID     = 0x800;
+INLINE const LispObject flagTRACED    = 0x0080;
+INLINE const LispObject flagSPECFORM  = 0x0100;
+INLINE const LispObject flagMACRO     = 0x0200;
+INLINE const LispObject flagGLOBAL    = 0x0400;
+INLINE const LispObject flagFLUID     = 0x0800;
+INLINE const LispObject flagGENSYM    = 0x1000;
 // There are LOTS more bits available for flags etc here if needbe!
 
 // Other atoms have a header that gives info about them. Well as a special
 // case I will allow that something tagged with tagATOM but with zero as
 // its address is a special marker value...
 
-// I will INSIAT that the definition of tagATOM s in the same compilation
-// unit as this is.
 INLINE const LispObject NULLATOM = tagATOM + 0;
 
 static inline LispObject &qheader(LispObject x)
@@ -390,7 +623,7 @@ static inline bool isEQHASHX(LispObject x)
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-INLINE const size_t MEM = 512;
+INLINE const size_t MEM = 1024;
 #endif // MEM
 
 INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
@@ -411,7 +644,7 @@ LispObject *C_stackbase;
 // Hmm - a full copy of everything that makes up Reduce involved around
 // 40K distinct symbols...
 
-INLINE const size_t OBHASH_SIZE   = 10007;
+INLINE const size_t OBHASH_SIZE   = 15013;
 INLINE const int MAX_LISPFILES = 30;
 
 // Some Lisp values that I will use frequently...
@@ -468,8 +701,8 @@ INLINE const int MAX_LISPFILES = 30;
 #define symlower   listbases[24]
 #define dfprint    listbases[25]
 //#define bignum     listbases[26]
-#define symfluid   listbases[27]
-#define symglobal  listbases[28]
+//#define symfluid   listbases[27]
+//#define symglobal  listbases[28]
 const int BASES_SIZE = MAX_LISPFILES+29;
 
 #define filecursym (&listbases[29])
@@ -1360,7 +1593,6 @@ void inner_reclaim(LispObject *C_stack)
 // section has its "starts" bit set, and so the loop can never zoom down and
 // drop beyond the bottom of a segment.
             block_header *block_a = find_block(a);
-            LispObject initial_a = a;
             while (!getheapstarts(a))
             {
                 a -= 8;
@@ -1368,7 +1600,6 @@ void inner_reclaim(LispObject *C_stack)
                 assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
                 assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
             }
-if (initial_a == 123456) printf("ook\n"); // to get it used.
             if (!getpinned(a))
             {   LispObject h;
 // ensureheapspace is here to arrange to skip past any of the pinned items
@@ -1911,7 +2142,7 @@ int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch1(int c)
-{
+{   //????if (c == '\r') return;
     if (lispout == -1)
     {   char w[4];
 // This bit is for the benefit of explode and explodec.
@@ -1947,9 +2178,10 @@ void wrch1(int c)
     }
 }
 
+
 void wrch(int ch)
 {   if (blank_pending)
-    {   wrch1(' ');
+    {   if (lispout < 0 || linepos != 0) wrch1(' ');
         blank_pending = false;
     }
     wrch1(ch);
@@ -2023,8 +2255,131 @@ void checkspace(int n)
 
 char printbuffer[32];
 
-extern LispObject call1(const char *name, LispObject a1);
-extern LispObject call2(const char *name, LispObject a1, LispObject a2);
+//
+// I want the floating point print style that I use to match the
+// one used by PSL rather carefully. So here is some code so that
+// everything I do about it is in one place.
+//
+
+intptr_t print_precision = 6;
+
+LispObject Lprint_precision(LispObject lits, LispObject a)
+{   intptr_t old = print_precision;
+    if (a == nil) return packfixnum(old);
+    if (!isFIXNUM(a)) error1("print-precision", a);
+    print_precision = qfixnum(a);
+    if (print_precision > 36) print_precision = 36;
+    else if (print_precision < 1) print_precision = 15;
+    return packfixnum(old);
+}
+
+
+//
+// Two crummy little functions to delete and insert chars from strings.
+//
+
+static void char_del(char *s)
+{   while (*s != 0)
+    {   *s = *(s+1);
+        s++;
+    }
+}
+
+static void char_ins(char *s, int c)
+{   char *p = s;
+    while (*p != 0) p++;
+    while (p != s)
+    {   *(p+1) = *p;
+        p--;
+    }
+    *(s+1) = *s;
+    *s = c;
+//  printf("After char_ins \"%s\"\n", s);
+}
+
+static void fp_sprint(char *buff, double x, int prec, int xmark)
+{
+// Note that I am assuming IEEE arithmetic here so the tricks that I use
+// to detect -0.0, NaN and infinities ought to be OK. Just remember that
+// -0.0 is equal to 0.0 and not less than it, so the simple test
+// "x < 0.0" will not pick up the case of -0.0.
+    if (x == 0.0)
+    {   if (xmark != 'e')
+        {   if (1.0/x < 0.0) sprintf(buff, "-0.0%c+00", xmark);
+            else sprintf(buff, "0.0%c+00", xmark);
+        }
+        else if (1.0/x < 0.0) strcpy(buff, "-0.0");
+        else strcpy(buff, "0.0");
+        return;
+    }
+    if (x != x)
+    {   strcpy(buff, "NaN"); // The length of the NaN will not be visible
+        return;
+    }
+    if (x == 2.0*x)
+    {   if (x < 0.0) strcpy(buff, "minusinf"); // Length of infinity not shown.
+        else strcpy(buff, "inf");
+        return;
+    }
+// Limit the precision used for printing based on the type of float involved.
+    switch (xmark)
+    {   case 's': case 'S':
+            if (prec > 7) prec = 7;
+            break;
+        case 'f': case 'F':
+            if (prec > 8) prec = 8;
+            break;
+        default:
+            if (prec > 17) prec = 17;
+    }
+    if (x < 0.0)
+    {   *buff++ = '-';
+        x = -x;
+    }
+// Now I just have strictly positive values to worry about
+    sprintf(buff, "%.*g", prec, x);
+// I will allow for pathologically bad versions of sprintf...
+    if (*buff == '+') char_del(buff);      // Explicit "+" not wanted
+    if (*buff == '.') char_ins(buff, '0'); // turn .nn to 0.nn
+    else if (*buff == 'e')                 // turn Ennn to 0.0Ennn
+    {   char_ins(buff, '0');
+        char_ins(buff, '.');
+        char_ins(buff, '0');
+    }
+// I now have at lesst one digit before any "." or "E"
+    while (*buff != 0 && *buff != '.' && *buff != 'e') buff++;
+    if (*buff == 'e') *buff = xmark;    // force style of exponent mark
+    if (*buff == 0 || *buff == xmark)   // ddd to ddd.0
+    {   char_ins(buff, '0');            // and dddEnnn to ddd.0Ennn
+        char_ins(buff, '.');
+    }
+// I now have a "." in there
+    while (*buff != 0 && *buff != 'e' && *buff != xmark) buff++;
+    if (*(buff-1) == '.') char_ins(buff++, '0');// ddd. to ddd.0
+    while (*(buff-1) == '0' &&                  // ddd.nnn0 to ddd.nnn
+           *(buff-2) != '.') char_del(--buff);
+    if (*buff == 0)
+    {   if (xmark != 'e')
+        {   *buff++ = xmark;
+            *buff++ = '+';
+            *buff++ = '0';
+            *buff++ = '0';
+            *buff = 0;
+        }
+        return; // no E present. Add exponent mark if not default type
+    }
+    if (xmark != 'e') *buff = xmark; 
+    buff++;
+// At this stage I am looking at the exponent part
+    if (*buff == 0) strcpy(buff, "+00");
+    else if (isdigit((unsigned char)*buff)) char_ins(buff, '+');
+// Exponent should now start with explicit + or - sign
+    buff++;
+// Force exponent to have at least 2 digits
+    if (*(buff+1) == 0) char_ins(buff, '0');
+// Three-digit exponent with leading zero gets trimmed here
+    else if (*buff == '0' && *(buff+2) != 0) char_del(buff);
+}
 
 void internalprint(LispObject x)
 {   int sep = '(', esc;
@@ -2058,10 +2413,10 @@ void internalprint(LispObject x)
                 x = qcdr(x);
             }
             if (x != nil)
-            {   blank_pending = 1;
+            {   blank_pending = true;
                 checkspace(1);
                 wrch('.');
-                blank_pending = 1;
+                blank_pending = true;
                 internalprint(x);
             }
             checkspace(1);
@@ -2166,8 +2521,11 @@ void internalprint(LispObject x)
                             wrch('[');
                         }
                         else for (i=0; i<len; i++)
-                        {   checkspace(1);
-                            wrch(sep);
+                        {   if (sep==' ') blank_pending = true;
+                            else
+                            {   checkspace(1);
+                                wrch(sep);
+                            }
                             sep = ' ';
                             internalprint(elt(x, i));
                         }
@@ -2181,25 +2539,9 @@ void internalprint(LispObject x)
                 }
         case tagFLOAT:
             {   double d =  *((double *)(x - tagFLOAT));
-                if (isnan(d)) strcpy(printbuffer, "NaN");
-                else if (isfinite(d)) snprintf(printbuffer, sizeof(printbuffer), "%.14g", d);
-                else strcpy(printbuffer, "inf");
+                fp_sprint(printbuffer, d, print_precision, 'e');
             }
-            s = printbuffer;
-// The C printing of floating point values is not to my taste, so I (slightly)
-// asjust the output here...
-            if (*s == '+' || *s == '-') s++;
-            while (isdigit((int)*s)) s++;
-            if (*s == 0 || *s == 'e')  // No decimal point present!
-            {   len = strlen(s);
-                while (len != 0)       // Move existing text up 2 places
-                {   s[len+2] = s[len];
-                    len--;
-                }
-                s[2] = s[0];
-                s[0] = '.'; s[1] = '0'; // insert ".0"
-            }
-            checkspace(len = strlen(printbuffer));
+            len = strlen(printbuffer);
             for (i=0; i<len; i++) wrch(printbuffer[i]);
             return;
         case tagFIXNUM:
@@ -2296,6 +2638,7 @@ int hexval(int n)
     else if ('A' <= n && n <= 'F') return n - 'A' + 10;
     else return 0;
 }
+static LispObject Nminus(LispObject a);
 static LispObject Nplus2(LispObject a, LispObject b);
 static LispObject Ntimes2(LispObject a, LispObject b);
 
@@ -2440,7 +2783,7 @@ LispObject token()
             {   r = Nplus2(Ntimes2(packfixnum(10), r),
                            packfixnum(boffo[boffop++] - '0'));
             }
-            if (neg) r = call1("minus", r);
+            if (neg) r = Nminus(r);
             return r;
         }
         else
@@ -2638,14 +2981,6 @@ LispObject call1(const char *name, LispObject a1)
         qdefn1(fn) == wrongnumber1) return NULLATOM;
 // Attempting to trace the function used here will be ineffective.
     return (*(LispFn1 *)qdefn1(fn))(qlits(fn), a1);
-}
-
-LispObject call2(const char *name, LispObject a1, LispObject a2)
-{
-    LispObject fn = lookup(name, strlen(name), 2);
-    if (fn == undefined || qdefn2(fn) == undefined2 ||
-        qdefn2(fn) == wrongnumber2) return NULLATOM;
-    return (*(LispFn2 *)qdefn2(fn))(qlits(fn), a1, a2);
 }
 
 LispObject eval(LispObject x);
@@ -2944,21 +3279,24 @@ LispObject eval(LispObject x)
             {
             case 0:
                 if (flags & flagTRACED)
-                {   linepos += printf("Calling: ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Calling: ");
                     printf("%s\n", fname); linepos = 0;
 //                  errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                 }
                 x = (*qdefn0(f))(qlits(f));
                 if (unwindflag == unwindBACKTRACE)
-                {   linepos += printf("Call to ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   errprin(f);
+                {   if (linepos!=0) wrch('\n');
+                    errprin(f);
                     linepos += printf(" = ");
                     if (unwindflag != unwindNONE) return nil;
                     errprint(x);
@@ -2969,7 +3307,8 @@ LispObject eval(LispObject x)
                 x = eval(qcar(aa));
                 if (unwindflag != unwindNONE) return nil;
                 if (flags & flagTRACED)
-                {   linepos += printf("Calling: ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Calling: ");
                     errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                     linepos += printf("Arg1: ");
@@ -2978,14 +3317,16 @@ LispObject eval(LispObject x)
                 }
                 x = (*qdefn1(f))(qlits(f), x);
                 if (unwindflag == unwindBACKTRACE)
-                {   linepos += printf("Call to ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   errprin(f);
+                {   if (linepos!=0) wrch('\n');
+                    errprin(f);
                     linepos += printf(" = ");
                     if (unwindflag != unwindNONE) return nil;
                     errprint(x);
@@ -2998,7 +3339,8 @@ LispObject eval(LispObject x)
                 aa = eval(qcar(qcdr(aa)));
                 if (unwindflag != unwindNONE) return nil;
                 if (flags & flagTRACED)
-                {   linepos += printf("Calling: ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Calling: ");
                     errprint(f);
                     if (unwindflag != unwindNONE) return nil;
                     linepos += printf("Arg1: ");
@@ -3010,14 +3352,16 @@ LispObject eval(LispObject x)
                 }
                 x = (*qdefn2(f))(qlits(f), x, aa);
                 if (unwindflag == unwindBACKTRACE)
-                {   linepos += printf("Call to ");
+                {   if (linepos!=0) wrch('\n');
+                    linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
                     linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   errprin(f);
+                {   if (linepos!=0) wrch('\n');
+                    errprin(f);
                     linepos += printf(" = ");
                     if (unwindflag != unwindNONE) return nil;
                     errprint(x);
@@ -3033,7 +3377,8 @@ LispObject eval(LispObject x)
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   linepos += printf("Calling: ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Calling: ");
                         errprint(f);
                         if (unwindflag != unwindNONE) return nil;
                         linepos += printf("Arg1: ");
@@ -3048,14 +3393,16 @@ LispObject eval(LispObject x)
                     }
                     x = (*qdefn3(f))(qlits(f), x, a2, aa);
                     if (unwindflag == unwindBACKTRACE)
-                    {   linepos += printf("Call to ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
                         linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   errprin(f);
+                    {   if (linepos!=0) wrch('\n');
+                        errprin(f);
                         linepos += printf(" = ");
                         if (unwindflag != unwindNONE) return nil;
                         errprint(x);
@@ -3075,7 +3422,8 @@ LispObject eval(LispObject x)
                     aa = eval(qcar(qcdr(aa)));
                     if (unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   linepos += printf("Calling: ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Calling: ");
                         errprint(f);
                         if (unwindflag != unwindNONE) return nil;
                         linepos += printf("Arg1: ");
@@ -3093,14 +3441,16 @@ LispObject eval(LispObject x)
                     }
                     x = (*qdefn4(f))(qlits(f), x, a2, a3, aa);
                     if (unwindflag == unwindBACKTRACE)
-                    {   linepos += printf("Call to ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
                         linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   errprin(f);
+                    {   if (linepos!=0) wrch('\n');
+                        errprin(f);
                         linepos += printf(" = ");
                         if (unwindflag != unwindNONE) return nil;
                         errprint(x);
@@ -3123,7 +3473,8 @@ LispObject eval(LispObject x)
                     aa = evlis(qcdr(aa));
                     if (unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   linepos += printf("Calling: ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Calling: ");
                         errprint(f);
                         if (unwindflag != unwindNONE) return nil;
                         linepos += printf("Arg1: ");
@@ -3144,14 +3495,16 @@ LispObject eval(LispObject x)
                     }
                     x = (*qdefn5up(f))(qlits(f), x, a2, a3, a4, aa);
                     if (unwindflag == unwindBACKTRACE)
-                    {   linepos += printf("Call to ");
+                    {   if (linepos!=0) wrch('\n');
+                        linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
                         linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   errprin(f);
+                    {   if (linepos!=0) wrch('\n');
+                        errprin(f);
                         linepos += printf(" = ");
                         if (unwindflag != unwindNONE) return nil;
                         errprint(x);
@@ -3993,7 +4346,7 @@ LispObject Lfloatp(LispObject lits, LispObject x)
 LispObject Lfrexp(LispObject lits, LispObject a)
 {   double d = 0.0;
     int x = 0;
-    if (isFLOAT(x)) d = std::frexp(qfloat(a), &x);
+    if (isFLOAT(a)) d = std::frexp(qfloat(a), &x);
     return cons(packfixnum(x), boxfloat(d));
 }
 
@@ -4063,34 +4416,221 @@ LispObject Lfp_signbit(LispObject lits, LispObject arg)
     return std::signbit(d) ? lisptrue : nil;
 }
 
-LispObject Lcos(LispObject lits, LispObject x)
-{
-    return boxfloat(cos(floatval(x)));
-}
-
-LispObject Lsin(LispObject lits, LispObject x)
-{
-    return boxfloat(sin(floatval(x)));
-}
-
 LispObject Lsqrt(LispObject lits, LispObject x)
-{
-    return boxfloat(sqrt(floatval(x)));
-}
-
-LispObject Llog(LispObject lits, LispObject x)
-{
-    return boxfloat(log(floatval(x)));
+{   return boxfloat(SQRT(floatval(x)));
 }
 
 LispObject Lexp(LispObject lits, LispObject x)
-{
-    return boxfloat(exp(floatval(x)));
+{   return boxfloat(EXP(floatval(x)));
+}
+
+LispObject Llog(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0) return error1("argument out of range", x);
+    return boxfloat(LOG(d));
+}
+
+LispObject Llog2(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0) return error1("argument out of range", x);
+    return boxfloat(LOG2(d));
+}
+
+LispObject Llog10(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0) return error1("argument out of range", x);
+    return boxfloat(LOG10(d));
+}
+
+LispObject Lsin(LispObject lits, LispObject x)
+{   return boxfloat(SIN(floatval(x)));
+}
+
+LispObject Lcos(LispObject lits, LispObject x)
+{   return boxfloat(COS(floatval(x)));
+}
+
+LispObject Ltan(LispObject lits, LispObject x)
+{   return boxfloat(TAN(floatval(x)));
+}
+
+LispObject Lsec(LispObject lits, LispObject x)
+{   return boxfloat(SEC(floatval(x)));
+}
+
+LispObject Lcsc(LispObject lits, LispObject x)
+{   return boxfloat(CSC(floatval(x)));
+}
+
+LispObject Lcot(LispObject lits, LispObject x)
+{   return boxfloat(COT(floatval(x)));
+}
+
+LispObject Lsind(LispObject lits, LispObject x)
+{   return boxfloat(SIND(floatval(x)));
+}
+
+LispObject Lcosd(LispObject lits, LispObject x)
+{   return boxfloat(COSD(floatval(x)));
+}
+
+LispObject Ltand(LispObject lits, LispObject x)
+{   return boxfloat(TAND(floatval(x)));
+}
+
+LispObject Lsecd(LispObject lits, LispObject x)
+{   return boxfloat(SECD(floatval(x)));
+}
+
+LispObject Lcscd(LispObject lits, LispObject x)
+{   return boxfloat(CSCD(floatval(x)));
+}
+
+LispObject Lcotd(LispObject lits, LispObject x)
+{   return boxfloat(COTD(floatval(x)));
+}
+
+LispObject Lsinh(LispObject lits, LispObject x)
+{   return boxfloat(SINH(floatval(x)));
+}
+
+LispObject Lcosh(LispObject lits, LispObject x)
+{   return boxfloat(COSH(floatval(x)));
+}
+
+LispObject Ltanh(LispObject lits, LispObject x)
+{   return boxfloat(TANH(floatval(x)));
+}
+
+LispObject Lsech(LispObject lits, LispObject x)
+{   return boxfloat(SECH(floatval(x)));
+}
+
+LispObject Lcsch(LispObject lits, LispObject x)
+{   return boxfloat(CSCH(floatval(x)));
+}
+
+LispObject Lcoth(LispObject lits, LispObject x)
+{   return boxfloat(COTH(floatval(x)));
+}
+
+LispObject Lasin(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ASIN(d));
+}
+
+LispObject Lacos(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOS(d));
 }
 
 LispObject Latan(LispObject lits, LispObject x)
-{
-    return boxfloat(atan(floatval(x)));
+{   double d = floatval(x);
+    return boxfloat(ATAN(d));
+}
+
+LispObject Lasec(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ASEC(d));
+}
+
+LispObject Lacsc(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACSC(d));
+}
+
+LispObject Lacot(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ACOT(d));
+}
+
+LispObject Lasind(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ASIND(d));
+}
+
+LispObject Lacosd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOSD(d));
+}
+
+LispObject Latand(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ATAND(d));
+}
+
+LispObject Lasecd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ASECD(d));
+}
+
+LispObject Lacscd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACSCD(d));
+}
+
+LispObject Lacotd(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ACOTD(d));
+}
+
+LispObject Lasinh(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ASINH(d));
+}
+
+LispObject Lacosh(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOSH(d));
+}
+
+LispObject Latanh(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < -1.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ATANH(d));
+}
+
+LispObject Lasech(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d < 0.0 || d > 1.0) return error1("argument out of range", x);
+    return boxfloat(ASECH(d));
+}
+
+LispObject Lacsch(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    return boxfloat(ACSCH(d));
+}
+
+LispObject Lacoth(LispObject lits, LispObject x)
+{   double d = floatval(x);
+    if (d > -1.0 && d < 1.0) return error1("argument out of range", x);
+    return boxfloat(ACOTH(d));
+}
+
+LispObject Latan_2(LispObject lits, LispObject x, LispObject y)
+{   double fx = floatval(x), fy=floatval(y), r;
+#ifdef CRLIBM
+// This implementation will breach the "correctly rounded" ideal at the very
+// least because the division of y by x can round the input to the ATAN
+// function.
+    r = ATAN(fy/fx);
+    if (fx <= 0.0)
+    {   if (fy >= 0.0) r += _pi;
+        else r -= _pi;
+    }
+#else
+    r = atan2(fx, fy);
+#endif
+    return boxfloat(r);
 }
 
 LispObject Lnull(LispObject lits, LispObject x)
@@ -4178,14 +4718,18 @@ LispObject Lboundp(LispObject lits, LispObject x)
 }
 
 LispObject Lgensym_0(LispObject lits)
-{   return allocatesymbol(nil);
+{   LispObject r = allocatesymbol(nil);
+    qflags(r) |= flagGENSYM;
+    return r;
 }
 
 // I want to have gensyms where I can control their name at least a bit,
 // but do not have that implemented yet...
 
 LispObject Lgensym_1(LispObject lits, LispObject a1)
-{   return allocatesymbol(nil);
+{   LispObject r = allocatesymbol(nil);
+    qflags(r) |= flagGENSYM;
+    return r;
 }
 
 LispObject Lcharcode (LispObject lits, LispObject x)
@@ -4224,7 +4768,34 @@ LispObject Ldate(LispObject lits)
     today1[7] = today[22];
     today1[8] = today[23];
     today1[9] = 0;             // Now as in 03-Apr-09
-    return makestring(today1, 10);
+    return makestring(today1, 9);
+}
+
+LispObject Ldate_and_time_0(LispObject lits)
+{   time_t t = time(NULL);
+    char today[32];
+    strcpy(today, ctime(&t));  // e.g. "Sun Sep 16 01:03:52 1973\n"
+    today[24] = 0;             // loses final '\n'
+    return makestring(today, 24);
+}
+
+LispObject Ldate_and_time_1(LispObject lits, LispObject a1)
+{   time_t t = time(NULL);
+    char today[32], today1[32];
+    strcpy(today, ctime(&t));  // e.g. "Sun Sep 16 01:03:52 1973\n"
+                               //       012345678901234567890123
+    today[24] = 0;             // loses final '\n'
+    today1[0] = today[8]==' ' ? '0' : today[8];
+    today1[1] = today[9];
+    today1[2] = '-';
+    today1[3] = today[4];
+    today1[4] = today[5];
+    today1[5] = today[6];
+    today1[6] = '-';
+    today1[7] = today[22];
+    today1[8] = today[23];
+    today1[9] = 0;             // Now as in 03-Apr-09
+    return makestring(today1, 9);
 }
 
 LispObject Llist2string(LispObject lits, LispObject a)
@@ -4352,8 +4923,8 @@ LispObject Lfluid(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symglobal);
-        Lput(lits, v, symfluid, lisptrue);
+        qflags(v) &= ~flagGLOBAL;
+        qflags(v) |= flagFLUID;
         if (qvalue(v) == undefined) qvalue(v) = nil;
     }
     return nil;
@@ -4364,8 +4935,8 @@ LispObject Lglobal(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symfluid);
-        Lput(lits, v, symglobal, lisptrue);
+        qflags(v) &= ~flagFLUID;
+        qflags(v) |= flagGLOBAL;
         if (qvalue(v) == undefined) qvalue(v) = nil;
     }
     return nil;
@@ -4376,7 +4947,7 @@ LispObject Lunfluid(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symfluid);
+        qflags(v) &= ~flagFLUID;
     }
     return nil;
 }
@@ -4386,9 +4957,24 @@ LispObject Lunglobal(LispObject lits, LispObject x)
     {   LispObject v = qcar(x);
         x = qcdr(x);
         if (!isSYMBOL(v)) continue;
-        Lremprop(lits, v, symglobal);
+        qflags(v) &= ~flagGLOBAL;
     }
     return nil;
+}
+
+LispObject Lfluidp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagFLUID)!=0) return lisptrue;
+    else return nil;
+}
+
+LispObject Lglobalp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagGLOBAL)!=0) return lisptrue;
+    else return nil;
+}
+
+LispObject Lgensymp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagGENSYM)!=0) return lisptrue;
+    else return nil;
 }
 
 LispObject Lmkvect(LispObject lits, LispObject x)
@@ -5616,15 +6202,49 @@ static LispObject Nabs(LispObject a)
 {   return number_dispatcher::unary<LispObject,Abser>("abs", a);
 }
 
+// ====== evenp ======
+
+class Evenper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Evenp::op(a);
+    }
+    static inline bool op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Evenp::op(a);
+    }
+};
+
+static bool Bevenp(LispObject a)
+{   return number_dispatcher::iunary<bool,Evenper>("evenp", a);
+}
+
+// ====== oddp ======
+
+class Oddper
+{
+public:
+    static inline bool op(number_dispatcher::I t1, int64_t a)
+    {   return arith::Oddp::op(a);
+    }
+    static inline bool op(number_dispatcher::B t1, uint64_t *a)
+    {   return arith::Oddp::op(a);
+    }
+};
+
+static bool Boddp(LispObject a)
+{   return number_dispatcher::iunary<bool,Oddper>("oddp", a);
+}
+
 // ====== msd ======
 
 class Msder
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    static inline int64_t op(number_dispatcher::I t1, int64_t a)
     {   return arith::Integer_length::op(a);
     }
-    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    static inline int64_t op(number_dispatcher::B t1, uint64_t *a)
     {   return arith::Integer_length::op(a);
     }
 };
@@ -5638,10 +6258,10 @@ static LispObject Nmsd(LispObject a)
 class Lsder
 {
 public:
-    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    static inline int64_t op(number_dispatcher::I t1, int64_t a)
     {   return arith::Low_bit::op(a);
     }
-    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    static inline int64_t op(number_dispatcher::B t1, uint64_t *a)
     {   return arith::Low_bit::op(a);
     }
 };
@@ -5766,6 +6386,14 @@ LispObject Lminusp(LispObject lits, LispObject x)
         (isBIGNUM(x) &&
          arith::Minusp::op(arith::vector_of_handle(x)))) return lisptrue;
     else return nil;
+}
+
+LispObject Levenp(LispObject lits, LispObject x)
+{   return Bevenp(x) ? lisptrue : nil;
+}
+
+LispObject Loddp(LispObject lits, LispObject x)
+{   return Boddp(x) ? lisptrue : nil;
 }
 
 LispObject Lmsd(LispObject lits, LispObject x)
@@ -6337,47 +6965,56 @@ LispObject Lnreverse(LispObject lits, LispObject x)
 
 LispObject Lexplode(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -1;
     work1 = nil;
     prin(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
 LispObject Lexplodec(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -1;
     work1 = nil;
     princ(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
 LispObject Lexploden(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -3;
     work1 = nil;
     prin(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
 LispObject Lexplodecn(LispObject lits, LispObject x)
 {   int f = lispout;
+    int savepos = linepos;
     lispout = -3;
     work1 = nil;
     princ(x);
     lispout = f;
+    linepos = savepos;
     return nreverse(work1);
 }
 
+
 LispObject Lreadch(LispObject lits)
-{   char ch[4];
-    if (curchar == EOF) return eofsym;
-    ch[0] = qvalue(symlower) != nil ? tolower(curchar) :
-            qvalue(symraise) != nil ? toupper(curchar) : curchar;
+{   int c = rdch();
+    if (c == EOF) return eofsym;
+    char ch[4];
+    ch[0] = qvalue(symlower) != nil ? tolower(c) :
+            qvalue(symraise) != nil ? toupper(c) : c;
     ch[1] = 0;
-    curchar = rdch();
     return lookup(ch, 1, 1);
 }
 
@@ -6738,6 +7375,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 
 #define SETUP0                                                  \
     SETUP_TABLE_SELECT("date",              Ldate),             \
+    SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_0), \
     SETUP_TABLE_SELECT("list",              Llist_0),           \
     SETUP_TABLE_SELECT("iplus",             Lplus_0),           \
     SETUP_TABLE_SELECT("itimes",            Ltimes_0),          \
@@ -6774,6 +7412,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 #define SETUP0a
 
 #define SETUP1                                                  \
+    SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_1),  \
     SETUP_TABLE_SELECT("list",              Llist_1),           \
     SETUP_TABLE_SELECT("list*",             Lliststar_1),       \
     SETUP_TABLE_SELECT("iplus",             Lplus_1),           \
@@ -6781,6 +7420,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ilogand",           Llogand_1),         \
     SETUP_TABLE_SELECT("ilogor",            Llogor_1),          \
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_1),         \
+    SETUP_TABLE_SELECT("evenp",             Levenp),            \
+    SETUP_TABLE_SELECT("oddp",              Loddp),             \
     SETUP_TABLE_SELECT("abs",               Labs_1),            \
     SETUP_TABLE_SELECT("plus",              Lplus_1),           \
     SETUP_TABLE_SELECT("times",             Ltimes_1),          \
@@ -6790,6 +7431,12 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("lor",               Llogor_1),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_1),         \
     SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
+    SETUP_TABLE_SELECT("sin",               Lsin),              \
+    SETUP_TABLE_SELECT("cos",               Lcos),              \
+    SETUP_TABLE_SELECT("exp",               Lexp),              \
+    SETUP_TABLE_SELECT("log",               Llog),              \
+    SETUP_TABLE_SELECT("log2",              Llog2),             \
+    SETUP_TABLE_SELECT("log10",             Llog10),            \
     SETUP_TABLE_SELECT("atan",              Latan),             \
     SETUP_TABLE_SELECT("atom",              Latom),             \
     SETUP_TABLE_SELECT("pairp",             Lpairp),            \
@@ -6831,11 +7478,9 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("close",             Lclose),            \
     SETUP_TABLE_SELECT("code-char",         Lcodechar),         \
     SETUP_TABLE_SELECT("compress",          Lcompress),         \
-    SETUP_TABLE_SELECT("cos",               Lcos),              \
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
     SETUP_TABLE_SELECT("eval",              Leval),             \
-    SETUP_TABLE_SELECT("exp",               Lexp),              \
     SETUP_TABLE_SELECT("explode",           Lexplode),          \
     SETUP_TABLE_SELECT("explode2",          Lexplodec),         \
     SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
@@ -6845,12 +7490,14 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
     SETUP_TABLE_SELECT("fluid",             Lfluid),            \
+    SETUP_TABLE_SELECT("fluidp",            Lfluidp),           \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
     SETUP_TABLE_SELECT("fp-subnorm",        Lfp_subnorm),       \
     SETUP_TABLE_SELECT("fp-signbit",        Lfp_signbit),       \
     SETUP_TABLE_SELECT("global",            Lglobal),           \
+    SETUP_TABLE_SELECT("globalp",           Lglobalp),          \
     SETUP_TABLE_SELECT("iadd1",             Ladd1),             \
     SETUP_TABLE_SELECT("iceiling",          Lceiling),          \
     SETUP_TABLE_SELECT("ifix",              Lfix),              \
@@ -6883,12 +7530,12 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("floor",             Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
+    SETUP_TABLE_SELECT("gensymp",           Lgensymp),          \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("linelength",        Llinelength),       \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
-    SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
     SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
     SETUP_TABLE_SELECT("not",               Lnull),             \
@@ -6906,6 +7553,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("princhex",          Lprinchex),         \
     SETUP_TABLE_SELECT("printhex",          Lprinthex),         \
     SETUP_TABLE_SELECT("printchex",         Lprintchex),        \
+    SETUP_TABLE_SELECT("set-print-precision",Lprint_precision), \
+    SETUP_TABLE_SELECT("setprintprecision", Lprint_precision),  \
     SETUP_TABLE_SELECT("rdf",               Lrdf),              \
     SETUP_TABLE_SELECT("rds",               Lrds),              \
     SETUP_TABLE_SELECT("reclaim",           Lreclaim_1),        \
@@ -6913,8 +7562,46 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_1),   \
     SETUP_TABLE_SELECT("return",            Lreturn_1),         \
     SETUP_TABLE_SELECT("setpchar",          Lsetpchar),         \
-    SETUP_TABLE_SELECT("sin",               Lsin),              \
     SETUP_TABLE_SELECT("sqrt",              Lsqrt),             \
+    SETUP_TABLE_SELECT("exp",               Lexp),              \
+    SETUP_TABLE_SELECT("log",               Llog),              \
+/* Now a horribly large number of elementary functions */       \
+    SETUP_TABLE_SELECT("sin",               Lsin),              \
+    SETUP_TABLE_SELECT("cos",               Lcos),              \
+    SETUP_TABLE_SELECT("sec",               Lsec),              \
+    SETUP_TABLE_SELECT("csc",               Lcsc),              \
+    SETUP_TABLE_SELECT("tan",               Ltan),              \
+    SETUP_TABLE_SELECT("cot",               Lcot),              \
+    SETUP_TABLE_SELECT("sind",              Lsind),             \
+    SETUP_TABLE_SELECT("cosd",              Lcosd),             \
+    SETUP_TABLE_SELECT("secd",              Lsecd),             \
+    SETUP_TABLE_SELECT("cscd",              Lcscd),             \
+    SETUP_TABLE_SELECT("tand",              Ltand),             \
+    SETUP_TABLE_SELECT("cotd",              Lcotd),             \
+    SETUP_TABLE_SELECT("sinh",              Lsinh),             \
+    SETUP_TABLE_SELECT("cosh",              Lcosh),             \
+    SETUP_TABLE_SELECT("sech",              Lsech),             \
+    SETUP_TABLE_SELECT("csch",              Lcsch),             \
+    SETUP_TABLE_SELECT("tanh",              Ltanh),             \
+    SETUP_TABLE_SELECT("coth",              Lcoth),             \
+    SETUP_TABLE_SELECT("asin",              Lasin),             \
+    SETUP_TABLE_SELECT("acos",              Lacos),             \
+    SETUP_TABLE_SELECT("asec",              Lasec),             \
+    SETUP_TABLE_SELECT("acsc",              Lacsc),             \
+    SETUP_TABLE_SELECT("atan",              Latan),             \
+    SETUP_TABLE_SELECT("acot",              Lacot),             \
+    SETUP_TABLE_SELECT("asind",             Lasind),            \
+    SETUP_TABLE_SELECT("acosd",             Lacosd),            \
+    SETUP_TABLE_SELECT("asecd",             Lasecd),            \
+    SETUP_TABLE_SELECT("acscd",             Lacscd),            \
+    SETUP_TABLE_SELECT("atand",             Latand),            \
+    SETUP_TABLE_SELECT("acotd",             Lacotd),            \
+    SETUP_TABLE_SELECT("asinh",             Lasinh),            \
+    SETUP_TABLE_SELECT("acosh",             Lacosh),            \
+    SETUP_TABLE_SELECT("asech",             Lasech),            \
+    SETUP_TABLE_SELECT("acsch",             Lacsch),            \
+    SETUP_TABLE_SELECT("atanh",             Latanh),            \
+    SETUP_TABLE_SELECT("acoth",             Lacoth),            \
     SETUP_TABLE_SELECT("stop",              Lstop_1),           \
     SETUP_TABLE_SELECT("stringp",           Lstringp),          \
     SETUP_TABLE_SELECT("idp",               Lsymbolp),          \
@@ -6992,9 +7679,12 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("quotient",          Lquotient),         \
     SETUP_TABLE_SELECT("remainder",         Lremainder),        \
     SETUP_TABLE_SELECT("gcdn",              Lgcdn),             \
+    SETUP_TABLE_SELECT("gcdn1",             Lgcdn),             \
     SETUP_TABLE_SELECT("lcmn",              Llcmn),             \
     SETUP_TABLE_SELECT("rshift",            Lrightshift),       \
     SETUP_TABLE_SELECT("rightshift",        Lrightshift),       \
+    SETUP_TABLE_SELECT("atan",              Latan_2),           \
+    SETUP_TABLE_SELECT("atan2",             Latan_2),           \
     SETUP_TABLE_SELECT("flagp",             Lget),              \
     SETUP_TABLE_SELECT("get",               Lget),              \
     SETUP_TABLE_SELECT("gethash",           Lgethash),          \
@@ -7244,19 +7934,20 @@ void setup()
     lisptrue = lookup("t", 1, 3);
     qflags(lisptrue) |= flagGLOBAL;
     qvalue(lisptrue) = lisptrue;
-    symfluid = lookup("fluid", 5, 3);
-    symglobal = lookup("global", 6, 3);
-    Lput(nil, nil, symglobal, lisptrue);
-    Lput(nil, lisptrue, symglobal, lisptrue);
-    Lput(nil, undefined, symglobal, lisptrue);
+//    symfluid = lookup("fluid", 5, 3);
+//    symglobal = lookup("global", 6, 3);
+//    Lput(nil, nil, symglobal, lisptrue);
+//    Lput(nil, lisptrue, symglobal, lisptrue);
+//    Lput(nil, undefined, symglobal, lisptrue);
+
     qvalue(echo = lookup("*echo", 5, 3)) = nil;
 // interactive ? nil : lisptrue;
     qflags(echo) |= flagFLUID;
-    Lput(nil, echo, symfluid, lisptrue);
+//    Lput(nil, echo, symfluid, lisptrue);
     {   LispObject nn;
         qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
         qflags(nn) |= flagFLUID;
-        Lput(nil, nn, symfluid, lisptrue);
+//        Lput(nil, nn, symfluid, lisptrue);
     }
     qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
@@ -7264,14 +7955,14 @@ void setup()
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
     qflags(lispsystem) |= flagGLOBAL;
-    Lput(nil, lispsystem, symglobal, lisptrue);
+//    Lput(nil, lispsystem, symglobal, lisptrue);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
     qflags(eofsym) |= flagGLOBAL;
-    Lput(nil, eofsym, symglobal, lisptrue);
+//    Lput(nil, eofsym, symglobal, lisptrue);
     qvalue(eofsym) = eofsym;
     symlambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
@@ -7284,13 +7975,13 @@ void setup()
     pipe = lookup("pipe", 4, 3);
     qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
     qflags(dfprint) |= flagFLUID;
-    Lput(nil, dfprint, symfluid, lisptrue);
+//    Lput(nil, dfprint, symfluid, lisptrue);
     qvalue(symraise = lookup("*raise", 6, 3)) = nil;
     qvalue(symlower = lookup("*lower", 6, 3)) = lisptrue;
     qflags(symraise) |= flagFLUID;
     qflags(symlower) |= flagFLUID;
-    Lput(nil, symraise, symfluid, lisptrue);
-    Lput(nil, symlower, symfluid, lisptrue);
+//    Lput(nil, symraise, symfluid, lisptrue);
+//    Lput(nil, symlower, symfluid, lisptrue);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
@@ -7485,6 +8176,7 @@ int warm_start_1(gzFile f, int *errcode)
     char (*imagesetup_names)[MAX_NAMESIZE];
     void **imagesetup_defs;
     uintptr_t fr1, lim1, total_size, remaining_size;
+    print_precision = read32(f);
 // I have the table of names of entrypoints that are defined by
 // the kernel. Note that the table as present in the saved image may not
 // be the same size as the one in the code I am executing, so I can not
@@ -7987,6 +8679,7 @@ static inline int write_image_1(gzFile f, int *errcode)
     }
 // 16 bytes whose purpose at present escapes me.
     if (gzwrite(f, "0123456789abcdef", 16) != 16) return 1; // junk at present
+    write32(f, print_precision);
 // Next I want to dump the table of entrypoints to functions that are
 // built into the kernel. First I write an integer that indicates how
 // many there are, then the table of their names and then the associated
@@ -8141,7 +8834,6 @@ void setup_prompt() {
     if (stdin_tty) {
         el_struct = el_init("vsl", stdin, stdout, stderr);
         el_history = history_init();
-
         atexit(el_tidy);
         history(el_history, &el_history_event, H_SETSIZE, 1000);
         el_set(el_struct, EL_PROMPT, get_prompt);
@@ -8858,10 +9550,12 @@ int main(int argc, char *argv[])
         else if (qcar(work1) == lisptrue) coldstart = 0;
         else
         {   int save = lispout;
+            int savepos = linepos;
             lispout = -2;
             internalprint(work1);
             wrch(0);
             lispout = save;
+            linepos = savepos;
             coldstart = 0;
         }
     }

@@ -23,6 +23,14 @@ LIBS=-lm -lz -ledit -lncurses -ltermcap
 endif
 endif
 
+# I will expact that if crlibm is to be used that its header is in
+# /usr/local/include
+
+ifneq (,$(wildcard /usr/local/include/crlibm.h))
+CFLAGS += -I/usr/local/include -DCRLIBM=1
+LIBS += -L/usr/local/lib -lcrlibm
+endif
+
 all:	vsl vsl.img
 
 # This first is the VSL Lisp system more or less in its original form.
@@ -125,6 +133,20 @@ debug_reduce:	vsl
 	cgdb --args ./vsl -z -ireduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce.lsp | tee reduce.log
+
+reduce-arith:	vsl-arith
+	mkdir -p reduce-arith.img.modules
+	rm -f reduce-arith.img.modules/* reduce-arith.img inline-defs.dat
+	time ./vsl-arith -z -ireduce-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce-arith.lsp | tee reduce-arith.log
+
+fastreduce-arith:	fastvsl-arith
+	mkdir -p fastreduce-arith.img.modules
+	rm -f fastreduce-arith.img.modules/* fastreduce-arith.img inline-defs.dat
+	time ./fastvsl-arith -z -ifastreduce-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce-arith.lsp | tee fastreduce-arith.log
 
 # rcore is a core of Reduce. Building it will be a LOT cheaper than
 # building the full copy of Reduce, so this will be good for testing an
