@@ -39,6 +39,7 @@ public:
     bool safe_memory = true;
 };
 
+// joins the thread on destruction
 class Thread_RAII {
 private:
     std::thread t;
@@ -79,7 +80,7 @@ void reset_segments() {
 
 // For now, just make sure all threads are joined at some point
 std::unordered_map<int, Thread_RAII> active_threads;
-static std::atomic_int tid(0);
+int tid = 0;
 
 void init_main_thread(LispObject *C_stackbase) {
     // VB: Need to handle main thread separately                                
@@ -107,6 +108,35 @@ int start_thread(std::function<void(void)> f) {
 
     active_threads.emplace(tid, std::thread(twork));
     return tid;
+}
+
+void join_thread(int tid) {
+    // auto& t = active_threads[tid];
+    // t.join();
+    active_threads.erase(tid);
+}
+
+// we are keeping mutexes in a map, just like thread
+// unfortunately there are no finalisers
+// maybe have function to clean up mutex?
+std::unordered_map<int, std::mutex> mutexes;
+int mutex_id = 0;
+
+std::mutex mutex_mutex;
+int mutex() {
+    std::lock_guard<std::mutex> lock(mutex_mutex);
+    mutex_id += 1;
+
+    mutexes[mutex_id]; // easiest way to construct mutex in place
+    return mutex_id;
+}
+
+void mutex_lock(int mid) {
+    mutexes[mid].lock();
+}
+
+void mutex_unlock(int mid) {
+    mutexes[mid].unlock();
 }
 
 static std::mutex alloc_symbol_mutex;
