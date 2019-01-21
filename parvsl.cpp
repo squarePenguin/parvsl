@@ -5724,6 +5724,28 @@ LispObject Lthread(LispObject lits, LispObject x) {
     return packfixnum(tid);
 }
 
+LispObject Ljoin_thread(LispObject lits, LispObject x) {
+    int tid = qfixnum(x);
+    par::join_thread(tid);
+    return nil;
+}
+
+LispObject Lmutex(LispObject _data) {
+    return packfixnum(par::mutex());
+}
+
+LispObject Lmutex_lock(LispObject lits, LispObject x) {
+    int id = qfixnum(x);
+    par::mutex_lock(id);
+    return nil;
+}
+
+LispObject Lmutex_unlock(LispObject lits, LispObject x) {
+    int id = qfixnum(x);
+    par::mutex_unlock(id);
+    return nil;
+}
+
 #define SETUPSPEC                                               \
     SETUP_TABLE_SELECT("quote",             Lquote),            \
     SETUP_TABLE_SELECT("cond",              Lcond),             \
@@ -5751,6 +5773,7 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
     SETUP_TABLE_SELECT("get-lisp-directory",Lget_lisp_directory), \
+    SETUP_TABLE_SELECT("mutex",             Lmutex),            \
     SETUP_TABLE_SELECT("oblist",            Loblist),           \
     SETUP_TABLE_SELECT("posn",              Lposn),             \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_0),       \
@@ -5819,18 +5842,21 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("iminusp",           Lminusp),           \
     SETUP_TABLE_SELECT("inumberp",          Lnumberp),          \
     SETUP_TABLE_SELECT("isub1",             Lsub1),             \
+    SETUP_TABLE_SELECT("jointhread",        Ljoin_thread),      \
     SETUP_TABLE_SELECT("floatp",            Lfloatp),           \
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("global",            Lglobal),           \
-    SETUP_TABLE_SELECT("globalp",           Lglobalp),           \
+    SETUP_TABLE_SELECT("globalp",           Lglobalp),          \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
     SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
     SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
+    SETUP_TABLE_SELECT("mutexlock",         Lmutex_lock),       \
+    SETUP_TABLE_SELECT("mutexunlock",       Lmutex_unlock),     \
     SETUP_TABLE_SELECT("null",              Lnull),             \
     SETUP_TABLE_SELECT("onep",              Lonep),             \
     SETUP_TABLE_SELECT("plist",             Lplist),            \
