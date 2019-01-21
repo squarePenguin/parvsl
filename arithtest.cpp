@@ -1,4 +1,4 @@
-// Big-number arithmetic.                                  A C Norman, 2019
+// Test code for Big-number arithmetic.                    A C Norman, 2019
 
 
 /**************************************************************************
@@ -32,17 +32,17 @@
 
 
 // My bignum package is a header-only library, so to use it you arrange
-// that the c++ compiler has a directive such as "-Idirectory_for_arith"
+// that the c++ compiler has a directive such as "-Idirectory_for_arithlib"
 // so that it can be found and you then just include the one file that
 // contains everything.
 
-#include "arith.hpp"
+#include "arithlib.hpp"
 
 #include <iostream>
 #include <iomanip>
 #include <ctime>
 
-using namespace arith;
+using namespace arithlib;
 
 // The tests come in sections, and these preprocessor symbols can be used
 // to select which sections get run.

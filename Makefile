@@ -51,12 +51,12 @@ fastvsl:	vsl.cpp
 # vsl-arith and fastvsl-arith will be VSL but with arbitrary precision
 # integer arithmetic implemented in C++.
 
-vsl-arith:	vsl-arith.cpp arith.hpp
+vsl-arith:	vsl-arith.cpp arithlib.hpp
 	g++ $(CFLAGS) -DBIGNUM=1 \
 		vsl-arith.cpp $(LIBS) -o vsl-arith \
 		2>&1 | tee vsl-arith.log
 
-fastvsl-arith:	vsl-arith.cpp arith.hpp
+fastvsl-arith:	vsl-arith.cpp arithlib.hpp
 	g++ $(FASTCFLAGS) -DBIGNUM=1 \
 		vsl-arith.cpp $(LIBS) -o fastvsl-arith \
 		2>&1 | tee fastvsl-arith.log
@@ -208,7 +208,7 @@ step2:	vsl
 
 # "arithtest" tests the C++ bignum arithmetic code.
 
-arithtest:	arithtest.cpp arith.hpp
+arithtest:	arithtest.cpp arithlib.hpp
 	g++ $(FASTCFLAGS) arithtest.cpp -o arithtest
 
 # Once Reduce is built it becomes possible to try its various test

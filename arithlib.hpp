@@ -1,5 +1,9 @@
 // Big-number arithmetic.                                  A C Norman, 2019
 
+// To use this, go "#include "arithlib.hpp".
+
+#ifndef __arithlib_hpp
+#define __arithlib_hpp 1
 
 // To do:
 //    [I believe that all the following are just optimizations]
@@ -65,7 +69,7 @@
 // information see http://www.jhauser.us/arithmetic/SoftFloat.html.
 //
 // I will check "#ifdef softfloat_h" to see if I will activate the 128-bit
-// floating pint option. That should check whether softfloat.h has been
+// floating point option. That should check whether softfloat.h has been
 // included before this file.
 
 //
@@ -270,7 +274,7 @@
 #include <ctime>
 #include <chrono>
 
-namespace arith
+namespace arithlib
 {
 
 // A scheme "my_assert" lets me write in my own code to print the
@@ -412,19 +416,19 @@ private:
     }
 };
 
-} // temporary end of namespace arith
+} // temporary end of namespace arithlib
 
 // I want a new io manipulator "std::bin" to select binary mode output.
 // This will be used much as std::oct, std::dec and std::hex.
 
 namespace std
 {   std::ostream &bin(std::ostream &os)
-    {   arith::radix::set_binary_output(os);
+    {   arithlib::radix::set_binary_output(os);
         return os;
     }
 }
 
-namespace arith
+namespace arithlib
 {
 
 // declare a number of functions that maight usefully be used elsewhere. If
@@ -6028,7 +6032,7 @@ intptr_t Remainder::op(int64_t a, int64_t b)
 
 static inline LispObject cons(LispObject a, LispObject b);
 
-namespace arith
+namespace arithlib
 {
 
 intptr_t Divide::op(uint64_t *a, uint64_t *b)
@@ -6127,43 +6131,207 @@ void remainder_for_gcd(uint64_t *a,  size_t &lena, uint64_t *b, size_t lenb)
     unscale_for_division(b, lenb, ss);
 }
 
+// gcd_reduction starts with a > b and |b| >=2. It must reset a and
+// b (and their lengths) to be smaller. The basic Euclidean algorithm
+// would go
+//    a = a % b;   // otherwise a = a-q*b; for some useful value of q
+//                 // and then if q was "too large" go a = |a|;
+//    swap(a, b);
+//    swapped = !swapped;
+// but a Lehmer-style scheme can go distinctly faster overall.
+
+void gcd_reduction(uint64_t *&a, size_t &lena,
+                   uint64_t *&b, size_t &lenb,
+                   bool &swapped)
+{
+// I will start by collecting high bits from a and b. If I collect the
+// contents of the top 3 words (ie 192 bits in all) then I will be able
+// to normalize that to get 128 bits to work with however the top bits
+// of a and b lie within the words.
+    uint64_t a0=a[lena-1], a1=a[lena-2], a2=(lena>2 ? a[lena-3] : 0);
+    int lza = nlz(a0);
+    uint64_t b0=b[lenb-1], b1=b[lenb-2], b2=(lenb>2 ? b[lenb-3] : 0);
+    int lzb = nlz(b0);
+// I will sort out how many more bits are involved in a than in b. If
+// this number is large I will invent a number q of the form q=q0*2^q1
+// with q0 using almost all of 64 bits and go "a = a - q*b;". This
+// will involve "virtually shifting" b left by q1 bits so what I actually
+// do is "a = a = q0*(b<<q1);". It will be obvious that the idea is that
+// q should be chosen so that the new value of a is as small as possible.
+// Given that q will be an estimate for the correct quotient and so may
+// occasionally be incorrect I will allow that it might in fact be
+// too large. In such a case the value of a computed will end up negative,
+// in which caseI do a final step that goes "a = -a;" to fix that. If I
+// manage to make q a round-to-nearest approximation to the quotient this
+// might happen a significant fraction of the time, ideally getting me
+// 1 extra bit in reduction in the size of a for each step.
+// If the estimated quotient is accurate enough the this will leave
+// a < b and by swapping a and b we have a new pair ready to continue from.
+    size_t diff = 64*(lena-lenb) + lzb - lza;
+// If however the length-difference between a and b is small a subtraction
+// "a = a - q0*(b<<0);" would often find q0 rather small and completing
+// the remainder sequence would take many steps. So in such cases I take
+// the top 128 bits of a and (128-diff) bits from b and start forming
+// a remainder sequence using 128-bit arithmetic until a term in it
+// fits in 64-bits. If the last 2 terms in that remainder sequence are
+// p and q (with p having >64 bits and q <= 64 bits) I can have
+//    p = |Ua - Vb|,    q = |-Wa + Xb|.
+// where U, V, W and X should all fit in 64-bits. That gives me a new
+// pair of values - expected to be up to 128-bits shorter - to continue
+// my remainder sequence. Because my stopping condition for the
+// approximate remainder sequence is not guaranteed perfect I can not
+// be certain that q < p, so I will need to compare the values and
+// swap as appropriate.
+//
+    if (true || diff >= 60)
+    {
+// This is the "a = a - q*b;" case. For initial development I will use
+// this all the time.
+// Collect the top 128 bits of both a and b.
+        b0 = b0<<lzb;
+        if (lzb!=0) b0 |= (b1>>(64-lzb));
+        b1 = b1<<lzb;
+        if (lzb!=0) b1 |= (b2>>(64-lzb));
+        a0 = a0<<lza;
+        if (lza!=0) a0 |= (a1>>(64-lza));
+        a1 = a1<<lza;
+        if (lza!=0) a1 |= (a2>>(64-lza));
+        a2 = a2<<lza;
+// When I have done this b0 will have its top bit set and I will
+// want to have a0<b0 because I will be dividing {a0,a1}/b0 and I want the
+// quotient to fit within a single 64-bit word.
+        if (a0 >= b0)
+        {   a2 = (a2>>1) | (a1<<63);
+            a1 = (a1>>1) | (a0<<63);
+            a0 = a0>>1;
+            lza = lza-1;
+            diff = diff-1;
+        }
+        uint64_t q, r;
+// I want to get as close an approximation to the full quotient as I can,
+// and a "correction" of the form {a0,a1} -= a0*b1/b0 should do the trick.
+        multiply64(a0, b1, q, r);
+        divide64(q, r, b0, q, r);
+        r = a1 - q;
+        if (r > a1) a0--;
+        a1 = r; 
+        divide64(a0, a1, b0, q, r);
+// Now I want to go "a = a - q*b*2^(diff-64);". The "-64" there is because
+// the quotient I computed in q is essentially to be viewed as a fraction.
+// So if diff<=64 I will need to do something special.
+        if (diff <= 64)
+        {   size_t bits_to_lose = 64 - diff;
+// I will shift q right, but doing so in such a way that I try to round to
+// nearest.
+            if (bits_to_lose != 0)
+            {   q = q >> (bits_to_lose-1);
+                q = (q >> 1) + (q & 1);
+            }
+// Now just do "a = a-q*b;". Well have I got that aligned properly???
+// WELL for now and so I can test things I will just fake things so that
+// the GCDN function will return the initial quotient it will use to
+// start the remainder sequence. 
+            a[0] = q; lena = 1;
+            b[0] = 0; lenb = 0;
+            return;
+        }
+        a[0] = 99999; lena = 1;
+        b[0] = 0; lenb = 0;
+        return;
+    }
+    else
+    {   my_abort("Lehmer treatment not coded yet\n");
+    }
+// Swap the two numbers so that once again a will be the larger.
+    truncate_positive(a, lena); //@@ should be done where a is set!
+    if (biggreaterp_unsigned(b, lenb, a, lena))
+    {   uint64_t *ax = a;
+        a = b;
+        b = ax;
+        size_t lenax = lena;
+        lena = lenb;
+        lenb = lenax;
+        swapped = !swapped;
+    }
+}
+
+// A bit of stray commentary here:
+// The simplest GCD scheme is direct Euclidean with the central loop
+// being
+//     q = a/b;
+//     {a, b} = {b, a - q*b};
+// There are those who observe that on average the quotient q will be
+// small, so they replace this with
+//     {a, b} = {a, a - b};
+//     swap a and b if necessary so that a>=b.
+// This takes more steps but each is a subtraction not a division/remainder
+// operation and so might sometimes be a win.
+// A "least-remainder" scheme is
+//     q = (a + b/2)/b;
+//     {a, b} = {b, |a - q*b|};
+// where the calculation of q just means round the quotient to nearest
+// rather than truncate it towards zero. At the cost of the extra absolute
+// value calculation this will reduce the number of steps. I believe that
+// using the Euclidean scheme each step shrinks the inputs by an average of
+// about 1.7 bits, while the least remainder scheme shrinks values by
+// 2.4 or 2.5 bits per step, ie it saves around 30% of the steps, albeit at
+// the cost of some absolute value calculations, which could go some way to
+// balance out the savings.
+// The quotient q will in general be small. In the case where it is very large
+// then calculating it becomes tedious. So in such cases it will make sense
+// to calculate a leading-digit approximation to it and reduce using that. A
+// step of that nature would be essentially what wa happening in long division
+// anyway, but now if the guessed quotient is not perfect all will be well
+// because subsequent reduction steps will correct for it automatically.
+// A Lehmer-style scheme will be useful when the firts several quotients in a
+// sequence will all be small - it consolidates big-number arithmetic over
+// what are logically multiple individual reduction steps.
+
+
 intptr_t Gcd::op(uint64_t *a, uint64_t *b)
 {   if (number_size(b) == 1) return Gcd::op(a, (int64_t)b[0]);
-// Here I am going to have an initial implementation that will be crude
-// and much less efficient than would be possible, just so I have something
-// that might work. Specifically I will implement a straightforward
-// Euclidean GCD in a way that may allocate (and release) memory for
-// intermediate results over and over again.
+// I will start by making copies of |a| and |b| that I can overwrite
+// during the calculation and use part of in my result.
     size_t lena = number_size(a), lenb = number_size(b); 
+    size_t olena = lena, olenb = lenb;
+    if (olena == olenb &&   // See comments later for an explanation of this!
+        negative(a[lena-1]) && negative(b[lenb-1]) &&
+        a[lena-1] == b[lenb-1]) olena++;
     push(a); push(b);
-    uint64_t *av = reserve(lena+1);
+    uint64_t *av = reserve(olena);
+    pop(b); pop(a);
     if (negative(a[lena-1])) internal_negate(a, lena, av);
     else internal_copy(a, lena, av);
-    pop(b); pop(a);
-    push(a); push(b); push(av);
-    uint64_t *bv = reserve(lenb+1);
+    push(av); push(b);
+    uint64_t *bv = reserve(olenb);
+    pop(b); pop(av);
     if (negative(b[lenb-1])) internal_negate(b, lenb, bv);
     else internal_copy(b, lenb, bv);
-    pop(av); pop(b); pop(a);
     if (biggreaterp_unsigned(bv, lenb, av, lena))
-    {   uint64_t *w = av;
-        av = bv;
-        bv = w;
+    {   a = bv;
+        b = av;
         size_t lenw = lena;
         lena = lenb;
         lenb = lenw;
     }
-// Now av >= bv.
-    size_t olena = lena+1, olenb = lenb+1;
+    else
+    {   a = av;
+        b = bv;
+    }
+// Now a >= b and both numbers are in freshly allocated memory. I will
+// remember the sizes of these two arrays, and because during the calculation
+// I will often swap them I will have a flaf that tells me if they are swapped
+// or in their original order.
     bool swapped = false;
 // Remove any leading zero digits, and if that reduces the situation to
-// a 1-word case follow it.
-    if (bv[lenb-1] == 0) lenb--;
-    uint64_t bb = bv[0];
+// a 1-word case handle that specially..
+    if (b[lenb-1] == 0) lenb--;
+    if (a[lena-1] == 0) lena--;
     if (lenb == 1)
-    {   uint64_t hi = 0, q;
+    {   uint64_t bb = b[0];
+        uint64_t hi = 0, q;
         for (size_t i=lena-1;;i--)
-        {   divide64(hi, av[i], bb, q, hi);
+        {   divide64(hi, a[i], bb, q, hi);
             if (i == 0) break;
         }
         while (hi != 0)
@@ -6171,117 +6339,63 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
             bb = hi;
             hi = cc;
         }
-        abandon(av);
-        abandon(bv);
+        abandon(a);
+        abandon(b);
         return unsigned_int_to_bignum(bb);
     }
-    if (av[lena-1] == 0) lena--;
 // Now at last a and b and genuine unsigned vectors without leading digits
-// and with a > b.
+// and with a > b. The next line is the key iteration in this whole procedure.
     while (lenb != 1)
-    {
-#ifdef LEHMER
-        if (lena==lenb || lena==lenb+1)
-        {
-// Here I know that a>=b and the lengths of a and b are about the same.
-// I want high bits from each of a and b.
-            uint64_t a0=av[lena-1], a1=av[lena-2], a2;
-            if (lena>2) a2 = av[lena-2];
-            uint64_t b0, b1, b2;
-            if (lenb == lena)
-            {   b0=bv[lenb-1]; b1=bv[lenb-2];
-                if (lenb>2) b2 = bv[lenb-2];
-            }
-            else
-            {   b0=0; b1=bv[lenb-1]; b2=bv[lenb-2];
-            }
-// I will collect the top 128 bits of a and corresponding bits from b.
-            int lz = nlz(a0);
-            if (nlz != 0)
-            {   a0 = (a0<<lz) | (a1>>(64-lz));
-                a1 = (a1<<lz) | (a2>>(64-lz));
-                b0 = (b0<<lz) | (b1>>(64-lz));
-                b1 = (b1<<lz) | (b2>>(64-lz));
-            }
-// Now it may be that b has been a LOT smaller than a and so I will
-// just want to do a simple remainder step after all. I test for this
-// by ensuring that q={a0,a1}/{b0,b1} will be at least somewhat less than
-// a full 64-bit value. The cut-off value "4" used here is a bit arbitrary!
-// But for random inputs q will usually be a rather small integer so the
-// case of a huge value should only really arise as a very first step in
-// any remainder sequence.
-            if (b0 > 4)
-            {   uint64_t v0hi = 0, v0lo = 1, v1hi = 0, v1lo = 0;
-                while (b0 != 0)
-                {   uint64_t q, r0, r1;
-                    quotrem128(a0, a1, b0, b1, q, r0, r1);
-                    std::cout << std::hex << "{" << a0 << "," << a1 << "} / {" << b0 << "," << b1 << "}" << " = " << std::dec << q << std::endl;
-                    std::cout << std::hex << "r={" << r0 << "," << r1 << "}" <<std::dec << std::endl;
-                    a0 = b0; a1 = b1;
-                    b0 = r0; b1 = r1;
-// {r1,r2} = {v0hi, v0lo}
-                    r0 = v0hi; r1 = v0lo;
-                    v0hi = v1hi; v0lo = v1lo;
-// {v0hi,v0lo} = {v1hi, v1lo}
-// (v1hi,v1lo} = {r1,r2} + q*{v0hi,v0lo}
-                    v1hi = r0;
-                    multiplyadd64(v0lo, q, r1, r0, v1lo);
-                    v1hi += r0 + q*v0hi;
-                    std::cout << std::hex << "v={" << v1hi << "," << v1lo << "}" << std::endl;
-                }
-// Now b0==0,and it MAY be that b1==0 too. Bit it might not be!
-                if (b1 != 0)
-                {   uint64_t q, r;
-                    std::cout << std::hex << "{" << a0 << "," << a1 << "} % {"
-                              << b0 << "," << b1 << "}" << std::endl;
-// Well the very next step can still have a0 non-zero.
-                    divide64(a0, a1, b1, q, r);
-                    std::cout << std::dec << "   q =" << q << std::endl;
-                    a1 = b1; b1 = r;
-// Now both a and b are single precision
-                    while (b1 != 0)
-                    {   q = a1/b1;
-                        std::cout << std::hex << a1 << " % " << b1 << std::dec << "  q=" << q << std::endl;
-                        a0 = a1; a1 = b1; b1 = a0 - q*a1;
-                    }
-                }
-                std::cout << std::dec << "Done" << std::endl;
-                std::exit(0);
-            }
-        }
-#endif
-        remainder_for_gcd(av, lena, bv, lenb);
-        uint64_t *ax = av;
-        av = bv;
-        bv = ax;
-        size_t lenax = lena;
-        lena = lenb;
-        lenb = lenax;
-        swapped = !swapped;
-    }
+        gcd_reduction(a, lena, b, lenb, swapped);
+// Once b ends up with length 1 I am almost finshed. With all the swapping
+// along the way I did not track olena and olenb, so I bring them to a
+// consistent state now.
     if (swapped)
     {   size_t olenax = olena;
         olena = olenb;
         olenb = olenax;
     }
+// One possibility is that b==0 and then a holds the GCD. There is a
+// pathological case where an input was -2^(64*n-1), which fits within n
+// words, and the GCD ends up as +2^(64*n-1) which needs an extra word.
+// If the other input had been bigger I can copy my result into it and
+// survive.. the very messy situation would be if both inputs were
+// -2^(64*n-1) so had I worked in the obvious way I would not have enough
+// space for the result. To allow for this I arrange that if both inputs
+// start off the same size (and ideally I would check if both had a value
+// of the form -2^(64*n-1), but doing that check is probably more expensive
+// that occasionally over-allocating memory!) I enlarge one of the inputs by
+// one word.
     if (bv[0] == 0)
-    {   if (negative(av[lena-1])) av[lena++] = 0;
-        abandon(bv);
+    {   if (negative(a[lena-1]))
+        {   if (lena == olena)
+            {   internal_copy(a, lena, b);
+                abandon(a);
+                a = b;
+                lena = lenb;
+            }
+            else abandon(b);
+            a[lena++] = 0;
+        }
+        else abandon(b);
         return confirm_size(av, olena, lena);
     }
-    bb = bv[0];
+// If b is not zero here then it represents a value up to 2^64-1, and I can
+// complete the GCD by doing a long-by-short remainder and then a short-num
+// GCD...
+    uint64_t bb = b[0];
+    abandon(b);
     uint64_t hi = 0, q;
     for (size_t i=lena-1;;i--)
-    {   divide64(hi, av[i], bb, q, hi);
+    {   divide64(hi, a[i], bb, q, hi);
         if (i == 0) break;
     }
+    abandon(a);
     while (hi != 0)
     {   uint64_t cc = bb % hi;
         bb = hi;
         hi = cc;
     }
-    abandon(av);
-    abandon(bv);
     return unsigned_int_to_bignum(bb);
 }
 
@@ -6372,7 +6486,7 @@ intptr_t Lcm::op(int64_t a, int64_t b)
     }
 }
 
-} // end of namespace arith
+} // end of namespace arithlib
 
 //=========================================================================
 //=========================================================================
@@ -6380,4 +6494,6 @@ intptr_t Lcm::op(int64_t a, int64_t b)
 //=========================================================================
 //=========================================================================
 
-// end of arith.hpp
+#endif // __arithlib_hpp
+
+// end of arithlib.hpp
