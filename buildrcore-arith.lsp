@@ -642,8 +642,11 @@ rds(xxx := open("$reduce/packages/support/build.red", 'input));
 (load!-package!-sources 'specfn2 'specfn)
 (load!-package!-sources 'specfaux 'specfn)
 (load!-package!-sources 'specbess 'specfn)
-(load!-package!-sources 'sfgamma 'specfn)
+% (load!-package!-sources 'sfgamma 'specfn)
 
+% desir set the *gcd flag on, and that leads to int.tst (at least)
+% getting bogged down.
+(setq !*gcd nil)
 
 % The next line is a HACK and is (I hope) temporary.
 (setq largest!-small!-modulus (expt 10 100))
