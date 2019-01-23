@@ -5746,6 +5746,29 @@ LispObject Lmutex_unlock(LispObject lits, LispObject x) {
     return nil;
 }
 
+LispObject Lcondvar(LispObject _data) {
+    return packfixnum(par::condvar());
+}
+
+LispObject Lcondvar_wait(LispObject lits, LispObject cv, LispObject m) {
+    int cvid = qfixnum(cv);
+    int mid = qfixnum(m);
+    par::condvar_wait(cvid, mid);
+    return nil;
+}
+
+LispObject Lcondvar_notify_one(LispObject lits, LispObject cv) {
+    int cvid = qfixnum(cv);
+    par::condvar_notify_one(cvid);
+    return nil;
+}
+
+LispObject Lcondvar_notify_all(LispObject lits, LispObject cv) {
+    int cvid = qfixnum(cv);
+    par::condvar_notify_all(cvid);
+    return nil;
+}
+
 LispObject Lhardware_threads(LispObject _data) {
     return packfixnum(std::thread::hardware_concurrency());
 }
@@ -5766,6 +5789,7 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("prog",              Lprog),
 
 #define SETUP0                                                  \
+    SETUP_TABLE_SELECT("condvar",           Lcondvar),          \
     SETUP_TABLE_SELECT("date",              Ldate),             \
     SETUP_TABLE_SELECT("list",              Llist_0),           \
     SETUP_TABLE_SELECT("iplus",             Lplus_0),           \
@@ -5777,7 +5801,7 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
     SETUP_TABLE_SELECT("get-lisp-directory",Lget_lisp_directory), \
-    SETUP_TABLE_SELECT("hardwarethreads",   Lhardware_threads), \  
+    SETUP_TABLE_SELECT("hardwarethreads",   Lhardware_threads), \
     SETUP_TABLE_SELECT("mutex",             Lmutex),            \
     SETUP_TABLE_SELECT("oblist",            Loblist),           \
     SETUP_TABLE_SELECT("posn",              Lposn),             \
@@ -5818,6 +5842,8 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("close",             Lclose),            \
     SETUP_TABLE_SELECT("code-char",         Lcodechar),         \
     SETUP_TABLE_SELECT("compress",          Lcompress),         \
+    SETUP_TABLE_SELECT("condvar_notify_all", Lcondvar_notify_all), \
+    SETUP_TABLE_SELECT("condvar_notify_one", Lcondvar_notify_one), \
     SETUP_TABLE_SELECT("cos",               Lcos),              \
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
@@ -5831,7 +5857,7 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
     SETUP_TABLE_SELECT("fluid",             Lfluid),            \
-    SETUP_TABLE_SELECT("fluidp",            Lfluidp),            \
+    SETUP_TABLE_SELECT("fluidp",            Lfluidp),           \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
@@ -5907,6 +5933,7 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_2),         \
     SETUP_TABLE_SELECT("apply",             Lapply),            \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
+    SETUP_TABLE_SELECT("condvar_wait",      Lcondvar_wait),     \
     SETUP_TABLE_SELECT("cons",              Lcons),             \
     SETUP_TABLE_SELECT("eq",                Leq),               \
     SETUP_TABLE_SELECT("equal",             Lequal),            \

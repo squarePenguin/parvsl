@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <functional>
 #include <vector>
@@ -137,6 +138,35 @@ void mutex_lock(int mid) {
 
 void mutex_unlock(int mid) {
     mutexes[mid].unlock();
+}
+
+std::unordered_map<int, std::condition_variable> condvars;
+int condvar_id = 0;
+
+std::mutex condvar_mutex;
+int condvar() {
+    std::lock_guard<std::mutex> lock(condvar_mutex);
+    condvar_id += 1;
+
+    condvars[condvar_id]; // easiest way to construct condvar in place
+    return condvar_id;
+}
+
+// mutex must be locked when calling this function
+void condvar_wait(int cvid, int mid) {
+    auto& m = mutexes[mid];
+    std::unique_lock<std::mutex> lock(m, std::adopt_lock);
+    auto& condvar = condvars[cvid];
+
+    condvar.wait(lock);
+}
+
+void condvar_notify_one(int cvid) {
+    condvars[cvid].notify_one();
+}
+
+void condvar_notify_all(int cvid) {
+    condvars[cvid].notify_all();
 }
 
 static std::mutex alloc_symbol_mutex;
