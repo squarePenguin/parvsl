@@ -61,39 +61,6 @@
 % Back to defining what are sometimes merely alternate
 % names for very basic operations.
 
-(de prog1 (a b)
-   a)
-
-(de reverse (x)
-   (prog (y)
-   loop
-      (cond ((atom x) (return y)))
-      (setq y (cons (car x) y))
-      (setq x (cdr x))
-      (go loop)))
-
-% "reverse" reverses a list, while "reversip" creates the
-% reversed version by overwriting the data that makes up its
-% input. This may be held to save a little space, but is
-% to be used with care.
-
-(de reversip2 (a b)
-   (prog (w)
-   loop
-      (cond ((atom a) (return b)))
-      (setq w (cdr a))
-      (rplacd a b)
-      (setq b a)
-      (setq a w)
-      (go loop)))
-
-(de reversip (x) (reversip2 x nil)) % Destructive reverse
-
-(de append (a b)                % Append a pair of lists.
-   (cond
-      ((atom a) b)
-      (t (cons (car a) (append (cdr a) b)))))
-
 (de last (l)                    % Last element of a (non-empty) list.
    (cond
       ((atom l) (error 1 "last on emtpy list"))
@@ -874,17 +841,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de getenv (x) nil)
 
-% Because I have onnly just migrated a version of filep into the kernel
-% I leave the Lisp-coded copy here for use when I have an old copy of vsl
-% in use. In a while I will just remove this!
-
-(cond
-  ((null (getd 'filep))
-   (de filep (x)
-      (let!* ((h (errorset (list 'open x ''input) nil nil)))
-         (if (atom h) nil
-             (progn (close (car h)) t))))))
-
 (de lengthc (x) (length (explodec x)))
 
 % widelengthc takes something and counts the number of characters (not bytes).
@@ -905,10 +861,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de gctime () 0)
 
-(cond
-  ((null (getd 'setpchar))
-   (de setpchar (u) nil)))
-
 (de threevectorp (x)
    (and (vectorp x) (equal (upbv x) 2)))
 
@@ -926,8 +878,7 @@ top (cond ((atom a) (return (reversip r))))
 (de window!-heading (x) (print x))
 
 (de make!-special (x)
-   (set x nil)
-   (flag (list x) 'fluid))
+   (fluid (list x)))
 
 (de compile!-all () nil)
 
@@ -959,16 +910,6 @@ top (cond ((atom a) (return (reversip r))))
        nil))
 
 (de tmpnam () "./temporary-file.tmp")
-
-% Reduce these days needs unwind-protect. I will not provide its
-% key function here, but will support the easy case where the
-% protected block does NOT fail...
-
-(dm unwind!-protect (u)
-  (list
-    (list 'lambda '(!*x!*)
-      (cons 'progn (append (cddr u) '(!*x!*))))
-    (cadr u)))
 
 (de smember (u v)
   (cond
@@ -1044,6 +985,6 @@ top (cond ((atom a) (return (reversip r))))
     acosh     atanh      asech      acsch      acoth)
     'lose)
 
-"End of vsl.lsp"
+"End of vsl-arith.lsp"
 
-% End of vsl.lsp        
+% End of vsl-arith.lsp
