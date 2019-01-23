@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <functional>
 #include <vector>
@@ -22,7 +23,7 @@ namespace par {
 class Thread_data {
 public:
     // CR VB: Should this be defined in terms of LispObject?
-    static constexpr int SEGMENT_SIZE = 65536; // 64KB per segment
+    static constexpr int SEGMENT_SIZE = 0x20000; // 128K 65536; // 64KB per segment
     // VB: use these as the segment we can write on.
     uintptr_t segment_fringe = -1;
     uintptr_t segment_limit = 0;
@@ -39,6 +40,7 @@ public:
     bool safe_memory = true;
 };
 
+// joins the thread on destruction
 class Thread_RAII {
 private:
     std::thread t;
@@ -79,7 +81,7 @@ void reset_segments() {
 
 // For now, just make sure all threads are joined at some point
 std::unordered_map<int, Thread_RAII> active_threads;
-static std::atomic_int tid(0);
+int tid = 0;
 
 void init_main_thread(LispObject *C_stackbase) {
     // VB: Need to handle main thread separately                                
@@ -107,6 +109,64 @@ int start_thread(std::function<void(void)> f) {
 
     active_threads.emplace(tid, std::thread(twork));
     return tid;
+}
+
+void join_thread(int tid) {
+    // auto& t = active_threads[tid];
+    // t.join();
+    active_threads.erase(tid);
+}
+
+// we are keeping mutexes in a map, just like thread
+// unfortunately there are no finalisers
+// maybe have function to clean up mutex?
+std::unordered_map<int, std::mutex> mutexes;
+int mutex_id = 0;
+
+std::mutex mutex_mutex;
+int mutex() {
+    std::lock_guard<std::mutex> lock(mutex_mutex);
+    mutex_id += 1;
+
+    mutexes[mutex_id]; // easiest way to construct mutex in place
+    return mutex_id;
+}
+
+void mutex_lock(int mid) {
+    mutexes[mid].lock();
+}
+
+void mutex_unlock(int mid) {
+    mutexes[mid].unlock();
+}
+
+std::unordered_map<int, std::condition_variable> condvars;
+int condvar_id = 0;
+
+std::mutex condvar_mutex;
+int condvar() {
+    std::lock_guard<std::mutex> lock(condvar_mutex);
+    condvar_id += 1;
+
+    condvars[condvar_id]; // easiest way to construct condvar in place
+    return condvar_id;
+}
+
+// mutex must be locked when calling this function
+void condvar_wait(int cvid, int mid) {
+    auto& m = mutexes[mid];
+    std::unique_lock<std::mutex> lock(m, std::adopt_lock);
+    auto& condvar = condvars[cvid];
+
+    condvar.wait(lock);
+}
+
+void condvar_notify_one(int cvid) {
+    condvars[cvid].notify_one();
+}
+
+void condvar_notify_all(int cvid) {
+    condvars[cvid].notify_all();
 }
 
 static std::mutex alloc_symbol_mutex;

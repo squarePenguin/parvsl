@@ -3253,7 +3253,7 @@ void fluid_symbol(LispObject s) {
         qflags(s) &= ~flagGLOBAL; // disable global
 
         par::symval(s) = val;
-    } 
+    }
 
     qflags(s) |= flagFLUID;
 
@@ -5724,6 +5724,55 @@ LispObject Lthread(LispObject lits, LispObject x) {
     return packfixnum(tid);
 }
 
+LispObject Ljoin_thread(LispObject lits, LispObject x) {
+    int tid = qfixnum(x);
+    par::join_thread(tid);
+    return nil;
+}
+
+LispObject Lmutex(LispObject _data) {
+    return packfixnum(par::mutex());
+}
+
+LispObject Lmutex_lock(LispObject lits, LispObject x) {
+    int id = qfixnum(x);
+    par::mutex_lock(id);
+    return nil;
+}
+
+LispObject Lmutex_unlock(LispObject lits, LispObject x) {
+    int id = qfixnum(x);
+    par::mutex_unlock(id);
+    return nil;
+}
+
+LispObject Lcondvar(LispObject _data) {
+    return packfixnum(par::condvar());
+}
+
+LispObject Lcondvar_wait(LispObject lits, LispObject cv, LispObject m) {
+    int cvid = qfixnum(cv);
+    int mid = qfixnum(m);
+    par::condvar_wait(cvid, mid);
+    return nil;
+}
+
+LispObject Lcondvar_notify_one(LispObject lits, LispObject cv) {
+    int cvid = qfixnum(cv);
+    par::condvar_notify_one(cvid);
+    return nil;
+}
+
+LispObject Lcondvar_notify_all(LispObject lits, LispObject cv) {
+    int cvid = qfixnum(cv);
+    par::condvar_notify_all(cvid);
+    return nil;
+}
+
+LispObject Lhardware_threads(LispObject _data) {
+    return packfixnum(std::thread::hardware_concurrency());
+}
+
 #define SETUPSPEC                                               \
     SETUP_TABLE_SELECT("quote",             Lquote),            \
     SETUP_TABLE_SELECT("cond",              Lcond),             \
@@ -5740,6 +5789,7 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("prog",              Lprog),
 
 #define SETUP0                                                  \
+    SETUP_TABLE_SELECT("condvar",           Lcondvar),          \
     SETUP_TABLE_SELECT("date",              Ldate),             \
     SETUP_TABLE_SELECT("list",              Llist_0),           \
     SETUP_TABLE_SELECT("iplus",             Lplus_0),           \
@@ -5751,6 +5801,8 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
     SETUP_TABLE_SELECT("get-lisp-directory",Lget_lisp_directory), \
+    SETUP_TABLE_SELECT("hardwarethreads",   Lhardware_threads), \
+    SETUP_TABLE_SELECT("mutex",             Lmutex),            \
     SETUP_TABLE_SELECT("oblist",            Loblist),           \
     SETUP_TABLE_SELECT("posn",              Lposn),             \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_0),       \
@@ -5790,6 +5842,8 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("close",             Lclose),            \
     SETUP_TABLE_SELECT("code-char",         Lcodechar),         \
     SETUP_TABLE_SELECT("compress",          Lcompress),         \
+    SETUP_TABLE_SELECT("condvar_notify_all", Lcondvar_notify_all), \
+    SETUP_TABLE_SELECT("condvar_notify_one", Lcondvar_notify_one), \
     SETUP_TABLE_SELECT("cos",               Lcos),              \
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
@@ -5803,7 +5857,7 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("float-denormalized-p", Lfp_subnorm),    \
     SETUP_TABLE_SELECT("float-infinity-p",  Lfp_infinite),      \
     SETUP_TABLE_SELECT("fluid",             Lfluid),            \
-    SETUP_TABLE_SELECT("fluidp",            Lfluidp),            \
+    SETUP_TABLE_SELECT("fluidp",            Lfluidp),           \
     SETUP_TABLE_SELECT("fp-infinite",       Lfp_infinite),      \
     SETUP_TABLE_SELECT("fp-nan",            Lfp_nan),           \
     SETUP_TABLE_SELECT("fp-finite",         Lfp_finite),        \
@@ -5819,18 +5873,21 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("iminusp",           Lminusp),           \
     SETUP_TABLE_SELECT("inumberp",          Lnumberp),          \
     SETUP_TABLE_SELECT("isub1",             Lsub1),             \
+    SETUP_TABLE_SELECT("jointhread",        Ljoin_thread),      \
     SETUP_TABLE_SELECT("floatp",            Lfloatp),           \
     SETUP_TABLE_SELECT("ifloor",            Lfloor),            \
     SETUP_TABLE_SELECT("gensym",            Lgensym_1),         \
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("global",            Lglobal),           \
-    SETUP_TABLE_SELECT("globalp",           Lglobalp),           \
+    SETUP_TABLE_SELECT("globalp",           Lglobalp),          \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
     SETUP_TABLE_SELECT("log",               Llog),              \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
     SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
+    SETUP_TABLE_SELECT("mutexlock",         Lmutex_lock),       \
+    SETUP_TABLE_SELECT("mutexunlock",       Lmutex_unlock),     \
     SETUP_TABLE_SELECT("null",              Lnull),             \
     SETUP_TABLE_SELECT("onep",              Lonep),             \
     SETUP_TABLE_SELECT("plist",             Lplist),            \
@@ -5876,6 +5933,7 @@ LispObject Lthread(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("ilogxor",           Llogxor_2),         \
     SETUP_TABLE_SELECT("apply",             Lapply),            \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
+    SETUP_TABLE_SELECT("condvar_wait",      Lcondvar_wait),     \
     SETUP_TABLE_SELECT("cons",              Lcons),             \
     SETUP_TABLE_SELECT("eq",                Leq),               \
     SETUP_TABLE_SELECT("equal",             Lequal),            \
@@ -6678,6 +6736,7 @@ int warm_start_1(gzFile f, int *errcode)
                     if (fr1+11*sizeof(LispObject) < lim1)
                         qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
                     fr1 += SYMSIZE*sizeof(LispObject);
+                    
 // Now if the symbol was split across two heap segments I need to relocate
 // the parts of it at the start of the next heap block. What a mess!
                     if (fr1 > lim1 )
@@ -6691,12 +6750,20 @@ int warm_start_1(gzFile f, int *errcode)
                         w = fr1 + tagSYMBOL;
                         if (fr1+sizeof(LispObject) >= newblock) {
                             qvalue(w) = relocate(qvalue(w));
-                            if ((qflags(w) & flagGLOBAL) == 0) {
+                            // during warm_start, all values are still stored globally
+                            // we first relocate them then copy to thread_local
+                            // TODO VB: separate function
+                            if (!is_global(w)) {
                                 // reallocate on thread_local storage
                                 int loc = par::allocate_symbol();
                                 LispObject val = qvalue(w);
                                 qvalue(w) = packfixnum(loc);
-                                par::symval(w) = val;
+                                if (is_fluid(w)) {
+                                    par::symval(w) = val;
+                                    par::fluid_globals[loc] = val;
+                                } else {
+                                    par::local_symbol(loc) = val;
+                                }
                             }
                         }
                         if (fr1+2*sizeof(LispObject) >= newblock)
@@ -7004,19 +7071,22 @@ void write_image(gzFile f)
             if (isSYMBOL(x) && !is_global(x)) {
                 // If it wasn't a global symbol, the value is thread_local;
                 int loc = qfixnum(qvalue(x));
-
                 if (is_fluid(x)) {
                     // VB: I'm basically assuming here that we only care about the global
                     // value of a fluid on preserve. This further assumes preserve is called
                     // only in the global scope.
                     qvalue(x) = par::fluid_globals[loc];
+
+                    // TODO: this is a hack. need to keep both values
+                    if (qvalue(x) == undefined) {
+                        qvalue(x) = par::local_symbol(loc);
+                    }
                 } else {
                     qvalue(x) = par::local_symbol(loc);
                 }
             }
         }
     }
-
     hexdump();
     switch (write_image_1(f, &errcode))
     {
