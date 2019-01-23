@@ -22,7 +22,7 @@ namespace par {
 class Thread_data {
 public:
     // CR VB: Should this be defined in terms of LispObject?
-    static constexpr int SEGMENT_SIZE = 65536; // 64KB per segment
+    static constexpr int SEGMENT_SIZE = 131072; // 128KB per segment
     // VB: use these as the segment we can write on.
     uintptr_t segment_fringe = -1;
     uintptr_t segment_limit = 0;

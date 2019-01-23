@@ -5746,6 +5746,10 @@ LispObject Lmutex_unlock(LispObject lits, LispObject x) {
     return nil;
 }
 
+LispObject Lhardware_threads(LispObject _data) {
+    return packfixnum(std::thread::hardware_concurrency());
+}
+
 #define SETUPSPEC                                               \
     SETUP_TABLE_SELECT("quote",             Lquote),            \
     SETUP_TABLE_SELECT("cond",              Lcond),             \
@@ -5773,6 +5777,7 @@ LispObject Lmutex_unlock(LispObject lits, LispObject x) {
     SETUP_TABLE_SELECT("error",             Lerror_0),          \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
     SETUP_TABLE_SELECT("get-lisp-directory",Lget_lisp_directory), \
+    SETUP_TABLE_SELECT("hardwarethreads",   Lhardware_threads), \  
     SETUP_TABLE_SELECT("mutex",             Lmutex),            \
     SETUP_TABLE_SELECT("oblist",            Loblist),           \
     SETUP_TABLE_SELECT("posn",              Lposn),             \
