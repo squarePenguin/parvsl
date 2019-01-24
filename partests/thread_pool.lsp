@@ -73,10 +73,4 @@
 (setq code '(let () (dotimes (i 100) (add1 i)) (print "done")))
 (de test_tp (n)
     (dotimes (i n) (tp_addjob tp code)))
-% (tp_addjob tp '(print "la"))
 
-% (setq myq (queue))
-% (q_push myq 1)
-% (q_push myq 2)
-% (q_pop myq)
-% (q_push myq 3)
