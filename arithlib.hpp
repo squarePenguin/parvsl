@@ -2255,13 +2255,16 @@ again2:
     r = (un21*base + un0 - q0*c) >> s;
 }
 
-inline void remainder128(uint64_t a0, unit64_t a1,
-                         uint64_t b0, unit64_t b1;
-                         uint64_t &q, uint64_t &r0, uint64_t &r1);
+inline void remainder128(uint64_t a0, uint64_t a1,
+                         uint64_t b0, uint64_t b1,
+                         uint64_t &q, uint64_t &r0, uint64_t &r1)
 {   my_assert(b0 > 4);
 // This is still to be re-worked!
-    q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
-    UINT128 rr = (uint64_t)(pack128(a0, a1) % pack128(b0, b1));
+    q = (uint64_t)((((unsigned __int128)a0)<<64 | a1) /
+                   (((unsigned __int128)b0)<<64 | b1));
+    unsigned __int128 rr =
+        (uint64_t)((((unsigned __int128)a0)<<64 | a1) %
+                   (((unsigned __int128)b0)<<64 | b1));
     r0 = (uint64_t)(rr >> 64);
     r1 = (uint64_t)rr;
 }
