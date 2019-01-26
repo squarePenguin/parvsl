@@ -7,7 +7,7 @@
 
 // To do:
 //    [I believe that all the following are just optimizations]
-//    Lehmer-style gcd implementation.
+//    Finish coding GCD and Lehmer-style optimization there.
 //    Karatsuba-style multiplication when numbers are big enough.
 //    review all fixnum and fixnum/bignum cases for optimisation.
 
@@ -50,7 +50,8 @@
 // This code is for use as a header-only library, so just "#include" it
 // to be able to use it. All the use of the word "inline" is so that if
 // you #include this from several source files there will not be trouble when
-// you link them together.
+// you link them together: you should still only end up with one copy of
+// each function in memory.
 //
 // This code uses 64-bit digits and a 2s complement representation for
 // negative numbers. This means it will work best on 64-bit platforms
@@ -68,11 +69,6 @@
 // absolute speed may be modest, but it is nicely portable. For more
 // information see http://www.jhauser.us/arithmetic/SoftFloat.html.
 //
-// I will check "#ifdef softfloat_h" to see if I will activate the 128-bit
-// floating point option. That should check whether softfloat.h has been
-// included before this file.
-
-//
 // I will provide two levels of access and abstraction. At the low level
 // a big number is represented as and array of uint64_t digits along with
 // a size_t value that indicates the number of digits in use. The most
@@ -85,7 +81,7 @@
 // set then an additional zero digit is used ahead of that, and equivalently
 // for negative values.
 //
-// vectors to represent numbers are allocated using a function reserve()
+// Vectors to represent numbers are allocated using a function reserve()
 // which takes an argument indicating how long the number might be. It will
 // often be necessary to reserve memory in a conservative manner, ie to
 // allocate more memory than will eventually prove to be needed.
@@ -93,8 +89,19 @@
 // passed to abandon() when it is no longer required, or there can be a
 // call to confirm_size() to establish the exact size that is to be retained.
 // A variant call confirm_size_x() is used when the vector whose size is being
-// confirmed is not the one that was most recently allocated. confirm_size()
-// returns a handle for the vector, not the vector itself.
+// confirmed is not the one that was most recently allocated: the intent
+// there was that under some schemes discarding or shortening the most
+// recently allocated item might be especially easy to implement well.
+// confirm_size() returns a handle for the vector, not the vector itself.
+// Depending on build options it is also possible that small integers will be
+// represented almost directly: such cases will be referred to as fixnums.
+// So for the benefit of higher levels of abstraction every number is stored
+// using a "handle", where the handle can be tested to see it is holds the
+// value of the number within itself as a fixnum or whether it is a pointer
+// to a vector of digits. While the code here does not absolutely mandate it,
+// the expectation is that all vectors will be allocated at addresses that are
+// a multiple of sizeof(uint64_t) and that means that some low bits in a
+// handle are available to tag fixnums.
 //
 // In addition to numbers I will generate strings (I have code to make a
 // string representation of a number, with hex, decimal, octal and binary
@@ -107,20 +114,43 @@
 //
 // A higher level packaging represents numbers using a class Bignum. This
 // has just one field which will hold a potentially encoded version of a
-// pointer to a vector that is the number. This vector will have a first
-// item that is a header word containing length information and then the
-// uint64_t values representing the numeric value. The representation of the
-// header and the encoding of the pointer will be done in one of several
-// ways, these being intended to provide models of the implementation intended
-// for different use cases.
-// In some cases (especially the NEW one) small integers are handled
-// specially to improve efficiency.
-// There are other support functions which will be described where they
-// are defined or used.
-
-
+// pointer to a vector that is the number (ie a handle). When the handle
+// identified a vector the first item in the vector will be a header word
+// containing length information. That is followed by the uint64_t digits
+// representing the numeric value. The representation of the header and the
+// encoding of handles can be configured in one of several ways, these being
+// intended to provide models of the implementation intended for different
+// use cases.
 //
-//These cases are included in this file using conditional compilation:
+// Overall the code has conditional compilation providing for 3 prototype
+// arrangements. These are MALLOC, NEW and LISP. It is envisaged that some
+// users of this code will need to modify it to allow it to interface with the
+// rest of their software, and these three schemes give at least sketches of
+// various possibilites. The short explanation is that MALLOC uses malloc()
+// and free() for memory management and does not use fixnums, so that all
+// numbers (however small) are stored as vectors. This is perhaps the simplest
+// scheme, if not the highest performance. NEW exploits many more C++ features.
+// Storage management uses "new" and "delete" at the lowest level, but the
+// code keeps its own lists of previously used memory blocks in a manner that
+// greatly reduces the call on C++ memory management work. This version stores
+// handles that refer to vectors as even numbers and ones that are fixnums
+// with their bottom bit set, so fixnums are 63 bits wide. The C++ class
+// Bignum and a range of operator overloads lead to this being a simple
+// version to use for casual C++ code, and it is the default version built.
+// LISP is the version that originally motivated me to implement this. It has
+// a subsidiary configuration option that allows for systems where garbage
+// collection is or is not conservative. This could be a good starting point
+// for a bignum system to be used as part of the run-time system for any
+// language, not just Lisp. However the interface code here is liable to need
+// detailed review and revision since it mediates between the data structures
+// used here and whatever is present in the Lisp (or whatever!) that will
+// use it. I initially developed and tested this using a Lisp called "vsl"
+// and intend to migrate it for use in "csl". Both of these use low-bit
+// tagging of data and the precise values for tag bits and their layout
+// within header words has to be adhered to here, as has the Lisp's ideas
+// about the way that header words are stored.
+//
+// Here is some more information about each scheme:
 //
 // MALLOC:
 //   A bignum with n digits is held in a vector of length n+1, and the
@@ -131,15 +161,16 @@
 //   the allocated space, and abandon() maps onto use of free(). This
 //   uses C rather than C++ memory management because it wants to use realloc
 //   which is not supported in the tidy C++ world. Performance of the code
-//   as a whold will be sensitive to the malloc/realloc/free implementation
+//   as a whole will be sensitive to the malloc/realloc/free implementation
 //   on the platform that is in use. To allow for a user who wished to
 //   customize allocation, all calls to the basic memory allocation primitives
 //   are made indirectly so that alternative equivalents can be plugged in.
 //   Strings and allocated using malloc() and returned as simple nul-terminated
 //   C strings. They must be released using free() after use.
+//
 // NEW:
 //   A bignum with n digits will be stored in a vector whose size is the
-//   next power of two strictly larger than n. As with the MALLOC case
+//   next power of 2 strictly larger than n. As with the MALLOC case
 //   the numeric data starts one word into this block and the initial word
 //   of the block contains a header of length information. Here the header
 //   is split into two 32-bit parts. One contains the length of the number
@@ -171,8 +202,14 @@
 //   as C style strings that must be disposed of using "delete". The use of
 //   C rather than C++ style strings because I hope that makes storage
 //   management interaction clearer.
-//   In this case DEBUG_OVERRUN can enable simple checks against memory block
-//   overflow.
+//   In this case there is an extra option DEBUG_OVERRUN which enables some
+//   simple checks for memory block overflow. reserve() always arranges that
+//   there will be a "spare" word just beyond the top used word in a vector,
+//   and it initializes this to a slightly unlikely value. When confirm_size
+//   or abandon() are used it can then verify that this guard word has not
+//   been corrupted. This may not be 100% foolproof but is nevertheless helps
+//   while developing or maintaining the library!
+//
 // LISP:
 //   The arrangements here are based on the arrangements I have in my VSL
 //   and CSL Lisp implementations. I still hope that between the above options
@@ -198,32 +235,118 @@
 //   To support that when a block that is not the most recently allocated one
 //   is shrunk or discarded a header word is placed in the released space
 //   leaving a valid but dummy Lisp item there.
+//   Those issue motivate the distinction between confirm_size and
+//   confirm_size_x. [Note that the implementation may not (yet) do all that
+//   I intended in that respect!]
 //   Usually calls to memory allocation primitives are made without any special
 //   concern for garbage collector safety of other pointers, and so in its
-//   current form this code insistes on running in a context where the garbage
+//   current form this code insists on running in a context where the garbage
 //   collector is conservative, so that for instance the untagged pointers to
 //   raw vectors of digits are safe. This aspect of the code may well limit
-//   its direct usefulness. To allow for a system that uses a previse garbage
-//   collector I allow for a "#define PRECISE_GC 1" option and in that case
-//   where calls to memory allocation are performed within the low-level
-//   code I will use functions "push(intptr_t)" and "pop(intptr_t&)" and
+//   its direct usefulness. So too allow for a system that uses a precise
+//   garbage collector I allow for a "#define PRECISE_GC 1" option and in
+//   that case whenever calls to memory allocation are performed within the
+//   low-level code I will use functions "push()" and "pop()" and
 //   expect that they save values somewhere that the garbage collector can
 //   find. Note that this scheme does not automate keeping large bignum
 //   calculations expressed via operator overloading safe! It is mostly aimed
-//   at making the low level code usable. A typical case will be the code
-//   to multiply two big numbers. That can work out how large its result
-//   will be and then needs to call reserve() to get space for it. Across
-//   the call to reserve it will need to push its two arguments, because a
-//   copying garbage collector might relocate them.
+//   at making the low level code usable. A typical case where push() and
+//   pop() are needed will be the code to multiply two big numbers. That can
+//   work out how large its result will be and then needs to call reserve()
+//   to get space for it. Across the call to reserve it will need to push
+//   its two arguments, because a copying garbage collector might relocate
+//   them.
 //   In Lisp mode it is anticipated that as well as a tagged representation
 //   of small integers that the generic arithemetic will need to support
 //   floating point numbers (and possibly multiple widths of floating point
 //   values, plus ratios and complex numbers) and so the dispatch on tagged
 //   numbers needs to live at a higher level within the Lisp then just thise
-//   code.
+//   code. Thus while the big-number functions here are set up so they can
+//   return fixnum results and while there are entrypoints for performing
+//   arithmetic between bignums and fixnums  (ie between uint64_t * and
+//   int64_t values) it is the responsibility of somebody else to decide which
+//   functions to call when.
 //   Strings are allocated using reserve_string() and finalized using
 //   confirm_size_string. For Lisp purposes they will need to have a header
 //   word containing the string length.
+//
+// It might be helpful if I provide my own thoughts about when you mich decide
+// to use this code and when you will probably not. Wikipedia lists rather
+// a large number of arbitrary precision arithmetic packages on the web page
+// en.wikipedia.org/wiki/List_of_arbitrary-precision_arithmetic_software.
+// As well as free-stanidng libraries a range of programming languages feature
+// big-number arithmetic as a standard feature. It may be fair to suggest
+// that for use from C++ the most visible option is GMP with some users liking
+// to use it via Boost. Given a view that GMP is the market leader I will
+// set out some points comparing arithlib with it.
+// First GMP is well established, it aims for top performance, it has fast
+// algorithms for huge arithmetic as well as for sane-sized numbers. In
+// contrast arithlib is new and neither well established nor truly heavily
+// tested. It does not even try to provide algorithms that will only become
+// useful for arithmetic on numbers that are many many thousands of digits
+// (eg FFT-style multiplication). It can thus be expected to be generally
+// slower than GMP. People needing ultimate performance - especially for
+// larger numbers - or various of the more unusual functions that gmp provide
+// will *need* to use it.
+//
+// However potential advantages of arithlib are
+// (1) It is subject to a permissive BSD license, while GMP is dual licensed
+//     under LGPL3 or GPL2. For some users or some projects this may matter!
+// (2) Rather than having assembly code versions for a wide but finite range
+//     of particular hosts, arithlib follows the "Trust your Compiler" policy
+//     and expects that a sufficiently modern C++ compiler will manage to
+//     generate code close to the performance of all the hand-optimised
+//     assembly code that GMP uses. This reduces the total size of the
+//     package substantially and makes building/installing/using it especially
+//     easy even when a packaged version is not instantly available for
+//     your machine.
+// (3) By being a header-only library, arithlib imposes a cost at program
+//     build time as it all has to be processed by the compiler - but these
+//     days compile-times are pretty short anyway. And by having all of
+//     its source code available when code that uses it is built there are
+//     potential whole-program optimisations that can be made.
+// (4) arithlib is coded in C++ not C (and certainly not in assembly code),
+//     and this allows it to leverage features of C++11. For instance it can
+//     rely on the random number generation facilities that C++ provides
+//     rather than needing to implement its own. There are places within it
+//     where template code leads to a neater implementation, and the operator
+//     overloading scheme that various other C++ arithmetic packages provide
+//     fits in especially naturally.
+// (5) My initial motivation for creating arithlib was a need for a big
+//     arithmetic package to form part of the run-time system of a language
+//     implementation. arithlib was built with a view to keeping much of the
+//     memory allocation and management somewhere else, probably supported
+//     by garbage collection. I found it much harder to see how to arrange
+//     that the garbage collector in the rest of my run-time system could
+//     track the memory usage within GMP.
+// (6) While arithlib is not a totally tiny body of code it is much smaller
+//     and simpler than GMP. When its capabilities cover what is needed and
+//     when its speed is sufficient I would suggest that "small and tidy is
+//     good".
+//
+// A key use-case that arithlib is not set up to support is arithmetic on
+// long but fixed precision numbers - this is liable to mean that it will
+// not be the technlogy of choice for a range of cryptography applications!
+// The code here has been tested and runs on both 32 and 64-bit machines,
+// however its internal workings are almost all expressed in terms on the
+// type "uint64_t". This may result in there being significant scope for
+// better specialization for code to run on 32-bit targets.
+//
+// The file bench_both.cpp arranges a VERY SIMPLISTIC benchmark comparison
+// between this code and gmp. All that is tested is the low-level code for
+// multiplying a pair on N word integers to get a 2N word result.
+// Tests using this can show amazing variations in relative performance
+// across platforms. On 64-bit Ubuntu and for multiplying pairs of numbers
+// up to say 500 bits I believe I see arithlib taking between 1 and 1.5 times
+// as much time as gmp. On the same processor but running cygwin under
+// Windows 10 the speed ratio can be twice as bad!
+// By around 10000 bits the ratio has increased to 4 or so, and by 100000
+// bits it is almost 15. When I implement Karatsuba the arithlib performance
+// on larger numbers will improve - obviously! I note that for sufficiently
+// long numbers gmp uses a range of gradually more complicated algorithms - for
+// my present purposes I am not that those will ever make practical difference.
+
+
 
 // I provide a default configuration, but by predefining one of the
 // symbols allow other versions to be built.
@@ -233,7 +356,7 @@
 // allocation via C++ "new".
 
 #define NEW           1
-#define DEBUG_OVERRUN 1
+#define DEBUG_OVERRUN 1   // Overhead is not huge: watching for error is good.
 
 #endif
 
@@ -2031,7 +2154,7 @@ inline uint64_t add_with_carry(uint64_t a1, uint64_t a2,
         r = a2;
         return 1;
     }
-    r = w = w + a2;
+    w = r = w + a2;
     return (w < a2 ? 1 : 0);
 }
 
@@ -2039,9 +2162,27 @@ inline uint64_t add_with_carry(uint64_t a1, uint64_t a2,
 // the input carry is zero. That cases saves a small amount of work.
 
 inline uint64_t add_with_carry(uint64_t a1, uint64_t a2, uint64_t &r)
-{   uint64_t w;
-    r = w = a1 + a2;
+{   uint64_t w = r = a1 + a2;
     return (w < a1 ? 1 : 0);
+}
+
+// subtract_with_borrow does
+//     r = a1 - a2 - b_in;
+// and returns 1 is there is a borrow out.
+
+inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2,
+                                     uint64_t b_in, uint64_t &r)
+{   uint64_t w = a1 - b_in;
+    uint64_t w1 = r = w - a2;
+    return (w > a1 || w1 > r ? 1 : 0);
+}
+
+// I have an overload of subtract_with_borrow for use where it is known that
+// the input borrow is zero. That cases saves a small amount of work.
+
+inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2, uint64_t &r)
+{   uint64_t w = r = a1 - a2;
+    return (w > a1 ? 1 : 0);
 }
 
 #ifdef __SIZEOF_INT128__
@@ -2255,16 +2396,13 @@ again2:
     r = (un21*base + un0 - q0*c) >> s;
 }
 
-inline void remainder128(uint64_t a0, uint64_t a1,
-                         uint64_t b0, uint64_t b1,
-                         uint64_t &q, uint64_t &r0, uint64_t &r1)
+inline void remainder128(uint64_t a0, unit64_t a1,
+                         uint64_t b0, unit64_t b1;
+                         uint64_t &q, uint64_t &r0, uint64_t &r1);
 {   my_assert(b0 > 4);
 // This is still to be re-worked!
-    q = (uint64_t)((((unsigned __int128)a0)<<64 | a1) /
-                   (((unsigned __int128)b0)<<64 | b1));
-    unsigned __int128 rr =
-        (uint64_t)((((unsigned __int128)a0)<<64 | a1) %
-                   (((unsigned __int128)b0)<<64 | b1));
+    q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
+    UINT128 rr = (uint64_t)(pack128(a0, a1) % pack128(b0, b1));
     r0 = (uint64_t)(rr >> 64);
     r1 = (uint64_t)rr;
 }
@@ -6134,6 +6272,32 @@ void remainder_for_gcd(uint64_t *a,  size_t &lena, uint64_t *b, size_t lenb)
     unscale_for_division(b, lenb, ss);
 }
 
+// a = a - b*q.
+
+inline bool reduce_for_gcd(uint64_t *a, size_t lena,
+                           uint64_t q,
+                           uint64_t *b, size_t lenb)
+{   my_assert(lena == lenb || lena == lenb+1);
+    uint64_t hi = 0, lo, carry = 1;
+    for (size_t i=0; i<lenb; i++)
+    {   multiplyadd64(b[i], q, hi, hi, lo);
+// lo is now the next digit of b*q, and hi needs to be carried up to the
+// next one.
+        carry = add_with_carry(a[i-1], ~lo, carry, a[i-1]);
+    }
+// In the cases where this is used the difference |a - q*b| should be
+// less than a. Well if q was computed accurately then it will be less
+// than b. And if q is large it will at least me much less than a. So I
+// am confident that testing the top bit if a[lena-1] after the subtraction
+// will be a reliable test for overshoot. I might want to formailize this
+// argument a bit better!
+    if (lena > lenb)
+    {   hi = a[lena-1] + ~hi + carry;
+        a[lena-1] = hi;
+    }
+    return negative(a[lena-1]);
+}
+
 // gcd_reduction starts with a > b and |b| >=2. It must reset a and
 // b (and their lengths) to be smaller. The basic Euclidean algorithm
 // would go
@@ -6230,16 +6394,18 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
             {   q = q >> (bits_to_lose-1);
                 q = (q >> 1) + (q & 1);
             }
-// Now just do "a = a-q*b;". Well have I got that aligned properly???
+// Now just do "a = a-q*b;", then ensure that the result is positive
+// and clear away any leading zeros left in its representation.
+            if (reduce_for_gcd(a, lena, q, b, lenb))
+                internal_negate(a, lena, a);
+            truncate_positive(a, lena);
 // WELL for now and so I can test things I will just fake things so that
-// the GCDN function will return the initial quotient it will use to
-// start the remainder sequence. 
-            a[0] = q; lena = 1;
-            b[0] = 0; lenb = 0;
+// the GCDN function will return the first remainder.
+            b[0] = 0; lenb = 1;
             return;
         }
         a[0] = 99999; lena = 1;
-        b[0] = 0; lenb = 0;
+        b[0] = 0; lenb = 1;
         return;
     }
     else
@@ -6369,7 +6535,7 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
 // of the form -2^(64*n-1), but doing that check is probably more expensive
 // that occasionally over-allocating memory!) I enlarge one of the inputs by
 // one word.
-    if (bv[0] == 0)
+    if (b[0] == 0)
     {   if (negative(a[lena-1]))
         {   if (lena == olena)
             {   internal_copy(a, lena, b);
@@ -6381,7 +6547,7 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
             a[lena++] = 0;
         }
         else abandon(b);
-        return confirm_size(av, olena, lena);
+        return confirm_size(a, olena, lena);
     }
 // If b is not zero here then it represents a value up to 2^64-1, and I can
 // complete the GCD by doing a long-by-short remainder and then a short-num
@@ -6490,12 +6656,6 @@ intptr_t Lcm::op(int64_t a, int64_t b)
 }
 
 } // end of namespace arithlib
-
-//=========================================================================
-//=========================================================================
-// End of everything.
-//=========================================================================
-//=========================================================================
 
 #endif // __arithlib_hpp
 

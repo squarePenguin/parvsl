@@ -229,15 +229,12 @@ testlogs/%.log:
 # the case of multiplying two numbers that are the same length. But still
 # that can give a crude form of evaluation!
 
-bench_gmp:	bench_gmp.cpp
-	g++ bench_gmp.cpp -O3 -lgmp -o bench_gmp
+bench_both:	bench_both.cpp arithlib.hpp
+	g++ bench_both.cpp -O3 -lgmp -o bench_both
 
-bench_arithlib:	bench_arithlib.cpp arithlib.hpp
-	g++ bench_gmp.cpp -O3 -lgmp -o bench_gmp
 
-runbench:	bench_gmp bench_arithlib
-	time ./bench_gmp
-	time ./bench_arithlib
+runbench:	bench_both
+	./bench_both
 
 # "make clean" does some tidying up. 
 
