@@ -218,6 +218,27 @@ arithtest:	arithtest.cpp arithlib.hpp
 testlogs/%.log:
 	time ./test.sh $@
 
+# The following is a really crude benchmark for arithlib to compare
+# its performance against gmp. It ONLY tests mong-multiplication and at
+# the time of writing this comment it shows that gmp is maybe faster than
+# arithlib by a factor of 1.5 for what I will describe as sane-sized
+# arguments. As the numbers get to involve more than about 10 64-bit
+# words the fact that arithlib does not (yet) use Karatsuba leads to
+# much more substantial speed ratios. This test does not look at
+# operations other than multiplication, and for that it only looks at
+# the case of multiplying two numbers that are the same length. But still
+# that can give a crude form of evaluation!
+
+bench_gmp:	bench_gmp.cpp
+	g++ bench_gmp.cpp -O3 -lgmp -o bench_gmp
+
+bench_arithlib:	bench_arithlib.cpp arithlib.hpp
+	g++ bench_gmp.cpp -O3 -lgmp -o bench_gmp
+
+runbench:	bench_gmp bench_arithlib
+	time ./bench_gmp
+	time ./bench_arithlib
+
 # "make clean" does some tidying up. 
 
 clean:
