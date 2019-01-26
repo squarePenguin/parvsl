@@ -55,16 +55,15 @@
 (de thread_pool ()
     (global '(tp_q))
     (setq tp_q (safeq))
-    (let ((nthreads (sub1 (hardwarethreads))))
+    (let ((nthreads 1))
+    % (let ((nthreads (sub1 (hardwarethreads))))
     (dotimes (i nthreads) (thread 
-        % run indefinitely
+        % run indefinitely  
         '(while t
-        (let ((task (safeq_pop tp_q)))
-        (while (null task)
-            % busy wait for a task
-            (setq task (safeq_pop tp_q)))
-        (print task)
-        (eval task))))))
+            (let ((task (safeq_pop tp_q)))
+            (print task)
+            % (eval task)
+            )))))
     tp_q)
 
 (de tp_addjob (tp job) (safeq_push tp job))
@@ -74,3 +73,13 @@
 (de test_tp (n)
     (dotimes (i n) (tp_addjob tp code)))
 
+(de test_tp2 (n)
+    (dotimes (i n) (tp_addjob tp 'nil)))
+
+(test_tp2 300)
+% (test_tp2 100)
+% (test_tp2 100)
+% (test_tp2 100)
+% (test_tp2 100)
+% (test_tp2 100)
+tp
