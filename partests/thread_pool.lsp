@@ -62,7 +62,7 @@
         '(while t
             (let ((task (safeq_pop tp_q)))
             (print task)
-            % (eval task)
+            (eval task)
             )))))
     tp_q)
 
@@ -76,10 +76,9 @@
 (de test_tp2 (n)
     (dotimes (i n) (tp_addjob tp 'nil)))
 
-(test_tp2 300)
+% (test_tp2 300)
 % (test_tp2 100)
 % (test_tp2 100)
 % (test_tp2 100)
 % (test_tp2 100)
 % (test_tp2 100)
-tp

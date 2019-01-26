@@ -31,6 +31,9 @@ public:
     LispObject *C_stackbase;
     LispObject *C_stackhead = nullptr;
 
+    LispObject *work1;
+    LispObject *work2;
+
     std::vector<LispObject> *fluid_locals;
     
     /**
@@ -83,12 +86,14 @@ void reset_segments() {
 std::unordered_map<int, Thread_RAII> active_threads;
 int tid = 0;
 
-void init_main_thread(LispObject *C_stackbase) {
+void init_thread_data(LispObject *C_stackbase) {
     // VB: Need to handle main thread separately                                
     thread_data.C_stackbase = C_stackbase;
-    thread_data.id = 0;
+    thread_data.id = tid;
     thread_data.fluid_locals = &fluid_locals;
-    thread_table.emplace(0, par::thread_data);
+    thread_data.work1 = &work1;
+    thread_data.work2 = &work2;
+    thread_table.emplace(tid, par::thread_data);
 }
 
 std::mutex thread_mutex;
@@ -98,12 +103,8 @@ int start_thread(std::function<void(void)> f) {
     tid += 1;
     auto twork = [f]() {
         int stack_var = 0;
-        thread_data.C_stackbase = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
-        thread_data.id = tid;
-        thread_data.fluid_locals = &fluid_locals;
-
-        thread_table.emplace(tid, thread_data);
-
+        LispObject *C_stackbase = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+        init_thread_data(C_stackbase);
         f();
     };
 

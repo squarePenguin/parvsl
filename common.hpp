@@ -369,8 +369,8 @@ INLINE const int MAX_LISPFILES = 30;
 #define comma_at   listbases[9]
 #define eofsym     listbases[10]
 #define cursym     listbases[11]
-#define work1      listbases[12]
-#define work2      listbases[13]
+#define work1_base      listbases[12]
+#define work2_base      listbases[13]
 #define restartfn  listbases[14]
 #define expr       listbases[15]
 #define subr       listbases[16]
@@ -392,6 +392,11 @@ const int BASES_SIZE = MAX_LISPFILES+29;
 
 LispObject listbases[BASES_SIZE];
 LispObject obhash[OBHASH_SIZE];
+
+// Each thread uses its own threadlocal workspace and shouldn't interfere
+// with the others.
+static thread_local LispObject work1 = NULLATOM;
+static thread_local LispObject work2 = NULLATOM;
 
 // ... and non-LispObject values that need to be saved as part of a
 // heap image.

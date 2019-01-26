@@ -924,9 +924,12 @@ void *allocate_memory(uintptr_t n)
 void par_reclaim() {
     for (auto x: par::thread_table) {
         auto td = x.second;
-        for (auto& s: *td.fluid_locals) {
+        for (auto& s: *(td.fluid_locals)) {
             s = copy(s);
         }
+
+        *(td.work1) = copy(*(td.work1));
+        *(td.work2) = copy(*(td.work2));
     }
 
     for (auto& s : par::fluid_globals) {
@@ -6849,6 +6852,12 @@ int warm_start_1(gzFile f, int *errcode)
 // image file should be clobbered here!
      par::symval(echo) = interactive ? nil : lisptrue;
 
+    // Restore the work bases to thread_local storage.
+     work1 = work1_base;
+     work2 = work2_base;
+     work1_base = NULLATOM;
+     work2_base = NULLATOM;
+
      return 0;
 }
 
@@ -7064,6 +7073,11 @@ void write_image(gzFile f)
     // TODO VB: don't care about non-termination yet
     par::active_threads.clear();
 
+    // at this stage only the main thread is running. we can store
+    // the work variables inside listbases for preservation
+    work1_base = work1;
+    work2_base = work2;
+
     int errcode;
     inner_reclaim(C_stackbase); // To compact memory.
     inner_reclaim(C_stackbase); // in the conservative case GC twice.
@@ -7092,6 +7106,7 @@ void write_image(gzFile f)
             }
         }
     }
+
     hexdump();
     switch (write_image_1(f, &errcode))
     {
@@ -7701,7 +7716,7 @@ int main(int argc, char *argv[])
     C_stackbase = (LispObject *)((intptr_t)&inputfilename &
                                     -sizeof(LispObject));
 
-    par::init_main_thread(C_stackbase);
+    par::init_thread_data(C_stackbase);
 
     coldstart = 0;
     interactive = 1;
