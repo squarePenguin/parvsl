@@ -1611,6 +1611,11 @@ static char input_line[INPUT_LINE_SIZE];
 static size_t input_ptr = 0, input_max = 0;
 char the_prompt[80] = "> ";
 
+// gcc moans if the value of snprintf is unused and there is any chance that
+// truncation arose. To get rid of the warning message I dump the value of
+// snprintf somewhere were in fact I will not look at it!.
+
+static volatile int _s_;
 
 LispObject Lsetpchar(LispObject lits, LispObject a)
 {   LispObject r = makestring(the_prompt, strlen(the_prompt));
@@ -1618,7 +1623,7 @@ LispObject Lsetpchar(LispObject lits, LispObject a)
     if (!isSTRING(a)) return error1("bad arg to setpchar", a);
     uintptr_t len = veclength(qheader(a));
     if (len > sizeof(the_prompt)-1) len = sizeof(the_prompt)-1;
-    snprintf(the_prompt, sizeof(the_prompt), "%.*s", (int)len, qstring(a));
+    _s_=snprintf(the_prompt, sizeof(the_prompt), "%.*s", (int)len, qstring(a));
     return r;
 }
 
@@ -1783,7 +1788,7 @@ void internalprint(LispObject x)
                     case typeBIGNUM:
 // At present the case typeBIGNUM is merely a fixed-precision 64-bit case,
 // which is not very adventurous!
-                        snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, qint64(x));
+                        _s_=snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, qint64(x));
                         checkspace(len = strlen(printbuffer));
                         for (i=0; i<len; i++) wrch(printbuffer[i]);
                         return;
@@ -1823,7 +1828,7 @@ void internalprint(LispObject x)
         case tagFLOAT:
             {   double d =  *((double *)(x - tagFLOAT));
                 if (isnan(d)) strcpy(printbuffer, "NaN");
-                else if (isfinite(d)) snprintf(printbuffer, sizeof(printbuffer), "%.14g", d);
+                else if (isfinite(d)) _s_=snprintf(printbuffer, sizeof(printbuffer), "%.14g", d);
                 else strcpy(printbuffer, "inf");
             }
             s = printbuffer;
@@ -1844,14 +1849,14 @@ void internalprint(LispObject x)
             for (i=0; i<len; i++) wrch(printbuffer[i]);
             return;
         case tagFIXNUM:
-            snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, (int64_t)qfixnum(x));
+            _s_=snprintf(printbuffer, sizeof(printbuffer), "%" PRId64, (int64_t)qfixnum(x));
             checkspace(len = strlen(printbuffer));
             for (i=0; i<len; i++) wrch(printbuffer[i]);
             return;
         default:
 //case tagFORWARD:
 //case tagHDR:
-//          snprintf(printbuffer, sizeof(printbuffer), "??%#" PRIxPTR "??\n", x);
+//          _s_=snprintf(printbuffer, sizeof(printbuffer), "??%#" PRIxPTR "??\n", x);
 //          checkspace(len = strlen(printbuffer));
 //          for (i=0; i<len; i++) wrch(printbuffer[i]);
             assert(0);
@@ -3924,6 +3929,8 @@ LispObject Lgetd(LispObject lits, LispObject x)
              qdefn3(x) == undefined3 &&
              qdefn4(x) == undefined4 &&
              qdefn5up(x) == undefined5up) return nil;
+    else if ((qflags(x) & flagMACRO) != 0)
+        return list2star(macro, symlambda, r);
     else if (qdefn0(x) == interpreted0 &&
              (qdefn1(x) == interpreted1 ||
               qdefn1(x) == interpretspecform) &&
@@ -3931,9 +3938,7 @@ LispObject Lgetd(LispObject lits, LispObject x)
              qdefn3(x) == interpreted3 &&
              qdefn4(x) == interpreted4 &&
              qdefn5up(x) == interpreted5up)
-        return list2star((qflags(x) & flagMACRO) ? macro : expr,
-            symlambda,
-            r);
+        return list2star(expr, symlambda, r);
 //***            cons(shallow_copy(qcar(r)), qcdr(r)));
     else return cons(subr, x);
 }
@@ -5492,14 +5497,14 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 // for a Lisp variable "@word" and look at its value. If that value is a
 // string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
-    {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+    {   _s_=snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
         lits = par::symval(lookup(filename, strlen(filename), 0));
-        if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
+        if (isSTRING(lits)) _s_=snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
-        else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+        else _s_=snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
     }
-    else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    else _s_=snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -5524,14 +5529,14 @@ LispObject Lfilep(LispObject lits, LispObject x)
     if (!isSTRING(x))
         return error1("bad arg for filep", x);
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
-    {   snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
+    {   _s_=snprintf(filename, sizeof(filename), "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
         lits = par::symval(lookup(filename, strlen(filename), 0));
-        if (isSTRING(lits)) snprintf(filename, sizeof(filename), "%.*s%.*s",
+        if (isSTRING(lits)) _s_=snprintf(filename, sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
            (int)(veclength(qheader(x)) - (p-qstring(x))), p);
-        else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+        else _s_=snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
     }
-    else snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
+    else _s_=snprintf(filename, sizeof(filename), "%.*s", (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
 #endif // __WIN32__
@@ -5549,7 +5554,7 @@ LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
         !((y == input && (how=1)!=0) ||
           (y == output && (how=2)!=0)))
         return error1("bad arg for open-module", cons(x, y));
-    snprintf(filename, sizeof(filename), "%s.modules/%.*s.fasl", imagename,
+    _s_=snprintf(filename, sizeof(filename), "%s.modules/%.*s.fasl", imagename,
                       (int)veclength(qheader(x)), qstring(x));
 #ifdef __WIN32__
 //  while (strchr(filename, '/') != NULL) *strchr(filename, '/') = '\\';
@@ -7572,13 +7577,13 @@ const char *find_image_directory(int argc, const char *argv[])
 // tests here that are intended to detect the above cases and do special
 // things! My tests will be based on file names and paths.
 //
-    snprintf(xname, sizeof(xname), "/%s.app/Contents/MacOS", programName);
+    _s_=snprintf(xname, sizeof(xname), "/%s.app/Contents/MacOS", programName);
     n = strlen(programDir) - strlen(xname);
     if (n>=0 && strcmp(programDir+n, xname) == 0)
     {   // Seem to be being executed from within application bundle.
 // This dates from when I thought I would put the image in merely Contents not
 // in Contents/MacOS.
-        snprintf(xname, sizeof(xname), "%.*s/%s.img",
+        _s_=snprintf(xname, sizeof(xname), "%.*s/%s.img",
             (int)strlen(programDir), programDir, programName);
     }
     else
@@ -7589,13 +7594,13 @@ const char *find_image_directory(int argc, const char *argv[])
 // such bundle I will put the image file in the location I would have used
 // with Windows of X11.
 //
-        snprintf(xname, sizeof(xname), "%s/%s.app/Contents/MacOS", programDir, programName);
+        _s_=snprintf(xname, sizeof(xname), "%s/%s.app/Contents/MacOS", programDir, programName);
         if (stat(xname, &buf) == 0 &&
             (buf.st_mode & S_IFDIR) != 0)
-        {   snprintf(xname, sizeof(xname), "%s/%s.app/Contents/MacOS/%s.img",
+        {   _s_=snprintf(xname, sizeof(xname), "%s/%s.app/Contents/MacOS/%s.img",
                 programDir, programName, programName);
         }
-        else snprintf(xname, sizeof(xname), "%s/%s.img", programDir, programName);
+        else _s_=snprintf(xname, sizeof(xname), "%s/%s.img", programDir, programName);
 
     }
 #else
@@ -7634,7 +7639,7 @@ const char *find_image_directory(int argc, const char *argv[])
         i = strlen(bin);
         j = strlen(programDir);
         if (strcmp(programDir+j-i, bin) == 0)
-        {   snprintf(xname, sizeof(xname), "%.*s%s/%s.img", j-i, programDir, data, pn);
+        {   _s_=snprintf(xname, sizeof(xname), "%.*s%s/%s.img", j-i, programDir, data, pn);
         }
 
 //
@@ -7646,7 +7651,7 @@ const char *find_image_directory(int argc, const char *argv[])
 // writable are of disc.
 //
         if (stat(xname, &buf) != 0)
-            snprintf(xname, sizeof(xname), "%s/%s.img", programDir, pn);
+            _s_=snprintf(xname, sizeof(xname), "%s/%s.img", programDir, pn);
     }
 #endif
     n = strlen(xname)+1;
@@ -7706,9 +7711,9 @@ int main(int argc, char *argv[])
 #ifdef __WIN32__
     size_t i = strlen(argv[0]);
     if (strcmp(argv[0]+i-4, ".exe") == 0) i -= 4;
-    snprintf(imagename, sizeof(imagename), "%.*s.img", i, argv[0]);
+    _s_=snprintf(imagename, sizeof(imagename), "%.*s.img", i, argv[0]);
 #else // __WIN32__
-    snprintf(imagename, sizeof(imagename), "%s.img", argv[0]);
+    _s_=snprintf(imagename, sizeof(imagename), "%s.img", argv[0]);
 #endif // __WIN32__
     printf("default imagename = <%s>\n", imagename);
     for (int i=1; i<argc; i++)
