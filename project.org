@@ -147,3 +147,20 @@ Running the alg test ~./test1.sh alg~: 0.22s on both
 So far it is a bit slower but nothing crazy like 10x. I'll look into this further.
 
 Looks like on cygwin it is much slower. THread_locals add huge overhead.
+
+
+* Problem running threads
+
+Loads of different errors.
+~(dotimes (i 100) (thread '(dotimes (i 10) (add1 i))))~
+breaks
+macroexpanding dotimes and running that still fails:
+returns 'g002' etc/ prints them. these are generated symbols and should not be printed.
+
+
+even when having different names altoghether we still get a bug 
+threads sometimes return the wrong value(g001 instead of nil)
+
+work1/work2 should be some way of threadlocal 
+look at prog/return/go
+explode
