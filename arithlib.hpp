@@ -285,10 +285,7 @@
 // tested. It does not even try to provide algorithms that will only become
 // useful for arithmetic on numbers that are many many thousands of digits
 // (eg FFT-style multiplication). It can thus be expected to be generally
-// slower than GMP. People needing ultimate performance - especially for
-// larger numbers - or various of the more unusual functions that gmp provide
-// will *need* to use it.
-//
+// slower than GMP.
 // However potential advantages of arithlib are
 // (1) It is subject to a permissive BSD license, while GMP is dual licensed
 //     under LGPL3 or GPL2. For some users or some projects this may matter!
@@ -303,15 +300,14 @@
 // (3) By being a header-only library, arithlib imposes a cost at program
 //     build time as it all has to be processed by the compiler - but these
 //     days compile-times are pretty short anyway. And by having all of
-//     its source code available when code that uses it is built there are
+//     its souce code available when code that uses it is built there are
 //     potential whole-program optimisations that can be made.
-// (4) arithlib is coded in C++ not C (and certainly not in assembly code),
-//     and this allows it to leverage features of C++11. For instance it can
-//     rely on the random number generation facilities that C++ provides
-//     rather than needing to implement its own. There are places within it
-//     where template code leads to a neater implementation, and the operator
-//     overloading scheme that various other C++ arithmetic packages provide
-//     fits in especially naturally.
+// (4) arithlib is coded in C++ not C, and this allows it to leverage features
+//     of C++11. For instance it can rely on the random number generation
+//     facilities that C++ provides rather than needing to implement its
+//     own. There are places within it where template code leads to a neater
+//     implementation, and the operator overloading scheme that various other
+//     C++ arithmetic packages provide fits in especially naturally.
 // (5) My initial motivation for creating arithlib was a need for a big
 //     arithmetic package to form part of the run-time system of a language
 //     implementation. arithlib was built with a view to keeping much of the
@@ -319,10 +315,9 @@
 //     by garbage collection. I found it much harder to see how to arrange
 //     that the garbage collector in the rest of my run-time system could
 //     track the memory usage within GMP.
-// (6) While arithlib is not a totally tiny body of code it is much smaller
-//     and simpler than GMP. When its capabilities cover what is needed and
-//     when its speed is sufficient I would suggest that "small and tidy is
-//     good".
+// (6) While arithlib is not a totally tiny body of code it is smaller and
+//     simpler than GMP. When its capabilities cover what is needed and when
+//     its speed is sufficient I would suggest that "small and tidy is good".
 //
 // A key use-case that arithlib is not set up to support is arithmetic on
 // long but fixed precision numbers - this is liable to mean that it will
@@ -332,19 +327,17 @@
 // type "uint64_t". This may result in there being significant scope for
 // better specialization for code to run on 32-bit targets.
 //
-// The file bench_both.cpp arranges a VERY SIMPLISTIC benchmark comparison
-// between this code and gmp. All that is tested is the low-level code for
-// multiplying a pair on N word integers to get a 2N word result.
-// Tests using this can show amazing variations in relative performance
-// across platforms. On 64-bit Ubuntu and for multiplying pairs of numbers
-// up to say 500 bits I believe I see arithlib taking between 1 and 1.5 times
-// as much time as gmp. On the same processor but running cygwin under
-// Windows 10 the speed ratio can be twice as bad!
-// By around 10000 bits the ratio has increased to 4 or so, and by 100000
-// bits it is almost 15. When I implement Karatsuba the arithlib performance
-// on larger numbers will improve - obviously! I note that for sufficiently
-// long numbers gmp uses a range of gradually more complicated algorithms - for
-// my present purposes I am not that those will ever make practical difference.
+// The files bench_*.cpp arrange e VERY SIMPLISTIC benchmark comparison
+// between this code and gmp. All that is tested is the low0level code for
+// multiplying a pair on N word integers to get a 2N word result. On x86_64
+// and compiling with "g++ -O3" I believe that this test suggests that
+// gmp is maybe up to twice as fast as arithlib (just for this case of
+// multiplication) for numbers up to 500-1000 bits. The speed ratio increases
+// beyond there as gmp uses Karatsuba (and subsequently yet more elaborate
+// schemes) for very large numbers. By around 10000 bits the ratio has
+// increased to 4 and by 100000 bits it is almost 15. When I implement
+// Karatsuba the arithlib performance on larger numbers will improve -
+// obviously!
 
 
 
@@ -2174,15 +2167,20 @@ inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2,
                                      uint64_t b_in, uint64_t &r)
 {   uint64_t w = a1 - b_in;
     uint64_t w1 = r = w - a2;
-    return (w > a1 || w1 > r ? 1 : 0);
+    return (w > a1 || w1 > w ? 1 : 0);
 }
 
 // I have an overload of subtract_with_borrow for use where it is known that
-// the input borrow is zero. That cases saves a small amount of work.
+// the input borrow is zero. That cases saves a small amount of work. I take
+// care so that if a1 and r are references to the same variable nothing
+// untoward can happen - although a1 being passed by reference should avoid
+// risk anyway: my version of the code should make thinsg even clearer.
 
 inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2, uint64_t &r)
-{   uint64_t w = r = a1 - a2;
-    return (w > a1 ? 1 : 0);
+{   uint64_t w = a1 - a2;
+    uint64_t b = (w > a1 ? 1 : 0);
+    r = w;
+    return b;
 }
 
 #ifdef __SIZEOF_INT128__
@@ -2712,6 +2710,10 @@ inline void truncate_positive(const uint64_t *r, size_t &n)
 
 inline void truncate_negative(const uint64_t *r, size_t &n)
 {   while (r[n-1]==allbits && n>1 && negative(r[n-2])) n--;
+}
+
+inline void truncate_unsigned(const uint64_t *r, size_t &n)
+{   while (r[n-1]==0 && n>1) n--;
 }
 
 // The following is a rather strange function. It looks at the 4 bit number n.
@@ -3896,23 +3898,20 @@ inline bool biggreaterp(const uint64_t *a, size_t lena,
     return false;
 }
 
-inline bool biggreaterp_unsigned(const uint64_t *a, size_t lena,
-                                 const uint64_t *b, size_t lenb)
-{   uint64_t a0 = a[lena-1], b0 = b[lenb-1];
-// If one of the numbers has more digits than the other then the sign of
-// the longer one gives my the answer.
-    if (lena > lenb) return positive(a0);
-    else if (lenb > lena) return negative(b0);
-// When the two numbers are the same length but the top digits differ
-// then comparing those digits tells me all I need to know.
-    if (a0 > b0) return true;
-    if (a0 < b0) return false;
-// Otherwise I need to scan down through digits...
-    lena--;
+// This version treats the two inputs as unsigned numbers. It is used from
+// within the GCD code (at least)
+
+inline bool big_unsigned_greaterp(const uint64_t *a, size_t lena,
+                                  const uint64_t *b, size_t lenb)
+{
+// If one of the numbers has more digits than the other then it is the
+// larger.
+    if (lena > lenb) return true;
+    else if (lenb > lena) return false;
     while (lena != 0)
     {   lena--;
-        a0 = a[lena];
-        b0 = b[lena];
+        uint64_t a0 = a[lena];
+        uint64_t b0 = b[lena];
         if (a0 > b0) return true;
         if (a0 < b0) return false;
     }
@@ -6244,46 +6243,18 @@ intptr_t Divide::op(uint64_t *a, uint64_t *b, intptr_t &rem)
 
 #endif
 
-void remainder_for_gcd(uint64_t *a,  size_t &lena, uint64_t *b, size_t lenb)
-{
-// This is a copy of the kernel of the long division code just for use
-// in my GCD routine. Its input will be two positive integere a and b.
-// The vector that a is stored in will have (at least) one word spare at the
-// end to let the number temporarily expand into. As positive numbers
-// neither a nor b will have a zero leading digit. |a| will be at least as
-// big as |b| and b will use at least 2 words. This replaces a with
-// (a%b). It temporarily corrupts b by scaling it, but puts that right
-// before exiting. There is no extra storage allocation performed.
-    my_assert(lena>=lenb);
-    my_assert(lenb>=2);
-    int ss = nlz(b[lenb-1]);
-    a[lena] = scale_for_division(a, lena, ss);
-    lena++;
-// now lena>lenb strictly.
-    my_assert(scale_for_division(b, lenb, ss) == 0);
-    size_t lenq = lena-lenb; // potential length of quotient.
-    size_t m = lenq-1;
-    for (;;)
-    {   (void)next_quotient_digit(a, lena, b, lenb);
-        if (m == 0) break;
-        m--;
-    }
-    unscale_for_division(a, lena, ss);
-    unscale_for_division(b, lenb, ss);
-}
-
 // a = a - b*q.
 
 inline bool reduce_for_gcd(uint64_t *a, size_t lena,
                            uint64_t q,
                            uint64_t *b, size_t lenb)
 {   my_assert(lena == lenb || lena == lenb+1);
-    uint64_t hi = 0, lo, carry = 1;
+    uint64_t hi = 0, hi1, lo, borrow = 0;
     for (size_t i=0; i<lenb; i++)
-    {   multiplyadd64(b[i], q, hi, hi, lo);
-// lo is now the next digit of b*q, and hi needs to be carried up to the
-// next one.
-        carry = add_with_carry(a[i-1], ~lo, carry, a[i-1]);
+    {   multiply64(b[i], q, hi1, lo);
+        hi1 += subtract_with_borrow(a[i], hi, a[i]);
+        borrow = subtract_with_borrow(a[i], lo, borrow, a[i]);
+        hi = hi1;
     }
 // In the cases where this is used the difference |a - q*b| should be
 // less than a. Well if q was computed accurately then it will be less
@@ -6291,10 +6262,7 @@ inline bool reduce_for_gcd(uint64_t *a, size_t lena,
 // am confident that testing the top bit if a[lena-1] after the subtraction
 // will be a reliable test for overshoot. I might want to formailize this
 // argument a bit better!
-    if (lena > lenb)
-    {   hi = a[lena-1] + ~hi + carry;
-        a[lena-1] = hi;
-    }
+    if (lena > lenb) a[lena-1] = a[lena-1] - hi - borrow;
     return negative(a[lena-1]);
 }
 
@@ -6311,6 +6279,8 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
                    uint64_t *&b, size_t &lenb,
                    bool &swapped)
 {
+    display("a", a, lena);
+    display("b", b, lenb);
 // I will start by collecting high bits from a and b. If I collect the
 // contents of the top 3 words (ie 192 bits in all) then I will be able
 // to normalize that to get 128 bits to work with however the top bits
@@ -6334,7 +6304,7 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
 // 1 extra bit in reduction in the size of a for each step.
 // If the estimated quotient is accurate enough the this will leave
 // a < b and by swapping a and b we have a new pair ready to continue from.
-    size_t diff = 64*(lena-lenb) + lzb - lza;
+    int64_t diff = 64*(lena-lenb) + lzb - lza;
 // If however the length-difference between a and b is small a subtraction
 // "a = a - q0*(b<<0);" would often find q0 rather small and completing
 // the remainder sequence would take many steps. So in such cases I take
@@ -6372,7 +6342,7 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
             a1 = (a1>>1) | (a0<<63);
             a0 = a0>>1;
             lza = lza-1;
-            diff = diff-1;
+            diff = diff+1;
         }
         uint64_t q, r;
 // I want to get as close an approximation to the full quotient as I can,
@@ -6396,24 +6366,28 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
             }
 // Now just do "a = a-q*b;", then ensure that the result is positive
 // and clear away any leading zeros left in its representation.
+            printf("Q = %" PRIu64 "\n", q);
             if (reduce_for_gcd(a, lena, q, b, lenb))
                 internal_negate(a, lena, a);
-            truncate_positive(a, lena);
-// WELL for now and so I can test things I will just fake things so that
-// the GCDN function will return the first remainder.
+            truncate_unsigned(a, lena);
+            display("next A", a , lena);
+        }
+        else
+        {
+// Here I need to do a reduction but the quotient in the step is very large
+// so I will use the value of q I have as basically the top 60+ bits of the
+// quotient I need but with "diff" bits stuck on the end.
+            printf("Q = %" PRIx64 " with %" PRId64 " bits after that\n", q, (uint64_t)diff);
+            a[0] = 99999; lena = 1;
             b[0] = 0; lenb = 1;
             return;
         }
-        a[0] = 99999; lena = 1;
-        b[0] = 0; lenb = 1;
-        return;
     }
     else
     {   my_abort("Lehmer treatment not coded yet\n");
     }
 // Swap the two numbers so that once again a will be the larger.
-    truncate_positive(a, lena); //@@ should be done where a is set!
-    if (biggreaterp_unsigned(b, lenb, a, lena))
+    if (big_unsigned_greaterp(b, lenb, a, lena))
     {   uint64_t *ax = a;
         a = b;
         b = ax;
@@ -6421,6 +6395,7 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
         lena = lenb;
         lenb = lenax;
         swapped = !swapped;
+        printf("Swapped a and b\n");
     }
 }
 
@@ -6476,7 +6451,7 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
     pop(b); pop(av);
     if (negative(b[lenb-1])) internal_negate(b, lenb, bv);
     else internal_copy(b, lenb, bv);
-    if (biggreaterp_unsigned(bv, lenb, av, lena))
+    if (big_unsigned_greaterp(bv, lenb, av, lena))
     {   a = bv;
         b = av;
         size_t lenw = lena;

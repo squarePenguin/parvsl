@@ -52,12 +52,12 @@ fastvsl:	vsl.cpp
 # integer arithmetic implemented in C++.
 
 vsl-arith:	vsl-arith.cpp arithlib.hpp
-	g++ $(CFLAGS) -DBIGNUM=1 \
+	g++ $(CFLAGS) \
 		vsl-arith.cpp $(LIBS) -o vsl-arith \
 		2>&1 | tee vsl-arith.log
 
 fastvsl-arith:	vsl-arith.cpp arithlib.hpp
-	g++ $(FASTCFLAGS) -DBIGNUM=1 \
+	g++ $(FASTCFLAGS) \
 		vsl-arith.cpp $(LIBS) -o fastvsl-arith \
 		2>&1 | tee fastvsl-arith.log
 
