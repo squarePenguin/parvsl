@@ -380,7 +380,6 @@
 #include <cstdint>
 #include <cctype>
 #include <cinttypes>
-#include <cassert>
 #include <cstdlib>
 #include <cstdarg>
 #include <random>
@@ -393,23 +392,40 @@
 namespace arithlib
 {
 
-// A scheme "my_assert" lets me write in my own code to print the
-// diagnostics.
+// A scheme "arithlib::assert" lets me write in my own code to print the
+// diagnostics. To use this version you must include arithlib.hpp after
+// and other header files that define assert or abort macros.
 
-// my_abort() mainly exists so I can set a breakpoint on it! Setting one
+// I implement things here using #define because I want to exploit
+// __FILE__ and __LINE__ to report where issues arose.
+
+#define STRINGIFY1(x) #x
+#define STRINGIFY(x) STRINGIFY1(x)
+
+static const char *_abort_location = "";
+
+// abort() mainly exists so I can set a breakpoint on it! Setting one
 // on the system abort() function sometimes does not give me as much help
 // as I might have hoped on at least some platforms, while a break-point
-// on my_abort() does what I expect.
+// on abort() does what I expect.
 
-static inline void my_abort(const char *msg)
-{   std::cout << "About to abort: " << msg << std::endl;
-    abort();
+static inline void abort1(const char *msg)
+{   std::cout << "About to abort at " << _abort_location << ": "
+              << msg << std::endl;
+    std::abort();
 }
 
-static inline void my_abort()
-{   std::cout << "About to abort" << std::endl;
-    abort();
+static inline void abort1()
+{   std::cout << "About to abort at " << _abort_location << std::endl;
+    std::abort();
 }
+
+#undef abort
+
+#define abort(...)                                                         \
+    {   arithlib::_abort_location = __FILE__ " line " STRINGIFY(__LINE__); \
+        arithlib::abort1(__VA_ARGS__);                                     \
+    }
 
 #ifdef NEW
 INLINE_VAR const bool debug_arith = true;
@@ -418,22 +434,35 @@ INLINE_VAR const bool debug_arith = false;
 #endif
 
 template <typename F>
-static inline void my_assert(bool ok, F&& action)
+static inline void assert1(bool ok, F&& action, const char *location)
 {
 // Use this as in:
-//     my_assert(predicate, [&]{...});
+//     assert(predicate, [&]{...});
 // where the "..." is an arbitrary sequence of actions to be taken
 // if the assertion fails. The action will typically be to display
 // extra information about what went wrong.
-    if (debug_arith && !ok) { action(); my_abort(); }
+    if (debug_arith && !ok)
+    {   action();
+        _abort_location = location;
+        abort1();
+    }
 }
 
-static inline void my_assert(bool ok)
+static inline void assert1(bool ok, const char *location)
 {
 // For simple use where a customised message is not required:
-//     my_assert(predicate);
-    if (debug_arith && !ok) my_abort("failure reported via my_assert()");
+//     assert(predicate);
+    if (debug_arith && !ok)
+    {   _abort_location = location;
+        abort1("failure reported via assert()");
+    }
 }
+
+#undef assert
+
+#define assert(...) \
+    arithlib::assert1(__VA_ARGS__, __FILE__ " line " STRINGIFY(__LINE__))
+
 
 // At times during development it is useful to be able to send messages
 // to a log file.... This should not be used in final production code
@@ -643,17 +672,17 @@ INLINE_VAR realloc_t *realloc_function = realloc;
 INLINE_VAR free_t    *free_function   = free;
 
 inline uint64_t *reserve(size_t n)
-{   my_assert(n>0 && n<1000000); // Temporary upper limit on size
+{   assert(n>0 && n<1000000); // Temporary upper limit on size
     uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
-    my_assert(r != NULL);
+    assert(r != NULL);
     return &r[1];
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>=final);
+{   assert(final>0 && n>=final);
     p = (uint64_t *)
         (*realloc_function)((void *)&p[-1], (final_n+1)*sizeof(uint64_t));
-    my_assert(p != NULL);
+    assert(p != NULL);
     p[0] = final_n;
     return vector_to_handle(&p[1]);
 }
@@ -661,7 +690,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 // In this model confirm_size_x() is just the same as confirm_size().
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>=final);
+{   assert(final>0 && n>=final);
     confirm_size(p, n, final);
 }
 
@@ -673,7 +702,7 @@ inline void abandon(uint64_t *p)
 
 inline char *reserve_string(size_t n)
 {   char *r = (char *)(*malloc_function)(n+1);
-    my_assert(r != NULL);
+    assert(r != NULL);
     return r;
 }
 
@@ -684,7 +713,7 @@ inline char *reserve_string(size_t n)
 // be a good bargain.
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   my_assert(final>0 && (n+9)>final);
+{   assert(final>0 && (n+9)>final);
     r[final] = 0;
     return r;
 }
@@ -705,7 +734,7 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   my_assert(p[-1]!=0 && p[-1]<1000000);
+{   assert(p[-1]!=0 && p[-1]<1000000);
     return p[-1];
 }
 
@@ -790,7 +819,7 @@ public:
 // freechains here should show that. I set and test for that in the other
 // bits of code that allocate or release memory.
                 for (uint64_t *b=f; b!=NULL; b = (uint64_t *)b[1])
-                {   my_assert(b[0] == -(uint64_t)1);
+                {   assert(b[0] == -(uint64_t)1);
                     n++;
                 }
                 if (n != 0)
@@ -820,11 +849,11 @@ public:
 #else
         int bits = log_next_power_of_2(n);
 #endif
-        my_assert(n<=(((size_t)1)<<bits) && n>0);
+        assert(n<=(((size_t)1)<<bits) && n>0);
         uint64_t *r = freechain_table[bits];
         if (r == NULL)
         {   r = new uint64_t[((size_t)1)<<bits];
-            my_assert(r != NULL);
+            assert(r != NULL);
 #ifdef DEBUG_OVERRUN
             if (debug_arith)
             {   std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
@@ -835,7 +864,7 @@ public:
         else
         {   freechain_table[bits] = (uint64_t *)r[1];
 #ifdef DEBUG_OVERRUN
-            my_assert(r[0] == -(uint64_t)1);
+            assert(r[0] == -(uint64_t)1);
             std::memset(r, 0xaa, (((size_t)1)<<bits)*sizeof(uint64_t));
             r[0] = 0;
 #endif
@@ -849,9 +878,9 @@ public:
     }
 // When I abandon a memory block I will push it onto a relevant free chain.
     static void abandon(uint64_t *p)
-    {   my_assert(p[0] != -(uint64_t)1);
+    {   assert(p[0] != -(uint64_t)1);
         int bits = ((uint32_t *)p)[0];
-        my_assert(bits>0 && bits<48);
+        assert(bits>0 && bits<48);
 // Here I assume that sizeof(uint64_t) >= sizeof(intptr_t) so I am not
 // risking loss of information.
         if (debug_arith) p[0] = -(uint64_t)1;
@@ -867,16 +896,16 @@ public:
 INLINE_VAR freechains fc;
 
 inline uint64_t *reserve(size_t n)
-{   my_assert(n>0 && n<1000000);
+{   assert(n>0 && n<1000000);
     return &(fc.allocate(n+1))[1];
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>=final);
+{   assert(final>0 && n>=final);
 // Verify that the word just beyond where anything should have been
 // stored has not been clobbered.
 #ifdef DEBUG_OVERRUN
-    if (debug_arith) my_assert(p[n] == 0xaaaaaaaaaaaaaaaaU);
+    if (debug_arith) assert(p[n] == 0xaaaaaaaaaaaaaaaaU);
 #endif
     if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
@@ -900,7 +929,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 }
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>=final);
+{   assert(final>0 && n>=final);
     return confirm_size(p, n, final);
 }
 
@@ -914,7 +943,7 @@ inline uint64_t *vector_of_handle(intptr_t n)
 
 inline size_t number_size(uint64_t *p)
 {   size_t r = ((uint32_t *)(&p[-1]))[1];
-    my_assert(r>0 && r<1000000);
+    assert(r>0 && r<1000000);
     return ((uint32_t *)(&p[-1]))[1];
 }
 
@@ -960,7 +989,7 @@ inline char *reserve_string(size_t n)
 }
 
 inline char *confirm_size_string(char *p, size_t n, size_t final)
-{   my_assert(final>0 && (n+9)>final);
+{   assert(final>0 && (n+9)>final);
     p[final] = 0;
     return p;
 }
@@ -1049,7 +1078,7 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 //=========================================================================
 
 inline uint64_t *reserve(size_t n)
-{   my_assert(n>0 && n<1000000);
+{   assert(n>0 && n<1000000);
 // I must allow for alignment padding on 32-bit platforms.
     if (sizeof(LispObject)==4) n = n*sizeof(uint64_t) + 4;
     else n = n*sizeof(uint64_t);
@@ -1058,7 +1087,7 @@ inline uint64_t *reserve(size_t n)
 }
 
 inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>=final);
+{   assert(final>0 && n>=final);
     if (final == 1 && fits_into_fixnum((int64_t)p[0]))
     {   intptr_t r = int_to_handle((int64_t)p[0]);
         return r;
@@ -1075,7 +1104,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 }
 
 inline intptr_t confirm_size_x(uint64_t *p, size_t n, size_t final)
-{   my_assert(final>0 && n>=final);
+{   assert(final>0 && n>=final);
 // Here I might need to write a nice dummy object into the gap left by
 // shrinking the object.
     return confirm_size(p, n, final);
@@ -1094,7 +1123,7 @@ inline size_t number_size(uint64_t *p)
     size_t r = veclength(h);
     if (sizeof(LispObject) == 4) r -= 4;
     r = r/sizeof(uint64_t);
-    my_assert(r>0 && r<1000000);
+    assert(r>0 && r<1000000);
     return r;
 }
 
@@ -2026,6 +2055,25 @@ inline void display(const char *label, uint64_t *a, size_t lena)
     std::cout << std::endl;
 }
 
+// I provide a function that accesses (b<<shift)[n]. Note that the
+// valid index values n will from from 0 up to and including lenb.
+
+inline uint64_t shifted_digit(uint64_t *b, size_t lenb, int shift, size_t n)
+{   if (n == 0) return b[0]<<shift;
+    else if (n == lenb) return b[lenb-1]>>(64-shift);
+    else return (b[n]<<shift) | (b[n-1]>>(64-shift));
+}
+
+inline void display(const char *label, uint64_t *a, size_t lena, int shift)
+{   std::cout << label << " [" << (int)lena << "]";
+    for (size_t i=0; i<=lena; i++)
+        std::cout << " "
+                  << std::hex << std::setfill('0')
+                  << std::setw(16) << shifted_digit(a, lena, shift, lena-i)
+                  << std::dec << std::setw(0);
+    std::cout << std::endl;
+}
+
 inline void display(const char *label, intptr_t a)
 {   if (stored_as_fixnum(a))
     {   std::cout << label << " [fixnum] " << std::hex
@@ -2248,7 +2296,7 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
 
 inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
                      uint64_t &q, uint64_t &r)
-{   my_assert(divisor != 0 && hi < divisor);
+{   assert(divisor != 0 && hi < divisor);
     UINT128 dividend = pack128(hi, lo);
     q = dividend / divisor;
     r = dividend % divisor;
@@ -2261,7 +2309,7 @@ inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
 inline void quotrem128(uint64_t a0, uint64_t a1,
                        uint64_t b0, uint64_t b1,
                        uint64_t &q, uint64_t &r0, uint64_t &r1)
-{   my_assert(b0 > 4);
+{   assert(b0 > 4);
     q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
     UINT128 rr = pack128(a0, a1) % pack128(b0, b1);
     r0 = (uint64_t)(rr >> 64);
@@ -2332,7 +2380,7 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
 
 inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
                      uint64_t &q, uint64_t &r)
-{   my_assert(divisor != 0 && hi < divisor);
+{   assert(divisor != 0 && hi < divisor);
     uint64_t u1 = hi;
     uint64_t u0 = lo;
     uint64_t c = divisor;
@@ -2397,7 +2445,7 @@ again2:
 inline void remainder128(uint64_t a0, unit64_t a1,
                          uint64_t b0, unit64_t b1;
                          uint64_t &q, uint64_t &r0, uint64_t &r1);
-{   my_assert(b0 > 4);
+{   assert(b0 > 4);
 // This is still to be re-worked!
     q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
     UINT128 rr = (uint64_t)(pack128(a0, a1) % pack128(b0, b1));
@@ -2822,7 +2870,7 @@ inline void random_upto_bits(uint64_t *r, size_t &lenr, size_t n)
         r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
     r[lenr-1] |= UINT64_C(1) << ((bits-1)%64);
     if (bits%64 == 0) r[lenr++] = 0;
-    my_assert(!negative(r[lenr-1]));
+    assert(!negative(r[lenr-1]));
 }
 
 inline intptr_t random_upto_bits(size_t bits)
@@ -2950,11 +2998,11 @@ inline float Float::op(int64_t a)
     top24 = top24 >> (64-24-lz);
     if (low > 0x8000000000000000U) top24++;
     else if (low == 0x8000000000000000U) top24 += (top24 & 1); // round to even
-    my_assert(top24 >= ((int64_t)1)<<23 &&
+    assert(top24 >= ((int64_t)1)<<23 &&
               top24 <= ((int64_t)1)<<24);
 // The next line should never introduce any rounding at all.
     float d = (float)top24;
-    my_assert(top24 == (uint64_t)d);
+    assert(top24 == (uint64_t)d);
     d = ldexpf(d, (int)(64-24-lz));
     if (sign) return -d;
     else return d;
@@ -3021,10 +3069,10 @@ inline float Float::op(uint64_t *a)
     {   if (next != 0) top24++;
         else top24 += (top24&1);
     }
-    my_assert(top24 >= ((int64_t)1)<<23 &&
+    assert(top24 >= ((int64_t)1)<<23 &&
               top24 <= ((int64_t)1)<<24);
     double d = (float)top24;
-    my_assert(top24 == (uint64_t)d);
+    assert(top24 == (uint64_t)d);
     if (sign) d = -d;
     return ldexpf(d, (int)(128-24-lz+64*(lena-2)));
 }
@@ -3050,11 +3098,11 @@ inline double Double::op(int64_t a)
     top53 = top53 >> (64-53-lz);
     if (low > 0x8000000000000000U) top53++;
     else if (low == 0x8000000000000000U) top53 += (top53 & 1); // round to even
-    my_assert(top53 >= ((int64_t)1)<<52 &&
+    assert(top53 >= ((int64_t)1)<<52 &&
               top53 <= ((int64_t)1)<<53);
 // The next line should never introduce any rounding at all.
     double d = (double)top53;
-    my_assert(top53 == (uint64_t)d);
+    assert(top53 == (uint64_t)d);
     d = std::ldexp(d, (int)(64-53-lz));
     if (sign) return -d;
     else return d;
@@ -3121,10 +3169,10 @@ inline double Double::op(uint64_t *a)
     {   if (next != 0) top53++;
         else top53 += (top53&1);
     }
-    my_assert(top53 >= ((int64_t)1)<<52 &&
+    assert(top53 >= ((int64_t)1)<<52 &&
               top53 <= ((int64_t)1)<<53);
     double d = (double)top53;
-    my_assert(top53 == (uint64_t)d);
+    assert(top53 == (uint64_t)d);
     if (sign) d = -d;
     return std::ldexp(d, (int)(128-53-lz+64*(lena-2)));
 }
@@ -3257,7 +3305,7 @@ inline intptr_t string_to_bignum(const char *s)
     {   uint64_t d = 0;
 // assemble 19 digit blocks from the input into a value (d).
         while (chars != next)
-        {   my_assert(std::isdigit(*s));
+        {   assert(std::isdigit(*s));
             d = 10*d + (*s++ - '0');
             chars--;
         }
@@ -3484,7 +3532,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
     {   *p1++ = buffer[--bp];
         len++;
     } while (bp != 0);
-    my_assert(len + 19*(m/sizeof(uint64_t)-p)<= m);
+    assert(len + 19*(m/sizeof(uint64_t)-p)<= m);
     while (p < m/sizeof(uint64_t))
     {
 // I will always pick up the number I am going to expand before writing any
@@ -3498,7 +3546,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
         *p1 = '0' + (int)top;
         p1 += 19;
         len += 19;
-        my_assert(len <= m);
+        assert(len <= m);
     }
 // To convince myself that this is safe consider when I pick up the final
 // chunk. It will turn into 19 bytes of output, so where it comes from must
@@ -3661,7 +3709,7 @@ inline string_handle bignum_to_string_binary(intptr_t aa)
         }
     }
     else
-    {   my_assert(top != 0);
+    {   assert(top != 0);
         while ((top>>63) == 0)
         {   top = top << 1;
             m--;
@@ -3856,11 +3904,11 @@ inline bool Eqn::op(double a, uint64_t *b)
 
 #ifdef softfloat_h
 inline bool Eqn::op(int64_t a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
 }
 
 inline bool Eqn::op(uint64_t *a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
 }
 
 inline bool Eqn::op(float128_t a, int64_t b)
@@ -4061,11 +4109,11 @@ inline bool Greaterp::op(double a, uint64_t *b)
 
 #ifdef softfloat_h
 inline bool Greaterp::op(int64_t a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
 }
 
 inline bool Greaterp::op(uint64_t *a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
 }
 
 inline bool Greaterp::op(float128_t a, int64_t b)
@@ -4137,12 +4185,12 @@ inline bool Geq::op(double a, uint64_t *b)
 
 #ifdef softfloat_h
 inline bool Geq::op(int64_t a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
     return false;
 }
 
 inline bool Geq::op(uint64_t *a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
     return false;
 }
 
@@ -4215,12 +4263,12 @@ inline bool Lessp::op(double a, uint64_t *b)
 
 #ifdef softfloat_h
 inline bool Lessp::op(int64_t a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
     return false;
 }
 
 inline bool Lessp::op(uint64_t *a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
     return false;
 }
 
@@ -4293,12 +4341,12 @@ inline bool Leq::op(double a, uint64_t *b)
 
 #ifdef softfloat_h
 inline bool Leq::op(int64_t a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
     return false;
 }
 
 inline bool Leq::op(uint64_t *a, float128_t b)
-{   my_abort("not implemented yet");
+{   abort("not implemented yet");
     return false;
 }
 
@@ -4825,7 +4873,7 @@ bool Logbitp::op(int64_t a, size_t n)
 inline void ordered_bigplus(const uint64_t *a, size_t lena,
                             const uint64_t *b, size_t lenb,
                             uint64_t *r, size_t &lenr)
-{   my_assert(lena >= lenb);
+{   assert(lena >= lenb);
     uint64_t carry = 0;
     size_t i = 0;
 // The lowest digits can be added without there being any carry-in.
@@ -4946,7 +4994,7 @@ inline intptr_t bigplus_small(intptr_t aa, int64_t b)
 inline void ordered_bigsubtract(const uint64_t *a, size_t lena,
                                 const uint64_t *b, size_t lenb,
                                 uint64_t *r, size_t &lenr)
-{   my_assert(lena >= lenb);
+{   assert(lena >= lenb);
     uint64_t carry = 1;
     size_t i;
 // Add the digits that (a) and (b) have in common
@@ -4973,7 +5021,7 @@ inline void ordered_bigsubtract(const uint64_t *a, size_t lena,
 inline void ordered_bigrevsubtract(const uint64_t *a, size_t lena,
                                    const uint64_t *b, size_t lenb,
                                    uint64_t *r, size_t &lenr)
-{   my_assert(lena >= lenb);
+{   assert(lena >= lenb);
     uint64_t carry = 1;
     size_t i;
 // Add the digits that (a) and (b) have in common
@@ -5417,18 +5465,18 @@ inline void bigpow(uint64_t *a, size_t lena, uint64_t n,
     while (n > 1)
     {   if (n%2 == 0)
         {   bigsquare(v, lenv, r, lenr);
-            my_assert(lenr <= maxlenr);
+            assert(lenr <= maxlenr);
             internal_copy(r, lenr, v);
             lenv = lenr;
             n = n/2;
         }
         else
         {   bigmultiply(v, lenv, w, lenw, r, lenr);
-            my_assert(lenr <= maxlenr);
+            assert(lenr <= maxlenr);
             internal_copy(r, lenr, w);
             lenw = lenr;
             bigsquare(v, lenv, r, lenr);
-            my_assert(lenr <= maxlenr);
+            assert(lenr <= maxlenr);
             internal_copy(r, lenr, v);
             lenv = lenr;
             n = (n-1)/2;
@@ -5438,7 +5486,7 @@ inline void bigpow(uint64_t *a, size_t lena, uint64_t n,
 }
 
 // In cases where n is too large this can fail. At present I deal with that
-// with my_assert() statements rather than any comfortable scheme for reporting
+// with assert() statements rather than any comfortable scheme for reporting
 // the trouble.
 
 // The code that dispatches into here should have filtered cases such that
@@ -5454,7 +5502,7 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
         if (lena == 0)
         {   if ((int64_t)a[0]==1) z = 1;
             else if ((int64_t)a[0]==-1) z = (n%1==0 ? 1 : -1);
-            else my_assert(a[0] != 0u);
+            else assert(a[0] != 0u);
         }
 // 0^(-n) is an error
 // 1^(-n) = 1
@@ -5466,7 +5514,7 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
     size_t bitsa = bignum_bits(a, lena);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
-    my_assert(hi == 0); // Check that size is at least somewhat sane!
+    assert(hi == 0); // Check that size is at least somewhat sane!
 // I estimate the largest size that my result could be, but then add
 // an extra word because the internal working of multiplication can
 // write a zero beyond its true result - eg if you are multiplying a pair
@@ -5476,7 +5524,7 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
 // truncating from uint64_t to size_t.
-    my_assert(lenr == lenr1);
+    assert(lenr == lenr1);
     uint64_t olenr = lenr;
     push(a);
     uint64_t *r = reserve(lenr);
@@ -5486,7 +5534,7 @@ intptr_t Pow::op(uint64_t *a, int64_t n)
     uint64_t *w = reserve(lenr);
     pop(v); pop(r); pop(a);
     bigpow(a, lena, (uint64_t)n, v, w, r, lenr, lenr);
-    my_assert(lenr <= olenr);
+    assert(lenr <= olenr);
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
@@ -5503,7 +5551,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
     {   int z = 0;
         if (a == 1) z = 1;
         else if (a == -1) z = (n%1==0 ? 1 : 0);
-        else my_assert(a != 0);
+        else assert(a != 0);
         return int_to_handle(z);
     }
     if (a == 0) return int_to_handle(0);
@@ -5513,7 +5561,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
     size_t bitsa = 64 - nlz(absa);
     uint64_t hi, bitsr;
     multiply64(n, bitsa, hi, bitsr);
-    my_assert(hi == 0); // Check that size is at least somewhat sane!
+    assert(hi == 0); // Check that size is at least somewhat sane!
     uint64_t lenr1 = 2 + bitsr/64;
     if (bitsr < 64) // Can do all the work as machine integers.
     {   int64_t result = 1;
@@ -5527,7 +5575,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
     size_t lenr = (size_t)lenr1;
 // if size_t was more narrow than 64-bits I could lose information in
 // truncating from uint64_t to size_t.
-    my_assert(lenr == lenr1);
+    assert(lenr == lenr1);
     uint64_t olenr = lenr;
     uint64_t *r = reserve(lenr);
     push(r);
@@ -5537,7 +5585,7 @@ intptr_t Pow::op(int64_t a, int64_t n)
     pop(v); pop(r);
     uint64_t aa[1] = {(uint64_t)a};
     bigpow(aa, 1, (uint64_t)n, v, w, r, lenr, lenr);
-    my_assert(lenr <= olenr);
+    assert(lenr <= olenr);
     abandon(w);
     abandon(v);
     return confirm_size(r, olenr, lenr);
@@ -5720,7 +5768,7 @@ inline void division(uint64_t *a, size_t lena,
                      uint64_t *b, size_t lenb,
                      bool want_q, uint64_t *&q, size_t &olenq, size_t &lenq,
                      bool want_r, uint64_t *&r, size_t &olenr, size_t &lenr)
-{   my_assert(want_q || want_r);
+{   assert(want_q || want_r);
 // First I will filter out a number of cases where the divisor is "small".
 // I only want to proceed into the general case code if it is a "genuine"
 // big number with at least two digits. This bit of the code is messier
@@ -5731,7 +5779,7 @@ inline void division(uint64_t *a, size_t lena,
 // The first case is when the single digit if b is a signed value in the
 // range -2^63 to 2^63-1.
     if (lenb == 1)
-    {   my_assert(b[0] != 0); // would be division by zero
+    {   assert(b[0] != 0); // would be division by zero
         signed_short_division(a, lena, (int64_t)b[0],
                               want_q, q, olenq, lenq,
                               want_r, r, olenr, lenr);
@@ -5817,7 +5865,7 @@ inline void division(uint64_t *a, size_t lena,
         if (bb[lenbb-1] == 0) lenbb--;
     }
     else if (b[lenb-1] == 0) lenbb--;
-    my_assert(lenbb >= 2);
+    assert(lenbb >= 2);
 // Now I should look at the dividend. If it is shorter than the divisor
 // then I know that the quotient will be zero and the dividend will be the
 // remainder. If I had made this test before normalizing the divisor I could
@@ -5858,7 +5906,7 @@ inline void division(uint64_t *a, size_t lena,
         internal_copy(b, lenbb, bb);
     }
 #ifdef DEBUG_OVERRUN
-    if (debug_arith) my_assert(bb[olenr] == 0xaaaaaaaaaaaaaaaa);
+    if (debug_arith) assert(bb[olenr] == 0xaaaaaaaaaaaaaaaa);
 #endif
 // If I actually return the quotient I may need to add a leading 0 or -1 to
 // make its 2s complement representation valid. Hence the "+2" rather than
@@ -5884,7 +5932,7 @@ inline void division(uint64_t *a, size_t lena,
     else internal_copy(a, lena, r);
     unsigned_long_division(r, lenr, bb, lenbb, want_q, q, olenq, lenq);
 #ifdef DEBUG_OVERRUN
-    if (debug_arith) my_assert(r[lena+1] == 0xaaaaaaaaaaaaaaaa);
+    if (debug_arith) assert(r[lena+1] == 0xaaaaaaaaaaaaaaaa);
 #endif
 // While performing the long division I will have had three vectors that
 // were newly allocated. r starts off containing a copy of a but ends up
@@ -5896,7 +5944,7 @@ inline void division(uint64_t *a, size_t lena,
 // remainder is smaller than the divisor and so it will be a closer fit into
 // bb than r. So copy it into there so that the allocate/abandon and
 // size confirmation code is given less extreme things to cope with.
-    my_assert(lenr<=lenb);
+    assert(lenr<=lenb);
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
@@ -5948,7 +5996,7 @@ inline uint64_t scale_for_division(uint64_t *r, size_t lenr, int s)
 inline void multiply_and_subtract(uint64_t *r, size_t lenr,
                                   uint64_t q0,
                                   uint64_t *b, size_t lenb)
-{   my_assert(lenr > lenb);
+{   assert(lenr > lenb);
     uint64_t hi = 0, lo, carry = 1;
     for (size_t i=0; i<lenb; i++)
     {   multiplyadd64(b[i], q0, hi, hi, lo);
@@ -5966,7 +6014,7 @@ inline void multiply_and_subtract(uint64_t *r, size_t lenr,
  
 inline void add_back_correction(uint64_t *r, size_t lenr,
                                 uint64_t *b, size_t lenb)
-{   my_assert(lenr > lenb);
+{   assert(lenr > lenb);
     uint64_t carry = 0;
     for (size_t i=0; i<lenb; i++)
         carry = add_with_carry(r[i+lenr-lenb-1], b[i], carry, r[i+lenr-lenb-1]);
@@ -5975,9 +6023,9 @@ inline void add_back_correction(uint64_t *r, size_t lenr,
 
 inline uint64_t next_quotient_digit(uint64_t *r, size_t &lenr,
                                     uint64_t *b, size_t lenb)
-{   my_assert(lenr > lenb);
-    my_assert(lenb >= 2);
-    my_assert(b[lenb-1] != 0);
+{   assert(lenr > lenb);
+    assert(lenb >= 2);
+    assert(b[lenb-1] != 0);
     uint64_t q0, r0;
     if (r[lenr-1] == b[lenb-1])
     {   q0 = (uint64_t)(-1);
@@ -6026,7 +6074,7 @@ inline void unscale_for_division(uint64_t *r, size_t &lenr, int s)
             if (i == 0) break;
             i--;
         }
-        my_assert(carry==0);
+        assert(carry==0);
     }
     truncate_positive(r, lenr);
 }
@@ -6042,21 +6090,21 @@ inline void unsigned_long_division(uint64_t *a, size_t &lena,
                                    uint64_t *b, size_t &lenb,
                                    bool want_q, uint64_t *q,
                                    size_t &olenq, size_t &lenq)
-{   my_assert(lenb >= 2);
-    my_assert(lena >= lenb);
+{   assert(lenb >= 2);
+    assert(lena >= lenb);
 // I will multiply a and b by a scale factor that gets the top digit of "b"
 // reasonably large. The value stored in "a" can become one digit longer,
 // but there is space to store that.
 //
 // The scaling is done here using a shift, which seems cheaper to sort out
 // then multiplication by a single-digit value.
-    my_assert(b[lenb-1] != 0);
+    assert(b[lenb-1] != 0);
     int ss = nlz(b[lenb-1]);
 // When I scale the dividend expands into an extra digit but the scale
 // factor has been chosen so that the divisor does not.
     a[lena] = scale_for_division(a, lena, ss);
     lena++;
-    my_assert(scale_for_division(b, lenb, ss) == 0);
+    assert(scale_for_division(b, lenb, ss) == 0);
     lenq = lena-lenb; // potential length of quotient.
     size_t m = lenq-1;
     for (;;)
@@ -6248,7 +6296,7 @@ intptr_t Divide::op(uint64_t *a, uint64_t *b, intptr_t &rem)
 inline bool reduce_for_gcd(uint64_t *a, size_t lena,
                            uint64_t q,
                            uint64_t *b, size_t lenb)
-{   my_assert(lena == lenb || lena == lenb+1);
+{   assert(lena == lenb || lena == lenb+1);
     uint64_t hi = 0, hi1, lo, borrow = 0;
     for (size_t i=0; i<lenb; i++)
     {   multiply64(b[i], q, hi1, lo);
@@ -6260,9 +6308,39 @@ inline bool reduce_for_gcd(uint64_t *a, size_t lena,
 // less than a. Well if q was computed accurately then it will be less
 // than b. And if q is large it will at least me much less than a. So I
 // am confident that testing the top bit if a[lena-1] after the subtraction
-// will be a reliable test for overshoot. I might want to formailize this
+// will be a reliable test for overshoot. I might want to formalize this
 // argument a bit better!
     if (lena > lenb) a[lena-1] = a[lena-1] - hi - borrow;
+    return negative(a[lena-1]);
+}
+
+// The next function performs a = a = b*(q<<shift), but
+// it computes it more as a = a - (b<<shift)*q.
+// It will be used with 0 < shift < 64, ie only when a genuine shift
+// between digits is required.
+inline bool shifted_reduce_for_gcd(uint64_t *a, size_t lena,
+                                   uint64_t q,
+                                   uint64_t *b, size_t lenb,
+                                   int shift)
+{   assert(lena == lenb+1 || lena == lenb+2);
+//    display("a", a, lena);
+//    display("b", b, lenb);
+//    display("B", b, lenb, shift);
+    uint64_t hi = 0, hi1, lo, borrow = 0;
+    for (size_t i=0; i<=lenb; i++)
+    {   multiply64(shifted_digit(b, lenb, shift, i), q, hi1, lo);
+        hi1 += subtract_with_borrow(a[i], hi, a[i]);
+        borrow = subtract_with_borrow(a[i], lo, borrow, a[i]);
+        hi = hi1;
+    }
+// In the cases where this is used the difference |a - q*b| should be
+// less than a. Well if q was computed accurately then it will be less
+// than b. And if q is large it will at least me much less than a. So I
+// am confident that testing the top bit if a[lena-1] after the subtraction
+// will be a reliable test for overshoot. I might want to formalize this
+// argument a bit better!
+    if (lena > lenb+1) a[lena-1] = a[lena-1] - hi - borrow;
+//    display("A", a, lena);
     return negative(a[lena-1]);
 }
 
@@ -6272,15 +6350,14 @@ inline bool reduce_for_gcd(uint64_t *a, size_t lena,
 //    a = a % b;   // otherwise a = a-q*b; for some useful value of q
 //                 // and then if q was "too large" go a = |a|;
 //    swap(a, b);
-//    swapped = !swapped;
 // but a Lehmer-style scheme can go distinctly faster overall.
 
 void gcd_reduction(uint64_t *&a, size_t &lena,
                    uint64_t *&b, size_t &lenb,
-                   bool &swapped)
+                   size_t &olena, size_t &olenb)
 {
-    display("a", a, lena);
-    display("b", b, lenb);
+//    display("a", a, lena);
+//    display("b", b, lenb);
 // I will start by collecting high bits from a and b. If I collect the
 // contents of the top 3 words (ie 192 bits in all) then I will be able
 // to normalize that to get 128 bits to work with however the top bits
@@ -6366,26 +6443,43 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
             }
 // Now just do "a = a-q*b;", then ensure that the result is positive
 // and clear away any leading zeros left in its representation.
-            printf("Q = %" PRIu64 "\n", q);
+//            printf("Q = %" PRIu64 "\n", q);
             if (reduce_for_gcd(a, lena, q, b, lenb))
                 internal_negate(a, lena, a);
             truncate_unsigned(a, lena);
-            display("next A", a , lena);
+//            display("next A1", a , lena);
         }
         else
         {
 // Here I need to do a reduction but the quotient in the step is very large
 // so I will use the value of q I have as basically the top 60+ bits of the
-// quotient I need but with "diff" bits stuck on the end.
-            printf("Q = %" PRIx64 " with %" PRId64 " bits after that\n", q, (uint64_t)diff);
-            a[0] = 99999; lena = 1;
-            b[0] = 0; lenb = 1;
-            return;
+// quotient I need but with "diff" bits stuck on the end. If diff is a
+// multiple of 64 then this is merely a shift by some whole number of words.
+            if ((diff%64) == 0)
+            {   size_t diffw = diff/64;
+//                printf("Q = %" PRIu64 " << %u words\n", q, (unsigned int)diffw);
+                if (reduce_for_gcd(a+diffw-1, lena+1-diffw, q, b, lenb))
+                    internal_negate(a, lena, a);
+                truncate_unsigned(a, lena);
+//                display("next A2", a , lena);
+            }
+            else
+            {   size_t diffw = diff/64;
+                diff = diff%64;
+//                printf("Q = %" PRIu64 " << %u words, %d bits\n",
+//                        q, (unsigned int)diffw, (int)diff);
+                if (shifted_reduce_for_gcd(a+diffw-1, lena+1-diffw,
+                                           q, b, lenb, diff))
+                    internal_negate(a, lena, a);
+                truncate_unsigned(a, lena);
+//                display("next A3", a , lena);
+            }
         }
     }
     else
-    {   my_abort("Lehmer treatment not coded yet\n");
+    {   abort("Lehmer treatment not coded yet\n");
     }
+//    printf("Now check if swap needed\n");
 // Swap the two numbers so that once again a will be the larger.
     if (big_unsigned_greaterp(b, lenb, a, lena))
     {   uint64_t *ax = a;
@@ -6394,8 +6488,10 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
         size_t lenax = lena;
         lena = lenb;
         lenb = lenax;
-        swapped = !swapped;
-        printf("Swapped a and b\n");
+        lenax = olena;
+        olena = olenb;
+        olenb = lenax;
+//        printf("Swapped a and b\n");
     }
 }
 
@@ -6457,16 +6553,16 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
         size_t lenw = lena;
         lena = lenb;
         lenb = lenw;
+        lenw = olena;
+        olena = olenb;
+        olenb = lenw;
     }
     else
     {   a = av;
         b = bv;
     }
 // Now a >= b and both numbers are in freshly allocated memory. I will
-// remember the sizes of these two arrays, and because during the calculation
-// I will often swap them I will have a flaf that tells me if they are swapped
-// or in their original order.
-    bool swapped = false;
+// remember the sizes of these two arrays.
 // Remove any leading zero digits, and if that reduces the situation to
 // a 1-word case handle that specially..
     if (b[lenb-1] == 0) lenb--;
@@ -6490,14 +6586,20 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
 // Now at last a and b and genuine unsigned vectors without leading digits
 // and with a > b. The next line is the key iteration in this whole procedure.
     while (lenb != 1)
-        gcd_reduction(a, lena, b, lenb, swapped);
-// Once b ends up with length 1 I am almost finshed. With all the swapping
-// along the way I did not track olena and olenb, so I bring them to a
-// consistent state now.
-    if (swapped)
-    {   size_t olenax = olena;
-        olena = olenb;
-        olenb = olenax;
+    {
+#ifdef DEBUG_OVERRUN
+        if (debug_arith)
+        {   assert(a[olena] == 0xaaaaaaaaaaaaaaaaU);
+            assert(b[olenb] == 0xaaaaaaaaaaaaaaaaU);
+        }
+#endif
+        gcd_reduction(a, lena, b, lenb, olena, olenb);
+#ifdef DEBUG_OVERRUN
+        if (debug_arith)
+        {   assert(a[olena] == 0xaaaaaaaaaaaaaaaaU);
+            assert(b[olenb] == 0xaaaaaaaaaaaaaaaaU);
+        }
+#endif
     }
 // One possibility is that b==0 and then a holds the GCD. There is a
 // pathological case where an input was -2^(64*n-1), which fits within n
@@ -6516,10 +6618,20 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
             {   internal_copy(a, lena, b);
                 abandon(a);
                 a = b;
-                lena = lenb;
+                olena = olenb;
             }
             else abandon(b);
+#ifdef DEBUG_OVERRUN
+            if (debug_arith)
+            {   assert(a[olena] == 0xaaaaaaaaaaaaaaaaU);
+            }
+#endif
             a[lena++] = 0;
+#ifdef DEBUG_OVERRUN
+            if (debug_arith)
+            {   assert(a[olena] == 0xaaaaaaaaaaaaaaaaU);
+            }
+#endif
         }
         else abandon(b);
         return confirm_size(a, olena, lena);

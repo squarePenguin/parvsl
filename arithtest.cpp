@@ -211,6 +211,7 @@ int main(int argc, char *argv[])
         display("bnota", bnota);
         std::cout << "c4 a&~b|b&~a "  << c4 << std::endl;
         std::cout << "Failed " << std::dec << std::endl;
+        abort();
         return 1;
     }
 
@@ -267,6 +268,7 @@ int main(int argc, char *argv[])
         std::cout << "c4 a/2^r     " << c4 << std::endl;
         display("c4", c4);
         std::cout << "Failed " << std::dec << std::endl;
+        abort();
         return 1;
     }
 
@@ -322,6 +324,7 @@ int main(int argc, char *argv[])
         std::cout << "square(-a)  = " << square(-a) << std::endl;
         std::cout << "square(-b)  = " << square(-b) << std::endl;
         std::cout << "Failed" << std::endl;
+        abort();
         return 1;
     }
 
@@ -394,6 +397,7 @@ int main(int argc, char *argv[])
         display("q1       ", q1);
         display("r1       ", r1);
         std::cout << "Failed " << std::endl;
+        abort();
         return 1;
     }
 
@@ -408,8 +412,8 @@ int main(int argc, char *argv[])
 // Set up three values a, b and g. Let g'=gcd(a,b), g''=gcd(a*g,b*g) and
 // check if g''=g*g', and if g'' divides evenly into both a*g and b*g.
 
-    maxbits = 400;
-    ntries = 50*MILLION;
+    maxbits = 200;
+    ntries = 20*MILLION;
 
     std::cout << "Start of GCD testing" << std::endl;
     clk = clock(); clong = 0;
@@ -445,7 +449,7 @@ int main(int argc, char *argv[])
         std::cout << "B  " << B << std::endl;
         std::cout << "g1 " << g1 << std::endl;
         std::cout << "g2 " << g2 << std::endl;
-        std::cout << "Failed " << std::endl;
+        abort("Failed");
         return 1;
     }
 
@@ -487,6 +491,7 @@ int main(int argc, char *argv[])
         display("a", a);
         display("b", b);
         std::cout << "Failed " << std::endl;
+        abort();
         return 1;
     }
 
@@ -535,11 +540,11 @@ int main(int argc, char *argv[])
         fp_forcer = d + 1.0;
         double dplus = fp_forcer;
         if (dplus == d) dplus = std::nextafter(d, 1.0e300);
-        my_assert(dplus != d);
+        assert(dplus != d);
         fp_forcer = d - 1.0;
         double dminus = fp_forcer;
         if (dminus == d) dminus = std::nextafter(d, -1.0e300);
-        my_assert(dminus != d);
+        assert(dminus != d);
         Bignum nplus = fix_bignum(dplus);
         Bignum nminus = fix_bignum(dminus);
         Bignum err = a-n;
@@ -569,6 +574,7 @@ int main(int argc, char *argv[])
         display("a", a);
         display("n", n);
         std::cout << "Failed " << std::endl;
+        abort();
         return 1;
     }
 
