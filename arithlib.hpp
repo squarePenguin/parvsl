@@ -6344,6 +6344,43 @@ inline bool shifted_reduce_for_gcd(uint64_t *a, size_t lena,
     return negative(a[lena-1]);
 }
 
+// Here we compute r = u*a - v*b, where lenr >= min(lena, lenb). This
+// is for use in Lehmer reductions.
+// In general this will be used as in
+//    ua_minus_bv(a, u1, b, v1, temp);
+//    ua_minus_bv(a, u2, b, v2, a);
+//    copy from temp to b
+// so note that the destination may be the same vector as one of the inputs.
+// This will only be used when a and b are almost the same length. I leave
+// a result of length lena even though I very much expect that in at least
+// almost all cases the result will be almost 128 bits smaller!
+
+inline bool au_minus_bv(uint64_t *a, size_t lena,
+                        uint64_t u,
+                        uint64_t *b, size_t lenb,
+                        uint64_t v,
+                        uint64_r *r, size_t &lenr)
+{   assert(lena == lenb || lena == lenb+1);
+    uint64_t hia, loa, ca = 0, hib, lob, cb = 0, borrow = 0;
+    for (size_t i=0; i<lenb; i++)
+    {   multiply64(a[i], u, hia, loa);
+// hia is the high part of a product so carrying 1 into it can not cause it
+// to overflow. Just!
+        hia += add_with_carry(loa, ca, loa);
+        multiply64(b[i], v, hib, lob);
+        hib += add_with_carry(lob, cb, lob);
+        borrow = subtract_with_borrow(loa, lob, borrow, r[i]);
+        ca = hia;
+        cb = hib;
+    }
+    lenr = lenb;
+    if (lena > lenb)
+    {   a[lena-1] = ca - cb - borrow;
+        lenr = lena;
+    }
+    return negative(r[lenr-1]);
+}
+
 // gcd_reduction starts with a > b and |b| >=2. It must reset a and
 // b (and their lengths) to be smaller. The basic Euclidean algorithm
 // would go
