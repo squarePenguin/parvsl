@@ -6359,7 +6359,7 @@ inline bool au_minus_bv(uint64_t *a, size_t lena,
                         uint64_t u,
                         uint64_t *b, size_t lenb,
                         uint64_t v,
-                        uint64_r *r, size_t &lenr)
+                        uint64_t *r, size_t &lenr)
 {   assert(lena == lenb || lena == lenb+1);
     uint64_t hia, loa, ca = 0, hib, lob, cb = 0, borrow = 0;
     for (size_t i=0; i<lenb; i++)
