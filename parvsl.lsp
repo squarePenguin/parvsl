@@ -9,6 +9,9 @@
 % instate temporary versions of "plus2" and "times2" that will
 % make it possible to read this file.
 
+(global '(!~!~bignum))
+(setq !~!~bignum (compress '(!! !~ b i g n u m)))
+
 (fluid '(minus blank tab !$eol!$ dollar lpar rpar))
 (fluid '(!~radix))
 
@@ -697,7 +700,7 @@ top (cond ((atom a) (return (reversip r))))
    (cond
       ((null l) 0)
       ((null (cdr l)) (car l))
-      (t (cons '!~bignum l))))
+      (t (cons !~!~bignum l))))
 
 % Various two-argument functions will be able to use built-in
 % vsl functions on floating point input but need to do more
