@@ -117,14 +117,14 @@ parreduce:	parvsl
 	rm -f parreduce.img.modules/* parreduce.img inline-defs.dat
 	time ./parvsl -z -iparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildreduce.lsp | tee parreduce.log
+		parbuildreduce.lsp | tee parreduce.log
 
 fastparreduce:	fastparvsl
 	mkdir -p fastparreduce.img.modules
 	rm -f fastparreduce.img.modules/* fastparreduce.img inline-defs.dat
 	time ./fastparvsl -z -ifastparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildreduce.lsp | tee fastparreduce.log
+		parbuildreduce.lsp | tee fastparreduce.log
 
 
 debug_reduce:	vsl
