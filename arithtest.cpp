@@ -454,7 +454,7 @@ int main(int argc, char *argv[])
     }
 
     timing = (clong + clock() - clk)/(double)CLOCKS_PER_SEC;
-    std::cout << "Division tests completed in "
+    std::cout << "GCD tests completed in "
               << timing << " sec" << std::endl;
 
 #endif // TEST_GCD

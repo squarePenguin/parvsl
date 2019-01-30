@@ -2225,10 +2225,8 @@ inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2,
 // risk anyway: my version of the code should make thinsg even clearer.
 
 inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2, uint64_t &r)
-{   uint64_t w = a1 - a2;
-    uint64_t b = (w > a1 ? 1 : 0);
-    r = w;
-    return b;
+{   r = a1 - a2;
+    return (r > a1 ? 1 : 0);
 }
 
 #ifdef __SIZEOF_INT128__
@@ -6434,7 +6432,99 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
 // be certain that q < p, so I will need to compare the values and
 // swap as appropriate.
 //
-    if (true || diff >= 60)
+    if (diff < 60)
+    {
+// Try for Lehmer. The pair of values that will be 2-word surrogates
+// for a and b here will be the top 128 bits of a and however many bits of
+// b align with that. However if a has only 2 digits then I must NOT shift it
+// left, because that would make it seem to have a power of 2 as a factor
+// beyond any real such factors.
+// It could be that lenb < lena, but because a and b different in lengths
+// by at most 60 bits in that case lenb==lena-1. So adjust values so as to
+// align.
+        if (lena != lenb)
+        {   b2 = b1;
+            b1 = b0;
+            b0 = 0;
+        }
+        if (lena > 2)
+        {   a0 = a0<<lza;
+            if (lza!=0) a0 |= (a1>>(64-lza));
+            a1 = a1<<lza;
+            if (lza!=0) a1 |= (a2>>(64-lza));
+            b0 = b0<<lza;
+            if (lza!=0) b0 |= (b1>>(64-lza));
+            b1 = b1<<lza;
+            if (lza!=0) b1 |= (b2>>(64-lza));
+        }
+// I will maintain an identity
+//          a = ua*A + va*B
+//          b = ub*A + vb*B
+// where A and B are the initial values in my remainder sequence and a and b
+// are working ones calculated along the way. Note horribly well here that
+// I am keeping these values as signed... but the code U have above that
+// calculates u*a-b*v will take unsigned inputs!
+        int64_t ua = 1, va = 0, ub = 0, vb = 1;
+printf("For Lehmer:\n");
+printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
+       "b = %.16" PRIx64 ":%.16" PRIx64 "\n", a0, a1, b0, b1);
+        while (b0!=0 || b1!= 0)
+        {   uint64_t q;
+// Here I want to set q = {a0,a1}/{b0,b1}, and I expect that the answer
+// is a reasonably small integer. But it could potentially be huge.
+// At least I have filtered away the possibility {b0,b1}={0,0}.
+// I will grab the top 64 bits of a and the top corresponding bits of b,
+// because then I can do a (cheap) 64-by-64 division.
+            int lza1 = a0==0 ? 64+nlz(a1) : nlz(a0);
+            int lzb1 = b0==0 ? 64+nlz(b1) : nlz(b0);
+            if (lza1 > lzb1+60) break; // quotient will be too big
+            uint64_t ahi, bhi;
+            if (lza1 < 64) ahi = (a0<<lza1) | (a1>>(64-lza1));
+            else if (lza1 == 64) ahi = a1;
+            else ahi = a1<<(lza1-64);
+            if (lza1 < 64) bhi = (b0<<lza1) | (b1>>(64-lza1));
+            else if (lza1 == 64) bhi = b1;
+            else bhi = b1<<(lza1-64);
+printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
+// q could end up and over-estimate for the true quotient because bhi has
+// been truncated and so under-represents b. If that happens then a-q*b will
+// end up negative.
+            q = ahi/bhi;
+printf("q = %" PRIu64 "\n", q);
+// Now I need to go
+//              ua -= q*va;
+//              ub -= q*vb;
+//              {a0,a1} -= q*{b0,b1}
+// Then if a is negative I will negate a and ua and ub.
+// Finally, if (as I mostly expect) now a<b I swap a<=>b, ua<=>ub and va<=>vb
+            ua -= q*va;
+            ub -= q*vb;
+            uint64_t hi, lo;
+            multiply64(q, b1, hi, lo);
+            hi += subtract_with_borrow(a1, lo, a1);
+            uint64_t borrow = subtract_with_borrow(a0, hi, a0);
+            borrow += subtract_with_borrow(a0, q*b0, a0);
+// Now borrow!=0 if a had become negative
+            if (borrow != 0)
+            {   if ((a1 = -a1) == 0) a0 = -a0;
+                else a0 = ~a0;
+                ua = -ua;
+                ub = -ub;
+            }
+printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
+       "  ua=%" PRId64 " ub=%" PRId64 "\n",
+       q, a0, a1, ua, ub);
+            if (b0 > a0 ||
+                (b0 == a0 && b1 > a1))
+            {   uint64_t w;
+                w = a0; a0 = b0; b0 = w;
+                w = a1; a1 = b1; b1 = w;
+                w = ua; ua = va; va = w;
+                w = ub; ub = vb; vb = w;
+            }
+        } 
+    }
+    if (diff >= 60)
     {
 // This is the "a = a - q*b;" case. For initial development I will use
 // this all the time.
