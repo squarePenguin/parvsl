@@ -73,7 +73,6 @@
 #define __STDC_FORMAT_MACROS 1
 #endif
 
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -924,16 +923,9 @@ void *allocate_memory(uintptr_t n)
 void par_reclaim() {
     for (auto x: par::thread_table) {
         auto td = x.second;
-        for (auto& s: *(td.fluid_locals)) {
-            s = copy(s);
-        }
 
         *(td.work1) = copy(*(td.work1));
         *(td.work2) = copy(*(td.work2));
-    }
-
-    for (auto& s : par::fluid_globals) {
-        s = copy(s);
     }
 }
 
@@ -1494,6 +1486,24 @@ static inline LispObject copy(LispObject x)
 // s points at an object in the heap (old or new). Copy the
 // components of the object and return the address one beyond it.
 
+void copy_symval(LispObject x) {
+    assert(isSYMBOL(x));
+
+    if (is_global(x)) {
+        qvalue(x) = copy(qvalue(x));
+    } else {
+        int loc = qfixnum(qvalue(x));
+        for (auto x: par::thread_table) {
+            auto td = x.second;
+            auto& val = (*td.fluid_locals)[loc];
+            val = copy(val);
+        }
+
+        auto& global = par::fluid_globals[loc];
+        global = copy(global);
+    }
+}
+
 static inline LispObject copycontent(LispObject s)
 {   LispObject h = s, w;
     assert(inheap(h) && getheapstarts(h));
@@ -1519,7 +1529,8 @@ static inline LispObject copycontent(LispObject s)
     {   case typeSYM:
             w = s + tagSYMBOL;
             // qflags(w) does not need adjusting
-            par::symval(w) = copy(par::symval(w));
+            // par::symval(w) = copy(par::symval(w));
+            copy_symval(w);
             qplist(w) = copy(qplist(w));
             qpname(w) = copy(qpname(w));
             qlits(w)  = copy(qlits(w));
@@ -3229,13 +3240,15 @@ LispObject Lvector_5up(LispObject lits, LispObject a1, LispObject a2,
 
 void global_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) == 0) {
-        // If it was not global already, move value back from
-        // thread_local storage
-        // qvalue(s) = par::local_symbol(qfixnum(qvalue(s)));
+        // If it was not global already, move value back from thread_local storage
         qvalue(s) = par::symval(s);
         if (qvalue(s) == undefined) qvalue(s) = nil;
         qflags(s) &= ~flagFLUID; // disable fluid
         qflags(s) |= flagGLOBAL;
+    }
+
+    if (qvalue(s) == undefined) {
+        qvalue(s) = nil;
     }
 }
 
@@ -3253,17 +3266,22 @@ void unglobal_symbol(LispObject s) {
 void fluid_symbol(LispObject s) {
     // If it was global, move the value to thread_local storage
     // and store the location.
+
+    LispObject oldval = par::symval(s);
+
     if (qflags(s) & flagGLOBAL) {
         int loc = par::allocate_symbol();
         // par::local_symbol(loc) = qvalue(s);
-        LispObject val = qvalue(s);
+        // LispObject val = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL; // disable global
 
-        par::symval(s) = val;
+        // par::symval(s) = val;
     }
 
     qflags(s) |= flagFLUID;
+
+    par::symval(s) = oldval;
 
     if (par::symval(s) == undefined) {
         par::symval(s) = nil;
@@ -3275,9 +3293,9 @@ void unfluid_symbol(LispObject s) {
     qflags(s) &= ~flagFLUID;
     par::symval(s) = val;
 
-    if (par::symval(s) == undefined) {
-        par::symval(s) = nil;
-    }
+    // if (par::symval(s) == undefined) {
+    //     par::symval(s) = nil;
+    // }
 }
 
 LispObject chflag(LispObject x, void (*f)(LispObject)) {
