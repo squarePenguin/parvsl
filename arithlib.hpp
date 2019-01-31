@@ -672,7 +672,7 @@ INLINE_VAR realloc_t *realloc_function = realloc;
 INLINE_VAR free_t    *free_function   = free;
 
 inline uint64_t *reserve(size_t n)
-{   assert(n>0 && n<1000000); // Temporary upper limit on size
+{   assert(n>0);
     uint64_t *r = (uint64_t *)(*malloc_function)((n+1)*sizeof(uint64_t));
     assert(r != NULL);
     return &r[1];
@@ -6345,8 +6345,8 @@ inline bool shifted_reduce_for_gcd(uint64_t *a, size_t lena,
 // Here we compute r = u*a - v*b, where lenr >= min(lena, lenb). This
 // is for use in Lehmer reductions.
 // In general this will be used as in
-//    ua_minus_bv(a, u1, b, v1, temp);
-//    ua_minus_bv(a, u2, b, v2, a);
+//    au_minus_bv(a, u1, b, v1, temp);
+//    bv_minus_bv(a, u2, b, v2, a);
 //    copy from temp to b
 // so note that the destination may be the same vector as one of the inputs.
 // This will only be used when a and b are almost the same length. I leave
@@ -6379,6 +6379,36 @@ inline bool au_minus_bv(uint64_t *a, size_t lena,
     return negative(r[lenr-1]);
 }
 
+// Since the code here is quite short I will also provide a version
+// for r = -u*a + b*v;
+// Again this supposes that a is at least as long as b.
+
+inline bool minus_au_plus_bv(uint64_t *a, size_t lena,
+                        uint64_t u,
+                        uint64_t *b, size_t lenb,
+                        uint64_t v,
+                        uint64_t *r, size_t &lenr)
+{   assert(lena == lenb || lena == lenb+1);
+    uint64_t hia, loa, ca = 0, hib, lob, cb = 0, borrow = 0;
+    for (size_t i=0; i<lenb; i++)
+    {   multiply64(a[i], u, hia, loa);
+// hia is the high part of a product so carrying 1 into it can not cause it
+// to overflow. Just!
+        hia += add_with_carry(loa, ca, loa);
+        multiply64(b[i], v, hib, lob);
+        hib += add_with_carry(lob, cb, lob);
+        borrow = subtract_with_borrow(lob, loa, borrow, r[i]);
+        ca = hia;
+        cb = hib;
+    }
+    lenr = lenb;
+    if (lena > lenb)
+    {   a[lena-1] = cb - ca - borrow;
+        lenr = lena;
+    }
+    return negative(r[lenr-1]);
+}
+
 // gcd_reduction starts with a > b and |b| >=2. It must reset a and
 // b (and their lengths) to be smaller. The basic Euclidean algorithm
 // would go
@@ -6389,7 +6419,8 @@ inline bool au_minus_bv(uint64_t *a, size_t lena,
 
 void gcd_reduction(uint64_t *&a, size_t &lena,
                    uint64_t *&b, size_t &lenb,
-                   size_t &olena, size_t &olenb)
+                   size_t &olena, size_t &olenb,
+                   uint64_t *&temp, size_t &lentemp)
 {
 //    display("a", a, lena);
 //    display("b", b, lenb);
@@ -6468,7 +6499,7 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
 printf("For Lehmer:\n");
 printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
        "b = %.16" PRIx64 ":%.16" PRIx64 "\n", a0, a1, b0, b1);
-        while (b0!=0 || b1!= 0)
+        while (b0!=0 || b1!=0)
         {   uint64_t q;
 // Here I want to set q = {a0,a1}/{b0,b1}, and I expect that the answer
 // is a reasonably small integer. But it could potentially be huge.
@@ -6491,6 +6522,8 @@ printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
 // end up negative.
             q = ahi/bhi;
 printf("q = %" PRIu64 "\n", q);
+// I will stop this shortly before vb overflows (I hope)
+            if (62-nlz(q) > nlz(vb<0 ? -vb : vb)) break;
 // Now I need to go
 //              ua -= q*va;
 //              ub -= q*vb;
@@ -6522,103 +6555,124 @@ printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
                 w = ua; ua = va; va = w;
                 w = ub; ub = vb; vb = w;
             }
-        } 
+        }
+// Ahah now I am almost done. I want to go
+//          a' = |ua*a + ub*b|;
+//          b' = |va*a + vb*b|;
+//          if (a' > b') [a, b] = [a', b'];
+//          else [a, b] = [b', a'];
+// and in the first two lines I need to be aware that one or the other
+// (but not both) or ua and ub will be negative so I really have a subtraction,
+// and similarly for v1, vb.
+        if (temp == NULL)
+        {   push(a);
+            push(b);
+            temp = reserve(lena>lenb ? lena : lenb);
+            pop(b);
+            pop(a);
+        }
+        if (ub < 0)
+        {   if (au_minus_bv(a, lena, ua, b, lenb, -ub, temp, lentemp))
+                internal_negate(temp, lentemp, temp);
+        }
+        else if (minus_au_plus_bv(a, lena, -ua, b, lenb, ub, temp, lentemp))
+            internal_negate(temp, lentemp, temp);
+        truncate_positive(temp, lentemp);
+        if (vb < 0)
+        {   if (au_minus_bv(a, lena, va, b, lenb, -vb, a, lena))
+                internal_negate(a, lena, a);
+        }
+        else if (minus_au_plus_bv(a, lena, -va, b, lenb, vb, a, lena))
+            internal_negate(a, lena, a);
+        truncate_positive(a, lena);
+        internal_copy(temp, lentemp, b);
+        lenb = lentemp;
+display("new a: ", a, lena);
+display("new b: ", b, lenb);
+        return;
     }
-    if (diff >= 60)
-    {
-// This is the "a = a - q*b;" case. For initial development I will use
-// this all the time.
+// If I drop through to here I will do a simple reduction. This happens
+// either if the initial quotient a/b is huge (over 2^60) or if as I start
+// setting up for the Lehmer step I find I can not make enough progress
+// with that to be useful. For instance if the next two steps would have
+// q=1 and then q=<huge> I can not combine in the huge step to make Lehmer
+// style progress and I should drop down and do the "q=1" reduction first
+// (followed by the next huge one).
+//
+// This is the "a = a - q*b;" case.
 // Collect the top 128 bits of both a and b.
-        b0 = b0<<lzb;
-        if (lzb!=0) b0 |= (b1>>(64-lzb));
-        b1 = b1<<lzb;
-        if (lzb!=0) b1 |= (b2>>(64-lzb));
-        a0 = a0<<lza;
-        if (lza!=0) a0 |= (a1>>(64-lza));
-        a1 = a1<<lza;
-        if (lza!=0) a1 |= (a2>>(64-lza));
-        a2 = a2<<lza;
+    b0 = b0<<lzb;
+    if (lzb!=0) b0 |= (b1>>(64-lzb));
+    b1 = b1<<lzb;
+    if (lzb!=0) b1 |= (b2>>(64-lzb));
+    a0 = a0<<lza;
+    if (lza!=0) a0 |= (a1>>(64-lza));
+    a1 = a1<<lza;
+    if (lza!=0) a1 |= (a2>>(64-lza));
+    a2 = a2<<lza;
 // When I have done this b0 will have its top bit set and I will
 // want to have a0<b0 because I will be dividing {a0,a1}/b0 and I want the
 // quotient to fit within a single 64-bit word.
-        if (a0 >= b0)
-        {   a2 = (a2>>1) | (a1<<63);
-            a1 = (a1>>1) | (a0<<63);
-            a0 = a0>>1;
-            lza = lza-1;
-            diff = diff+1;
-        }
-        uint64_t q, r;
+    if (a0 >= b0)
+    {   a2 = (a2>>1) | (a1<<63);
+        a1 = (a1>>1) | (a0<<63);
+        a0 = a0>>1;
+        lza = lza-1;
+        diff = diff+1;
+    }
+    uint64_t q, r;
 // I want to get as close an approximation to the full quotient as I can,
 // and a "correction" of the form {a0,a1} -= a0*b1/b0 should do the trick.
-        multiply64(a0, b1, q, r);
-        divide64(q, r, b0, q, r);
-        r = a1 - q;
-        if (r > a1) a0--;
-        a1 = r; 
-        divide64(a0, a1, b0, q, r);
+    multiply64(a0, b1, q, r);
+    divide64(q, r, b0, q, r);
+    r = a1 - q;
+    if (r > a1) a0--;
+    a1 = r;
+    divide64(a0, a1, b0, q, r);
 // Now I want to go "a = a - q*b*2^(diff-64);". The "-64" there is because
 // the quotient I computed in q is essentially to be viewed as a fraction.
 // So if diff<=64 I will need to do something special.
-        if (diff <= 64)
-        {   size_t bits_to_lose = 64 - diff;
+    if (diff <= 64)
+    {   size_t bits_to_lose = 64 - diff;
 // I will shift q right, but doing so in such a way that I try to round to
 // nearest.
-            if (bits_to_lose != 0)
-            {   q = q >> (bits_to_lose-1);
-                q = (q >> 1) + (q & 1);
-            }
+        if (bits_to_lose != 0)
+        {   q = q >> (bits_to_lose-1);
+            q = (q >> 1) + (q & 1);
+        }
 // Now just do "a = a-q*b;", then ensure that the result is positive
 // and clear away any leading zeros left in its representation.
 //            printf("Q = %" PRIu64 "\n", q);
-            if (reduce_for_gcd(a, lena, q, b, lenb))
-                internal_negate(a, lena, a);
-            truncate_unsigned(a, lena);
-//            display("next A1", a , lena);
-        }
-        else
-        {
+        if (reduce_for_gcd(a, lena, q, b, lenb))
+            internal_negate(a, lena, a);
+        truncate_unsigned(a, lena);
+//      display("next A1", a , lena);
+    }
+    else
+    {
 // Here I need to do a reduction but the quotient in the step is very large
 // so I will use the value of q I have as basically the top 60+ bits of the
 // quotient I need but with "diff" bits stuck on the end. If diff is a
 // multiple of 64 then this is merely a shift by some whole number of words.
-            if ((diff%64) == 0)
-            {   size_t diffw = diff/64;
-//                printf("Q = %" PRIu64 " << %u words\n", q, (unsigned int)diffw);
-                if (reduce_for_gcd(a+diffw-1, lena+1-diffw, q, b, lenb))
-                    internal_negate(a, lena, a);
-                truncate_unsigned(a, lena);
-//                display("next A2", a , lena);
-            }
-            else
-            {   size_t diffw = diff/64;
-                diff = diff%64;
-//                printf("Q = %" PRIu64 " << %u words, %d bits\n",
-//                        q, (unsigned int)diffw, (int)diff);
-                if (shifted_reduce_for_gcd(a+diffw-1, lena+1-diffw,
-                                           q, b, lenb, diff))
-                    internal_negate(a, lena, a);
-                truncate_unsigned(a, lena);
-//                display("next A3", a , lena);
-            }
+        if ((diff%64) == 0)
+        {   size_t diffw = diff/64;
+//          printf("Q = %" PRIu64 " << %u words\n", q, (unsigned int)diffw);
+            if (reduce_for_gcd(a+diffw-1, lena+1-diffw, q, b, lenb))
+                internal_negate(a, lena, a);
+            truncate_unsigned(a, lena);
+//          display("next A2", a , lena);
         }
-    }
-    else
-    {   abort("Lehmer treatment not coded yet\n");
-    }
-//    printf("Now check if swap needed\n");
-// Swap the two numbers so that once again a will be the larger.
-    if (big_unsigned_greaterp(b, lenb, a, lena))
-    {   uint64_t *ax = a;
-        a = b;
-        b = ax;
-        size_t lenax = lena;
-        lena = lenb;
-        lenb = lenax;
-        lenax = olena;
-        olena = olenb;
-        olenb = lenax;
-//        printf("Swapped a and b\n");
+        else
+        {   size_t diffw = diff/64;
+            diff = diff%64;
+//          printf("Q = %" PRIu64 " << %u words, %d bits\n",
+//                  q, (unsigned int)diffw, (int)diff);
+            if (shifted_reduce_for_gcd(a+diffw-1, lena+1-diffw,
+                                       q, b, lenb, diff))
+                internal_negate(a, lena, a);
+            truncate_unsigned(a, lena);
+//          display("next A3", a , lena);
+        }
     }
 }
 
@@ -6710,24 +6764,28 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
         abandon(b);
         return unsigned_int_to_bignum(bb);
     }
+// In some cases performing a reduction will require a workspace vector.
+// I woll only allocate this as and when first needed.
+    uint64_t *temp = NULL;
+    size_t lentemp = lena;
 // Now at last a and b and genuine unsigned vectors without leading digits
 // and with a > b. The next line is the key iteration in this whole procedure.
     while (lenb != 1)
-    {
-#ifdef DEBUG_OVERRUN
-        if (debug_arith)
-        {   assert(a[olena] == 0xaaaaaaaaaaaaaaaaU);
-            assert(b[olenb] == 0xaaaaaaaaaaaaaaaaU);
+    {   gcd_reduction(a, lena, b, lenb, olena, olenb, temp, lentemp);
+        if (big_unsigned_greaterp(b, lenb, a, lena))
+        {   uint64_t *ax = a;
+            a = b;
+            b = ax;
+            size_t lenax = lena;
+            lena = lenb;
+            lenb = lenax;
+            lenax = olena;
+            olena = olenb;
+            olenb = lenax;
+//          printf("Swapped a and b\n");
         }
-#endif
-        gcd_reduction(a, lena, b, lenb, olena, olenb);
-#ifdef DEBUG_OVERRUN
-        if (debug_arith)
-        {   assert(a[olena] == 0xaaaaaaaaaaaaaaaaU);
-            assert(b[olenb] == 0xaaaaaaaaaaaaaaaaU);
-        }
-#endif
     }
+    if (temp != NULL) abandon(temp);
 // One possibility is that b==0 and then a holds the GCD. There is a
 // pathological case where an input was -2^(64*n-1), which fits within n
 // words, and the GCD ends up as +2^(64*n-1) which needs an extra word.
