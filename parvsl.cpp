@@ -2183,6 +2183,7 @@ LispObject lookup(const char *s, size_t len, int flag)
         w = qcdr(w);
     }
 // here the symbol as required was not already present.
+// TODO: add mutex lock here
     if ((flag & 1) == 0) return undefined;
     pn = makestring(s, len);
     w = allocatesymbol(pn);

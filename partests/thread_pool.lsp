@@ -55,8 +55,7 @@
 (de thread_pool ()
     (global '(tp_q))
     (setq tp_q (safeq))
-    (let ((nthreads 1))
-    % (let ((nthreads (sub1 (hardwarethreads))))
+    (let ((nthreads (sub1 (hardwarethreads))))
     (dotimes (i nthreads) (thread 
         % run indefinitely  
         '(while t
