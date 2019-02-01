@@ -12,18 +12,15 @@
 //       will interact with heap reloading code & GC.
 //    gc to use freelist in heap2 to avoid waste on fragmentation due
 //       to pinned items.
-//    fixnums to length that varies with machine word-length.
 //    scan for free space bitmap to go word at a time not bit at a time.
 //    &rest in lambda-lists.
-//    tracing fully implemented. Other backtrace and debugging issues.
-//    lots more CSL compatibility.
+
 //=========================================================================
 
 // Visible Lisp                                  A C Norman, August 2012-19
 //
-// This is a small Lisp system. It is especially
-// intended for use of the Raspberry Pi board, but should build
-// on almost any computer with a modern C compiler.
+// This is a small Lisp system, but large enough to run significant
+// code such as the Reduce algebra system.
 
 /**************************************************************************
  * Copyright (C) 2019.                                   A C Norman       *
@@ -6511,6 +6508,76 @@ static LispObject Nexpt(LispObject a, LispObject b)
 }
 
 
+// ====== random ======
+
+class Randomer
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   return packfixnum(arithlib::uniform_uint64(a));
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {   size_t lena = arithlib::number_size(a);
+        arithlib::push(a);
+        uint64_t *r = arithlib::reserve(lena);
+        arithlib::pop(a);
+        size_t lenr;
+        arithlib::uniform_upto(a, lena, r, lenr);
+        return arithlib::confirm_size(r, lena, lenr);
+    }
+    static inline LispObject op(number_dispatcher::D t1, double a)
+    {   uint64_t i = arithlib::mersenne_twister() & 0x1ffffffffffffU;
+        double d = (double)i;
+        double r = d/(double)0x1ffffffffffffU;
+        return boxfloat(a*r);
+    }
+};
+
+static LispObject Nrandom(LispObject a)
+{   return number_dispatcher::unary<LispObject,Randomer>("random", a);
+}
+
+LispObject Lrandom(LispObject lits, LispObject x)
+{   return Nrandom(x);
+}
+
+// ====== make-random-state ======
+
+class MakeRandomStater
+{
+public:
+    static inline LispObject op(number_dispatcher::I t1, int64_t a)
+    {   if (a == 0)
+        {   std::seed_seq random_seed{
+                (uint32_t)arithlib::threadid,
+                (uint32_t)arithlib::basic_randomness(),
+                (uint32_t)arithlib::basic_randomness(),
+                (uint32_t)arithlib::basic_randomness(),
+                (uint32_t)std::time(NULL),
+                (uint32_t)
+        std::chrono::high_resolution_clock::now().time_since_epoch().count()};
+            arithlib::mersenne_twister.seed(random_seed);
+        }
+        else arithlib::reseed(a);
+        return nil;
+    }
+    static inline LispObject op(number_dispatcher::B t1, uint64_t *a)
+    {
+// I ought to be able to use all the digits of the bignum as a seed_sequence
+// here, but for now I will just use the low bits.
+        arithlib::reseed(a[0]);
+        return nil;
+    }
+};
+
+static LispObject Nmake_random_state(LispObject a)
+{   return number_dispatcher::iunary<LispObject,MakeRandomStater>("make-random-state", a);
+}
+
+LispObject Lmake_random_state(LispObject lits, LispObject x)
+{   return Nmake_random_state(x);
+}
+
 LispObject Lminusp(LispObject lits, LispObject x)
 {
 // Anything non-numeric will not be negative!
@@ -7548,8 +7615,6 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("time",              Ltime),             \
     SETUP_TABLE_SELECT("vector",            Lvector_0),
 
-#define SETUP0a
-
 #define SETUP1                                                  \
     SETUP_TABLE_SELECT("append",            Lappend_1),         \
     SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_1),  \
@@ -7571,12 +7636,6 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("lor",               Llogor_1),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_1),         \
     SETUP_TABLE_SELECT("allocate-string",   Lallocate_string),  \
-    SETUP_TABLE_SELECT("sin",               Lsin),              \
-    SETUP_TABLE_SELECT("cos",               Lcos),              \
-    SETUP_TABLE_SELECT("exp",               Lexp),              \
-    SETUP_TABLE_SELECT("log",               Llog),              \
-    SETUP_TABLE_SELECT("log2",              Llog2),             \
-    SETUP_TABLE_SELECT("log10",             Llog10),            \
     SETUP_TABLE_SELECT("atan",              Latan),             \
     SETUP_TABLE_SELECT("atom",              Latom),             \
     SETUP_TABLE_SELECT("pairp",             Lpairp),            \
@@ -7662,6 +7721,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("min",               Lmin_1),            \
     SETUP_TABLE_SELECT("minus",             Lminus),            \
     SETUP_TABLE_SELECT("minusp",            Lminusp),           \
+    SETUP_TABLE_SELECT("random",            Lrandom),           \
+    SETUP_TABLE_SELECT("make-random-state", Lmake_random_state),\
     SETUP_TABLE_SELECT("numberp",           Lnumberp),          \
     SETUP_TABLE_SELECT("msd",               Lmsd),              \
     SETUP_TABLE_SELECT("lsd",               Llsd),              \
@@ -7708,7 +7769,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("sqrt",              Lsqrt),             \
     SETUP_TABLE_SELECT("exp",               Lexp),              \
     SETUP_TABLE_SELECT("log",               Llog),              \
-/* Now a horribly large number of elementary functions */       \
+    SETUP_TABLE_SELECT("log2",              Llog2),             \
+    SETUP_TABLE_SELECT("log10",             Llog10),            \
     SETUP_TABLE_SELECT("sin",               Lsin),              \
     SETUP_TABLE_SELECT("cos",               Lcos),              \
     SETUP_TABLE_SELECT("sec",               Lsec),              \

@@ -61,6 +61,18 @@
 // need that. It should work on 32-bit systems as well, although one should
 // expect performance there to be lower.
 //
+// The code here tried to arrange that any operations that might overflow are
+// done using unsigned types, because in C++ overflow in signed arithmetic
+// yields undefined results - ie on some machines the values delivered could
+// be quite unrelated to the desired ones. This means that I do plenty of
+// arithmetic rather as
+//     int c = (int)((unsigned)a + (unsigned)b);
+// and I rely on the result being as woudl be seen with natural 2s complement
+// working. From C++20 onwards this is likely to be guaranteed by the standard,
+// but at present it is not, so although this could will work on almost all
+// known machines if judged against the standard at is at best relying on
+// implementation defined behaviour.
+//
 // If "softfloat_h" is defined I will suppose that there is a type "float128"
 // available and I will support conversions to and from that. In part because
 // this type is not supported in any standard way I will be assuming that the
@@ -2288,6 +2300,13 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     lo = (uint64_t)r;
 }
 
+inline void signed_multiply64(int64_t a, int64_t b,
+                              int64_t &hi, uint64_t &lo)
+{   INT128 r = (INT128)a*(INT128)b;
+    hi = (int64_t)((UINT128)r >> 64);
+    lo = (uint64_t)r;
+}
+
 // divide {hi,lo} by divisor and generate a quotient and a remainder. The
 // version of the code that is able to use __int128 can serve as clean
 // documentation of the intent.
@@ -2374,6 +2393,16 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     if (u0 < c) u1++; 
     hi = u1;
     lo = u0;
+}
+
+inline void signed_multiply64(int64_t a, int64_t b,
+                              int64_t &hi, uint64_t &lo)
+{   uint64_t h, l;
+    multiply64((uint64_t)a, (uint64_t)b, h, l);
+    if (a < 0) h -= (uint64_t)b;
+    if (b < 0) h -= (uint64_t)a;
+    hi = (int64_t)h;
+    lo = l;
 }
 
 inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
@@ -2587,7 +2616,7 @@ INLINE_VAR uint64_t thread_local threadid =
 INLINE_VAR uint64_t seed_component_1 = (uint64_t)basic_randomness();
 INLINE_VAR uint64_t seed_component_2 = (uint64_t)basic_randomness();
 INLINE_VAR uint64_t seed_component_3 = (uint64_t)basic_randomness();
-INLINE_VAR thread_local uint64_t time_now = (uint64_t)time(NULL);
+INLINE_VAR thread_local uint64_t time_now = (uint64_t)std::time(NULL);
 INLINE_VAR thread_local uint64_t chrono_now = (uint64_t)
     (std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
@@ -2730,18 +2759,12 @@ inline void uniform_upto(uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 }
 
 inline intptr_t uniform_upto(intptr_t aa)
-{   uint64_t *a;
-    size_t lena;
-    uint64_t w[2];
-    if (stored_as_fixnum(aa))
-    {   w[1] = (uint64_t)int_of_handle(aa);
-        lena = 1;
-        a = &w[1];
+{   if (stored_as_fixnum(aa))
+    {   uint64_t r = uniform_uint64((uint64_t)int_of_handle(aa));
+        return int_to_handle(r);
     }
-    else
-    {   a = vector_of_handle(aa);
-        lena = number_size(a);
-    }
+    uint64_t *a = vector_of_handle(aa);
+    size_t lena = number_size(a);
     push(a);
     uint64_t *r = reserve(lena);
     pop(a);
@@ -6496,9 +6519,11 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
 // I am keeping these values as signed... but the code U have above that
 // calculates u*a-b*v will take unsigned inputs!
         int64_t ua = 1, va = 0, ub = 0, vb = 1;
+#ifdef LEHMER
 printf("For Lehmer:\n");
 printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
        "b = %.16" PRIx64 ":%.16" PRIx64 "\n", a0, a1, b0, b1);
+#endif
         while (b0!=0 || b1!=0)
         {   uint64_t q;
 // Here I want to set q = {a0,a1}/{b0,b1}, and I expect that the answer
@@ -6516,22 +6541,42 @@ printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
             if (lza1 < 64) bhi = (b0<<lza1) | (b1>>(64-lza1));
             else if (lza1 == 64) bhi = b1;
             else bhi = b1<<(lza1-64);
+#ifdef LEHMER
 printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
+#endif
 // q could end up and over-estimate for the true quotient because bhi has
 // been truncated and so under-represents b. If that happens then a-q*b will
 // end up negative.
             q = ahi/bhi;
+#ifdef LEHMER
 printf("q = %" PRIu64 "\n", q);
-// I will stop this shortly before vb overflows (I hope)
-            if (62-nlz(q) > nlz(vb<0 ? -vb : vb)) break;
+#endif
 // Now I need to go
 //              ua -= q*va;
 //              ub -= q*vb;
 //              {a0,a1} -= q*{b0,b1}
 // Then if a is negative I will negate a and ua and ub.
 // Finally, if (as I mostly expect) now a<b I swap a<=>b, ua<=>ub and va<=>vb
-            ua -= q*va;
-            ub -= q*vb;
+// If I would get an overflow in updating ua or ub I will break out of the
+// loop.
+            int64_t h;
+            uint64_t l;
+            signed_multiply64(q, va, h, l);
+            if ((uint64_t)h + (l>>63) != 0) break;
+// There could be overflow in the following subtraction... So I check
+// if that was about to happen and break out of the loop if so.
+            if (ua >= 0)
+            {   if (ua - INT64_MAX > (int64_t)l) break;
+            }
+            else if (ua - INT64_MIN < (int64_t)l) break; 
+            ua -= l;
+            signed_multiply64(q, vb, h, l);
+            if ((uint64_t)h + (l>>63) != 0) break;
+            if (ub >= 0)
+            {   if (ub - INT64_MAX > (int64_t)l) break;
+            }
+            else if (ub - INT64_MIN < (int64_t)l) break; 
+            ub -= l;
             uint64_t hi, lo;
             multiply64(q, b1, hi, lo);
             hi += subtract_with_borrow(a1, lo, a1);
@@ -6544,9 +6589,11 @@ printf("q = %" PRIu64 "\n", q);
                 ua = -ua;
                 ub = -ub;
             }
+#ifdef LEHMER
 printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
        "  ua=%" PRId64 " ub=%" PRId64 "\n",
        q, a0, a1, ua, ub);
+#endif
             if (b0 > a0 ||
                 (b0 == a0 && b1 > a1))
             {   uint64_t w;
@@ -6587,8 +6634,10 @@ printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
         truncate_positive(a, lena);
         internal_copy(temp, lentemp, b);
         lenb = lentemp;
+#ifdef LEHMER
 display("new a: ", a, lena);
 display("new b: ", b, lenb);
+#endif
         return;
     }
 // If I drop through to here I will do a simple reduction. This happens
