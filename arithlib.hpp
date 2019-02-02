@@ -439,14 +439,14 @@ static inline void abort1()
         arithlib::abort1(__VA_ARGS__);                                     \
     }
 
-#ifdef NEW
+// The following variable (well constant) enabled "assert" checking. The
+// effect might be a (probably tarher modest) slowdown.
+
 INLINE_VAR const bool debug_arith = true;
-#else
-INLINE_VAR const bool debug_arith = false;
-#endif
 
 template <typename F>
-static inline void assert1(bool ok, F&& action, const char *location)
+static inline void assert1(bool ok, const char *why,
+                           F&& action, const char *location)
 {
 // Use this as in:
 //     assert(predicate, [&]{...});
@@ -460,20 +460,21 @@ static inline void assert1(bool ok, F&& action, const char *location)
     }
 }
 
-static inline void assert1(bool ok, const char *location)
+static inline void assert1(bool ok, const char *why, const char *location)
 {
 // For simple use where a customised message is not required:
 //     assert(predicate);
     if (debug_arith && !ok)
     {   _abort_location = location;
-        abort1("failure reported via assert()");
+        abort1(why);
     }
 }
 
 #undef assert
 
-#define assert(...) \
-    arithlib::assert1(__VA_ARGS__, __FILE__ " line " STRINGIFY(__LINE__))
+#define assert(...)                                            \
+    arithlib::assert1(__VA_ARGS__, "assert(" #__VA_ARGS__ ")",   \
+                      __FILE__ " line " STRINGIFY(__LINE__))
 
 
 // At times during development it is useful to be able to send messages
@@ -3450,7 +3451,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
         }
         else sign = false;
         char buffer[24];
-        int len = 0;
+        size_t len = 0;
         while (v != 0)
         {   buffer[len++] = '0' + v%10;
             v = v/10;
@@ -3461,7 +3462,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
         if (sign) buffer[len++] = '-';
         else if (len == 0) buffer[len++] = '0';
         char *r = reserve_string(len);
-        for (int i=0; i<len; i++) r[i] = buffer[len-i-1];
+        for (size_t i=0; i<len; i++) r[i] = buffer[len-i-1];
         return confirm_size_string(r, len, len);
     }
 // The size (m) for the block of memory that I put my result in is
@@ -3560,7 +3561,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
 // digits into the buffer.
         top = r[p++];
 // For subsequent chunks I want to print exactly 19 decimal digits.
-        for (int i=0; i<18; i++)
+        for (size_t i=0; i<18; i++)
         {   p1[18-i] = '0' + top%10;
             top = top/10;
         }
@@ -6368,15 +6369,15 @@ inline bool shifted_reduce_for_gcd(uint64_t *a, size_t lena,
 // Here we compute r = u*a - v*b, where lenr >= min(lena, lenb). This
 // is for use in Lehmer reductions.
 // In general this will be used as in
-//    au_minus_bv(a, u1, b, v1, temp);
-//    bv_minus_bv(a, u2, b, v2, a);
+//    ua_minus_vb(a, u1, b, v1, temp);
+//    ua_minus_vb(a, u2, b, v2, a);
 //    copy from temp to b
 // so note that the destination may be the same vector as one of the inputs.
 // This will only be used when a and b are almost the same length. I leave
 // a result of length lena even though I very much expect that in at least
 // almost all cases the result will be almost 128 bits smaller!
 
-inline bool au_minus_bv(uint64_t *a, size_t lena,
+inline bool ua_minus_vb(uint64_t *a, size_t lena,
                         uint64_t u,
                         uint64_t *b, size_t lenb,
                         uint64_t v,
@@ -6396,7 +6397,7 @@ inline bool au_minus_bv(uint64_t *a, size_t lena,
     }
     lenr = lenb;
     if (lena > lenb)
-    {   a[lena-1] = ca - cb - borrow;
+    {   r[lenb] = a[lena-1]*u + ca - cb - borrow;
         lenr = lena;
     }
     return negative(r[lenr-1]);
@@ -6406,7 +6407,7 @@ inline bool au_minus_bv(uint64_t *a, size_t lena,
 // for r = -u*a + b*v;
 // Again this supposes that a is at least as long as b.
 
-inline bool minus_au_plus_bv(uint64_t *a, size_t lena,
+inline bool minus_ua_plus_vb(uint64_t *a, size_t lena,
                         uint64_t u,
                         uint64_t *b, size_t lenb,
                         uint64_t v,
@@ -6426,7 +6427,7 @@ inline bool minus_au_plus_bv(uint64_t *a, size_t lena,
     }
     lenr = lenb;
     if (lena > lenb)
-    {   a[lena-1] = cb - ca - borrow;
+    {   r[lenb] = cb - ca - a[lena-1]*u - borrow;
         lenr = lena;
     }
     return negative(r[lenr-1]);
@@ -6535,15 +6536,18 @@ printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
             int lzb1 = b0==0 ? 64+nlz(b1) : nlz(b0);
             if (lza1 > lzb1+60) break; // quotient will be too big
             uint64_t ahi, bhi;
-            if (lza1 < 64) ahi = (a0<<lza1) | (a1>>(64-lza1));
+            if (lza1 == 0) ahi = a0;
+            else if (lza1 < 64) ahi = (a0<<lza1) | (a1>>(64-lza1));
             else if (lza1 == 64) ahi = a1;
             else ahi = a1<<(lza1-64);
-            if (lza1 < 64) bhi = (b0<<lza1) | (b1>>(64-lza1));
+            if (lza1 == 0) bhi = b0;
+            else if (lza1 < 64) bhi = (b0<<lza1) | (b1>>(64-lza1));
             else if (lza1 == 64) bhi = b1;
             else bhi = b1<<(lza1-64);
 #ifdef LEHMER
 printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
 #endif
+            if (bhi == 0) break;
 // q could end up and over-estimate for the true quotient because bhi has
 // been truncated and so under-represents b. If that happens then a-q*b will
 // end up negative.
@@ -6551,6 +6555,7 @@ printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
 #ifdef LEHMER
 printf("q = %" PRIu64 "\n", q);
 #endif
+            assert(q != 0);
 // Now I need to go
 //              ua -= q*va;
 //              ub -= q*vb;
@@ -6560,23 +6565,24 @@ printf("q = %" PRIu64 "\n", q);
 // If I would get an overflow in updating ua or ub I will break out of the
 // loop.
             int64_t h;
-            uint64_t l;
-            signed_multiply64(q, va, h, l);
-            if ((uint64_t)h + (l>>63) != 0) break;
+            uint64_t l1, l2;
+            signed_multiply64(q, va, h, l1);
+            if ((uint64_t)h + (l1>>63) != 0) break;
 // There could be overflow in the following subtraction... So I check
 // if that was about to happen and break out of the loop if so.
             if (ua >= 0)
-            {   if (ua - INT64_MAX > (int64_t)l) break;
+            {   if (ua - INT64_MAX > (int64_t)l1) break;
             }
-            else if (ua - INT64_MIN < (int64_t)l) break; 
-            ua -= l;
-            signed_multiply64(q, vb, h, l);
-            if ((uint64_t)h + (l>>63) != 0) break;
+            else if (ua - INT64_MIN < (int64_t)l1) break; 
+            signed_multiply64(q, vb, h, l2);
+            if ((uint64_t)h + (l2>>63) != 0) break;
             if (ub >= 0)
-            {   if (ub - INT64_MAX > (int64_t)l) break;
+            {   if (ub - INT64_MAX > (int64_t)l2) break;
             }
-            else if (ub - INT64_MIN < (int64_t)l) break; 
-            ub -= l;
+            else if (ub - INT64_MIN < (int64_t)l2) break; 
+// I must either update both or neither of ua, ub.
+            ua -= l1;
+            ub -= l2;
             uint64_t hi, lo;
             multiply64(q, b1, hi, lo);
             hi += subtract_with_borrow(a1, lo, a1);
@@ -6619,18 +6625,29 @@ printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
             pop(a);
         }
         if (ub < 0)
-        {   if (au_minus_bv(a, lena, ua, b, lenb, -ub, temp, lentemp))
+        {   assert(ua >= 0);
+            if (ua_minus_vb(a, lena, ua, b, lenb, -ub, temp, lentemp))
                 internal_negate(temp, lentemp, temp);
         }
-        else if (minus_au_plus_bv(a, lena, -ua, b, lenb, ub, temp, lentemp))
-            internal_negate(temp, lentemp, temp);
+        else
+        {   assert(ua <= 0);
+            if (minus_ua_plus_vb(a, lena, -ua, b, lenb, ub, temp, lentemp))
+                internal_negate(temp, lentemp, temp);
+        }
         truncate_positive(temp, lentemp);
+#ifdef LEHMER
+display("temp: ", temp, lentemp);
+#endif
         if (vb < 0)
-        {   if (au_minus_bv(a, lena, va, b, lenb, -vb, a, lena))
+        {   assert(va >= 0);
+            if (ua_minus_vb(a, lena, va, b, lenb, -vb, a, lena))
                 internal_negate(a, lena, a);
         }
-        else if (minus_au_plus_bv(a, lena, -va, b, lenb, vb, a, lena))
-            internal_negate(a, lena, a);
+        else
+        {   assert(va <= 0);
+            if (minus_ua_plus_vb(a, lena, -va, b, lenb, vb, a, lena))
+                internal_negate(a, lena, a);
+        }
         truncate_positive(a, lena);
         internal_copy(temp, lentemp, b);
         lenb = lentemp;
