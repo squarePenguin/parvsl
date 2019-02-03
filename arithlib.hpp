@@ -6534,7 +6534,7 @@ printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
 // because then I can do a (cheap) 64-by-64 division.
             int lza1 = a0==0 ? 64+nlz(a1) : nlz(a0);
             int lzb1 = b0==0 ? 64+nlz(b1) : nlz(b0);
-            if (lza1 > lzb1+60) break; // quotient will be too big
+            if (lzb1 > lza1+60) break; // quotient will be too big
             uint64_t ahi, bhi;
             if (lza1 == 0) ahi = a0;
             else if (lza1 < 64) ahi = (a0<<lza1) | (a1>>(64-lza1));
@@ -6552,6 +6552,7 @@ printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
 // been truncated and so under-represents b. If that happens then a-q*b will
 // end up negative.
             q = ahi/bhi;
+            if (negative(q)) break;
 #ifdef LEHMER
 printf("q = %" PRIu64 "\n", q);
 #endif
