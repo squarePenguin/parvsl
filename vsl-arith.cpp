@@ -1,3 +1,4 @@
+#define LEHMER 1
 // This is a version that will use my "arithlib.hpp" big-number code.
 
 // Things to think about

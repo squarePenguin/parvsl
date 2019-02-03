@@ -1132,7 +1132,7 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   uintptr_t h = *(uintptr_t *)&p[-1];
+{   uintptr_t h = (uintptr_t)p[-1];
     size_t r = veclength(h);
     if (sizeof(LispObject) == 4) r -= 4;
     r = r/sizeof(uint64_t);
@@ -6098,7 +6098,7 @@ inline void unscale_for_division(uint64_t *r, size_t &lenr, int s)
         }
         assert(carry==0);
     }
-    truncate_positive(r, lenr);
+    truncate_unsigned(r, lenr);
 }
 
 // This function does long division on unsigned values, computing the
@@ -6142,10 +6142,10 @@ inline void unsigned_long_division(uint64_t *a, size_t &lena,
 // so if its top digit has its top bit set I need to prepend a zero;
     if (want_q)
     {   if (negative(q[lenq-1])) q[lenq++] = 0;
-        else truncate_positive(q, lenq);
+        else truncate_unsigned(q, lenq);
     }
     if (negative(a[lena-1])) a[lena++] = 0;
-    else truncate_positive(a, lena);
+    else truncate_unsigned(a, lena);
 }
 
 // Use unsigned_long_division when all that is required is the remainder.
@@ -6396,11 +6396,18 @@ inline bool ua_minus_vb(uint64_t *a, size_t lena,
         cb = hib;
     }
     lenr = lenb;
+// I want to report in whether u*a-v*b was negative. To do that I will
+// first note that the result that I am computing should be less than the
+// value of a, so I do not get too much messy overflow. I will look at the
+// borrow out from the top word of the result.
     if (lena > lenb)
-    {   r[lenb] = a[lena-1]*u + ca - cb - borrow;
+    {   multiply64(a[lena-1], u, hia, loa);
+        hia += add_with_carry(loa, ca, loa);
+        borrow = subtract_with_borrow(loa, cb, borrow, r[lena-1]);
         lenr = lena;
+        return negative(hia - borrow);
     }
-    return negative(r[lenr-1]);
+    return negative(ca - cb - borrow);
 }
 
 // Since the code here is quite short I will also provide a version
@@ -6416,8 +6423,6 @@ inline bool minus_ua_plus_vb(uint64_t *a, size_t lena,
     uint64_t hia, loa, ca = 0, hib, lob, cb = 0, borrow = 0;
     for (size_t i=0; i<lenb; i++)
     {   multiply64(a[i], u, hia, loa);
-// hia is the high part of a product so carrying 1 into it can not cause it
-// to overflow. Just!
         hia += add_with_carry(loa, ca, loa);
         multiply64(b[i], v, hib, lob);
         hib += add_with_carry(lob, cb, lob);
@@ -6427,10 +6432,15 @@ inline bool minus_ua_plus_vb(uint64_t *a, size_t lena,
     }
     lenr = lenb;
     if (lena > lenb)
-    {   r[lenb] = cb - ca - a[lena-1]*u - borrow;
+    {   multiply64(a[lena-1], u, hia, loa);
+        hia += add_with_carry(loa, ca, loa);
+        borrow = subtract_with_borrow(cb, loa, borrow, r[lena-1]); 
         lenr = lena;
+// It will be perfectly reasonable for hia to be zero and borrow to be zero
+// and hence the overall result positive.
+        return negative(- hia - borrow);
     }
-    return negative(r[lenr-1]);
+    return negative(cb - ca - borrow);
 }
 
 // gcd_reduction starts with a > b and |b| >=2. It must reset a and
@@ -6635,7 +6645,7 @@ printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
             if (minus_ua_plus_vb(a, lena, -ua, b, lenb, ub, temp, lentemp))
                 internal_negate(temp, lentemp, temp);
         }
-        truncate_positive(temp, lentemp);
+        truncate_unsigned(temp, lentemp);
 #ifdef LEHMER
 display("temp: ", temp, lentemp);
 #endif
@@ -6649,7 +6659,7 @@ display("temp: ", temp, lentemp);
             if (minus_ua_plus_vb(a, lena, -va, b, lenb, vb, a, lena))
                 internal_negate(a, lena, a);
         }
-        truncate_positive(a, lena);
+        truncate_unsigned(a, lena);
         internal_copy(temp, lentemp, b);
         lenb = lentemp;
 #ifdef LEHMER

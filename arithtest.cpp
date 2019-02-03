@@ -47,15 +47,15 @@ using namespace arithlib;
 // The tests come in sections, and these preprocessor symbols can be used
 // to select which sections get run.
 
-//#define TEST_SOME_BASICS 1
-//#define TEST_RANDOM 1
-//#define TEST_BITWISE 1
-//#define TEST_SHIFTS 1
-//#define TEST_PLUS_AND_TIMES 1
-//#define TEST_DIVISION 1
+#define TEST_SOME_BASICS 1
+#define TEST_RANDOM 1
+#define TEST_BITWISE 1
+#define TEST_SHIFTS 1
+#define TEST_PLUS_AND_TIMES 1
+#define TEST_DIVISION 1
 #define TEST_GCD 1
-//#define TEST_ISQRT 1
-//#define TEST_FLOAT
+#define TEST_ISQRT 1
+#define TEST_FLOAT
 
 // This function is to test if the least significant bit in the representation
 // of a floating point value is zero. It is used when verifying the correct
@@ -127,7 +127,7 @@ int main(int argc, char *argv[])
 // no more than 160 bits and it illustrates printing in both decimal and
 // hexadecimal.
 
-    maxbits = 130;
+    maxbits = 80;
     ntries = 10;
 
     std::cout << "Print some random numbers in decimal and hex" << std::endl;
@@ -412,7 +412,7 @@ int main(int argc, char *argv[])
 // Set up three values a, b and g. Let g'=gcd(a,b), g''=gcd(a*g,b*g) and
 // check if g''=g*g', and if g'' divides evenly into both a*g and b*g.
 
-    maxbits = 200;
+    maxbits = 300;
     ntries = 20*MILLION;
 
     std::cout << "Start of GCD testing" << std::endl;
@@ -433,10 +433,16 @@ int main(int argc, char *argv[])
             a = fudge_distribution_bignum(a, (int)(rr & 0xf));
             b = fudge_distribution_bignum(b, (int)((rr>>4) & 0xf));
             g = fudge_distribution_bignum(g, (int)((rr>>8) & 0xf));
-        } while (a==0 || b==0 || g==0);
+        } while (a<=0 || b<=0 || g<=0);
+//        std::cout << i << " " << a << " " << b << " " << g << std::endl;
+//        display("a", a);
+//        display("a", b);
         Bignum g1 = gcd(a, b);
         Bignum A = a*g;
         Bignum B = b*g;
+//        std::cout << i << " " << A << " " << B << std::endl;
+//        display("A", A);
+//        display("B", B);
         Bignum g2 = gcd(A, B);
         if (g2 == g1*abs(g) &&
             A%g2 == 0 &&
@@ -469,7 +475,7 @@ int main(int argc, char *argv[])
     ntries = 50*MILLION;
 
     std::cout << "Start of isqrt testing" << std::endl;
-    clk = clock(); clong = 0;
+    clk = clock();
 
     for (int i=1; i<=ntries; i++)
     {   if ((i & 0xfffff) == 0)
