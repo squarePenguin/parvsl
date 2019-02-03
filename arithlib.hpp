@@ -503,7 +503,12 @@ static inline void logprintf(const char *fmt, ...)
 // right shifts on signed values may or may not propagate the sign bit
 // and a left shift on signed values might cause trouble in overflow cases.
 // So here are versions that should behave consistently across all
-// architectures.
+// architectures. Well it is probable that from C++20 onwards the language
+// specification will arrange that right shifts on arithmetic types
+// propagate the sign in the way that I want, and it is also liable to be
+// the case that g++ and clang on all the computers that interest me do things
+// the "obvious way" already, so the code here is something of an exercise
+// in pedantry.
 
 static inline int32_t ASR(int32_t a, int n)
 {   if (n<0 || n>=8*(int)sizeof(int32_t)) n=0;
@@ -1091,7 +1096,7 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 //=========================================================================
 
 inline uint64_t *reserve(size_t n)
-{   assert(n>0 && n<1000000);
+{   assert(n>0);
 // I must allow for alignment padding on 32-bit platforms.
     if (sizeof(LispObject)==4) n = n*sizeof(uint64_t) + 4;
     else n = n*sizeof(uint64_t);
@@ -1105,12 +1110,13 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     {   intptr_t r = int_to_handle((int64_t)p[0]);
         return r;
     }
+    ((LispObject *)&p[-1])[0] =
+        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t));
 // If I am on a 32-bit system the data for a bignum is 8 bit aligned and
 // that leaves a 4-byte gat after the header. In such a case I will write
 // in a zero just to keep memory tidy.
-    if (sizeof(LispObject) == 4) p[-1] = 0;
-    *((LispObject *)&p[-1]) =
-        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t));
+    if (sizeof(LispObject) == 4)
+        ((LispObject *)&p[-1])[1] = 0;
 // Here I should reset fringe down by (final-n) perhaps. Think about that
 // later!
     return vector_to_handle(p);
@@ -1132,11 +1138,21 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   uintptr_t h = (uintptr_t)p[-1];
+{
+// The odd looking cast here is because in arithlib I am passing around
+// arrays of explicitly 64-bit values, however in the underlying Lisp
+// I expect to be modelling memory as made up of intptr-sized items
+// that I arrange to have aligned on 8-byte boundaries. So to show some
+// though about strict aliasing and the like I will access memory as
+// an array of LispObject things when I access the header of an item.
+    uintptr_t h = (uintptr_t)*(LispObject *)&p[-1];
     size_t r = veclength(h);
+// On 32-bit systems a bignum will have a wasted 32-bit word after the
+// header and before the digits, so that the digits are properly aligned
+// in memory.
     if (sizeof(LispObject) == 4) r -= 4;
     r = r/sizeof(uint64_t);
-    assert(r>0 && r<1000000);
+    assert(r>0);
     return r;
 }
 
@@ -5368,7 +5384,7 @@ intptr_t Square::op(int64_t a)
     if (a < 0) hi -= 2u*(uint64_t)a;
 // Now I have a 128-bit product of the inputs
     if ((hi == 0 && positive(lo)) ||
-        (hi == (uintptr_t)(-1) && negative(lo)))
+        (hi == (uint64_t)(-1) && negative(lo)))
     {   if (fits_into_fixnum((int64_t)lo)) return int_to_handle((int64_t)lo);
         else
         {   uint64_t *p = reserve(1);
@@ -5970,7 +5986,8 @@ inline void division(uint64_t *a, size_t lena,
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
-    {   if (a_negative != b_negative)
+    {   if (negative(q[lenq-1])) q[lenq++] = 0;
+        if (a_negative != b_negative)
         {   internal_negate(q, lenq, q);
             truncate_negative(q, lenq);
         }
@@ -5979,6 +5996,7 @@ inline void division(uint64_t *a, size_t lena,
 //  else abandon(q);
     if (want_r)
     {   r = bb;
+        if (negative(q[lenr-1])) r[lenr++] = 0;
         if (a_negative)
         {   internal_negate(r, lenr, r);
             truncate_negative(r, lenr);
