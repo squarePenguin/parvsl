@@ -5817,7 +5817,12 @@ inline void division(uint64_t *a, size_t lena,
 // The first case is when the single digit if b is a signed value in the
 // range -2^63 to 2^63-1.
     if (lenb == 1)
-    {   assert(b[0] != 0); // would be division by zero
+    {
+// At present I cause an attempt to divide by zero to crash with an assert
+// failure if I have build in debug mode or to do who knows what (possibly
+// raise an exception) otherwise. This maybe needs review. I wonder if
+// I should throw a "division by zero" exception?
+        assert(b[0] != 0); // would be division by zero
         signed_short_division(a, lena, (int64_t)b[0],
                               want_q, q, olenq, lenq,
                               want_r, r, olenr, lenr);
@@ -5996,7 +6001,7 @@ inline void division(uint64_t *a, size_t lena,
 //  else abandon(q);
     if (want_r)
     {   r = bb;
-        if (negative(q[lenr-1])) r[lenr++] = 0;
+        if (negative(r[lenr-1])) r[lenr++] = 0;
         if (a_negative)
         {   internal_negate(r, lenr, r);
             truncate_negative(r, lenr);
