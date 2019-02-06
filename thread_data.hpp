@@ -14,6 +14,8 @@
 #include <thread>
 #include <unordered_map>
 
+// #include "stacktrace.h"
+
 extern LispObject print(LispObject);
 
 namespace par {
@@ -41,6 +43,39 @@ public:
      * TODO VB: right now we say always true 
      * */
     bool safe_memory = true;
+};
+
+class Rw_lock {
+private:
+  std::atomic_int l;
+public:
+    Rw_lock() : l(0) {}
+
+  void acquire_write() {
+    int zero = 0;
+    do {
+      if (l.load() == 0 && l.compare_exchange_weak(zero, -1, std::memory_order_acquire, std::memory_order_relaxed)) {
+        break;
+      }
+    } while (true);
+  }
+
+  void release_write() {
+    l.store(0, std::memory_order_release);
+  }
+
+  void acquire_read() {
+    do {
+      int old_val = l.load(std::memory_order_relaxed);
+      if (old_val >= 0 && l.compare_exchange_weak(old_val, old_val + 1, std::memory_order_acquire, std::memory_order_relaxed)) {
+        break;
+      }
+    } while (true);
+  }
+
+  void release_read() {
+    l.fetch_add(-1, std::memory_order_release);
+  }
 };
 
 // joins the thread on destruction
@@ -72,6 +107,69 @@ static std::atomic_int num_symbols(0);
 thread_local std::vector<LispObject> fluid_locals;
 std::vector<LispObject> fluid_globals; // the global values
 
+std::atomic_int num_threads(0);
+std::atomic_int paused_threads(0);
+std::condition_variable gc_waitall;
+std::condition_variable gc_cv;
+std::atomic_bool gc_on(false);
+
+class Gc_guard {
+    std::mutex m;
+    std::unique_lock<std::mutex> lock;
+public:
+
+    Gc_guard() : m(), lock(m) {
+        // assert(false);
+        // print_stacktrace();
+        std::cerr << "Gc_guard" << std::endl;
+        int stack_var = 0;
+        thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+
+        paused_threads += 1;
+        gc_waitall.notify_one();
+    }
+
+    ~Gc_guard() {
+        std::cerr << "Waiting gc guard" << std::endl;
+        gc_cv.wait(lock, []() { 
+            std::cerr << "gc_on: " << gc_on << std::endl;
+            return !gc_on; });
+        std::cerr << "~Gc_guard" << std::endl;
+        paused_threads -= 1;
+        
+        thread_data.C_stackhead = nullptr;
+    }
+};
+
+class Gc_lock {
+private:
+    std::mutex m;
+    std::unique_lock<std::mutex> lock;
+public:
+    Gc_lock() : m(), lock(m) {
+        assert(gc_on);
+        std::cerr << "waiting gc lock" << std::endl;
+
+        int stack_var = 0;
+        thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+
+        paused_threads += 1;
+        gc_waitall.wait(lock, []() { 
+            std::cerr << "paused: " << paused_threads << std::endl;
+            std::cerr << "total: " << num_threads << std::endl;
+            return paused_threads == num_threads; });
+        std::cerr << "Gc_lock" << std::endl;
+    }
+
+    ~Gc_lock() {
+        std::cerr << "~Gc_lock" << std::endl;
+        paused_threads -= 1;
+        gc_on = false;
+        thread_data.C_stackhead = nullptr;
+        gc_cv.notify_all();
+    }
+};
+
 /**
  * Force all threads to go in GC mode
  * Reset the limits of each thread's segment
@@ -87,14 +185,28 @@ std::unordered_map<int, Thread_RAII> active_threads;
 int tid = 0;
 
 void init_thread_data(LispObject *C_stackbase) {
-    // VB: Need to handle main thread separately                                
     thread_data.C_stackbase = C_stackbase;
     thread_data.id = tid;
     thread_data.fluid_locals = &fluid_locals;
     thread_data.work1 = &work1;
     thread_data.work2 = &work2;
     thread_table.emplace(tid, par::thread_data);
+    num_threads += 1;
 }
+
+class Thread_manager {
+public:
+    Thread_manager() {
+        int stack_var = 0;
+        init_thread_data((LispObject *)((intptr_t)&stack_var & -sizeof(LispObject)));
+        // num_threads += 1;
+    }
+
+    ~Thread_manager() {
+        std::cerr << "~Thread_manager" << std::endl;
+        num_threads -= 1;
+    }
+};
 
 std::mutex thread_mutex;
 int start_thread(std::function<void(void)> f) {
@@ -102,9 +214,7 @@ int start_thread(std::function<void(void)> f) {
 
     tid += 1;
     auto twork = [f]() {
-        int stack_var = 0;
-        LispObject *C_stackbase = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
-        init_thread_data(C_stackbase);
+        Thread_manager tm;
         f();
     };
 
@@ -235,7 +345,7 @@ private:
 public:
     Shallow_bind(LispObject x, LispObject tval) {
         if (is_global(x)) {
-            error1("shallow bind global", x);
+            error1("shallow bind global", qpname(x));
         }
 
         loc = qfixnum(qvalue(x));

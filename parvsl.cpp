@@ -968,59 +968,65 @@ void inner_reclaim(LispObject *C_stack)
 // Now scan the stack (ie the ambiguous bases) looking for a reference
 // to the start of an object in heap1 that has not alread been pinned.
 // When I find one I pin it and add it to heap2_pinchain.
-    for (s=(uintptr_t)C_stack;
-         s<(uintptr_t)C_stackbase;
-         s+=sizeof(LispObject))
-    {   LispObject a = qind(s);
-// If a value points within heap1 then any item if points to or within is
-// to be treated as "pinned". I will allow pinning even if the ambiguous
-// value has dubious tag bits or appears to point within an object rather
-// than properly at its head. Taking this stance should provide more
-// resilience aginst agressive optimistion by a compiler, and also could
-// allow me to put either native or byte-coded compiled material in the heap
-// secure in the knowledge that program counters and return addresses
-// that reference into it will be coped with gracefully.
-        if (inheap1(a))
-        {
-            a &= ~(LispObject)TAGBITS;
-// The next line is going to assume that the very first location in any heap
-// section has its "starts" bit set, and so the loop can never zoom down and
-// drop beyond the bottom of a segment.
-            block_header *block_a = find_block(a);
-            LispObject initial_a = a;
-            while (!getheapstarts(a))
+
+// We have to scan the stacks of all threads
+    for (auto t: par::thread_table) {
+        auto& td = t.second;
+
+        for (s=(uintptr_t)td.C_stackhead;
+            s<(uintptr_t)td.C_stackbase;
+            s+=sizeof(LispObject))
+        {   LispObject a = qind(s);
+    // If a value points within heap1 then any item if points to or within is
+    // to be treated as "pinned". I will allow pinning even if the ambiguous
+    // value has dubious tag bits or appears to point within an object rather
+    // than properly at its head. Taking this stance should provide more
+    // resilience aginst agressive optimistion by a compiler, and also could
+    // allow me to put either native or byte-coded compiled material in the heap
+    // secure in the knowledge that program counters and return addresses
+    // that reference into it will be coped with gracefully.
+            if (inheap1(a))
             {
-                a -= 8;
-                block_header *block_b = find_block(a);
-                assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
-                assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
-            }
-if (initial_a == 123456) printf("ook\n"); // to get it used.
-            if (!getpinned(a))
-            {   LispObject h;
-// ensureheapspace is here to arrange to skip past any of the pinned items
-// that are in heap2 already.
-                ensureheap2space(2*sizeof(LispObject));
-                setheapstarts(fringe2);
-// Arrange that the ambiguous pointer gets proper tag-bits attached
-// so that it can not cause confusion later on. I could have had a model
-// where a value was only treated as a reference if its tag bits were at
-// least consistent with the data in memory pointed at. But by ignoring tag
-// bits in the (ambigious) reference (but re-creating some here) I am more
-// secure against compiler optimisations that save intermediate values that
-// have tags removed.
-                h = qcar(a);
-                if (getheapfp(a)) a += tagFLOAT;
-                else if (isHDR(h))
-                {   if ((h & TYPEBITS) == typeSYM) a += tagSYMBOL;
-                    else a += tagATOM;
+                a &= ~(LispObject)TAGBITS;
+    // The next line is going to assume that the very first location in any heap
+    // section has its "starts" bit set, and so the loop can never zoom down and
+    // drop beyond the bottom of a segment.
+                block_header *block_a = find_block(a);
+                LispObject initial_a = a;
+                while (!getheapstarts(a))
+                {
+                    a -= 8;
+                    block_header *block_b = find_block(a);
+                    assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
+                    assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
                 }
-                qcar(fringe2) = a;
-                qcdr(fringe2) = heap1_pinchain;
-                heap1_pinchain = fringe2;
-                fringe2 += 2*sizeof(LispObject);
-                setpinned(a);
-                npins++;
+    if (initial_a == 123456) printf("ook\n"); // to get it used.
+                if (!getpinned(a))
+                {   LispObject h;
+    // ensureheapspace is here to arrange to skip past any of the pinned items
+    // that are in heap2 already.
+                    ensureheap2space(2*sizeof(LispObject));
+                    setheapstarts(fringe2);
+    // Arrange that the ambiguous pointer gets proper tag-bits attached
+    // so that it can not cause confusion later on. I could have had a model
+    // where a value was only treated as a reference if its tag bits were at
+    // least consistent with the data in memory pointed at. But by ignoring tag
+    // bits in the (ambigious) reference (but re-creating some here) I am more
+    // secure against compiler optimisations that save intermediate values that
+    // have tags removed.
+                    h = qcar(a);
+                    if (getheapfp(a)) a += tagFLOAT;
+                    else if (isHDR(h))
+                    {   if ((h & TYPEBITS) == typeSYM) a += tagSYMBOL;
+                        else a += tagATOM;
+                    }
+                    qcar(fringe2) = a;
+                    qcdr(fringe2) = heap1_pinchain;
+                    heap1_pinchain = fringe2;
+                    fringe2 += 2*sizeof(LispObject);
+                    setpinned(a);
+                    npins++;
+                }
             }
         }
     }
@@ -1196,6 +1202,13 @@ volatile int volatile_variable = 12345;
 // VB: For now I naively lock this. Will probably very slow.
 std::mutex check_space_mutex;
 
+// simple call to check if gc has started and wait
+void guard_gc() {
+    if (par::gc_on) {
+        par::Gc_guard guard;
+    }
+}
+
 void check_space(int len, int line)
 {
 // The value passed will always be a multiple of 8. Ensure that that
@@ -1205,6 +1218,8 @@ void check_space(int len, int line)
 // the garbage collector while copying into heap2. The treatment of large
 // memory blocks here will be a little tedious and coule be improved by
 // checking the bitmap word at a time not bit at a time.
+
+    guard_gc();
 
     intptr_t i;
     for (;;) // loop for when pinned items intrude.
@@ -1279,11 +1294,18 @@ void middle_reclaim()
     par::reset_segments();
 }
 
-std::mutex reclaim_mutex;
-
 void reclaim(int line)
 {
-    std::lock_guard<std::mutex> lock(reclaim_mutex);
+    bool expected = false;
+    if (!par::gc_on.compare_exchange_strong(expected, true)) {
+        // any later thread ends up here and only waits for gc to finish
+        par::Gc_guard guard;
+        return;
+    }
+    std::cerr << "Starting reclaim" << std::endl;
+
+    par::Gc_lock gc_lock;
+
 // The purpose of this function is to force any even partially
 // reasonable C compiler into putting all registers that contain
 // values from the caller onto the stack. It assumes that there
@@ -2164,11 +2186,13 @@ LispObject readT()
     }
 }
 
-// TODO VB: Do we want to put it under a mutex? Otherwise it might create a
-// symbol multiple tymes.
+// I lock the entire lookup function to prevent the same symbol being created twice
+std::mutex lookup_lock;
 
 LispObject lookup(const char *s, size_t len, int flag)
-{   LispObject w, pn;
+{   
+    std::lock_guard<std::mutex> lock(lookup_lock);
+    LispObject w, pn;
     size_t i, hash = 1;
     for (i=0; i<len; i++) hash = 13*hash + s[i];
     hash = hash % OBHASH_SIZE;
@@ -2270,6 +2294,8 @@ LispObject eval(LispObject x);
 
 LispObject interpreted0(LispObject b)
 {
+    guard_gc();
+
     LispObject bvl, r;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -2288,6 +2314,8 @@ LispObject interpreted0(LispObject b)
 
 LispObject interpreted1(LispObject b, LispObject a1)
 {
+    guard_gc();
+
     // LispObject bvl, r, save1;
     LispObject bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -2311,6 +2339,7 @@ LispObject interpreted1(LispObject b, LispObject a1)
 
 LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
 {
+    guard_gc();
     LispObject bvl, v2, w;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -2338,6 +2367,7 @@ LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
 LispObject interpreted3(LispObject b, LispObject a1,
                         LispObject a2, LispObject a3)
 {
+    guard_gc();
     LispObject bvl, v2, v3, w;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -2367,6 +2397,7 @@ LispObject interpreted3(LispObject b, LispObject a1,
 LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
                         LispObject a3, LispObject a4)
 {
+    guard_gc();
     LispObject bvl, v2, v3, v4, w;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -2410,6 +2441,7 @@ LispObject nreverse(LispObject a)
 LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
                           LispObject a3, LispObject a4, LispObject a5up)
 {
+    guard_gc();
     LispObject bvl=nil, v2=nil, v3=nil, v4=nil, v5up=nil, w, v, a;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -3044,7 +3076,9 @@ LispObject Lsetq(LispObject lits, LispObject x)
 }
 
 LispObject Lprogn(LispObject lits, LispObject x)
-{   LispObject r = nil;
+{   
+    guard_gc();
+    LispObject r = nil;
     while (isCONS(x))
     {   r = eval(qcar(x));
         x = qcdr(x);
@@ -3054,7 +3088,9 @@ LispObject Lprogn(LispObject lits, LispObject x)
 }
 
 LispObject Lprog(LispObject lits, LispObject x)
-{   LispObject w, vars, saved = nil, save_x;
+{   
+    guard_gc();
+    LispObject w, vars, saved = nil, save_x;
     if (!isCONS(x)) return nil;
     vars = qcar(x);
     x = qcdr(x);
@@ -5780,6 +5816,7 @@ LispObject Lcondvar(LispObject _data) {
 LispObject Lcondvar_wait(LispObject lits, LispObject cv, LispObject m) {
     int cvid = qfixnum(cv);
     int mid = qfixnum(m);
+    par::Gc_guard guard; // now this thread is ready for gc.
     par::condvar_wait(cvid, mid);
     return nil;
 }
@@ -6176,9 +6213,6 @@ void setup()
 // code are rather rambling and repetitive but this is at least a simple
 // way to do things. I am going to assume that nothing can fail within this
 // setup code, so I can omit all checks for error conditions.
-
-// TODO VB: for now global values can be accessed as before, but
-// might want to unify
     int i;
     undefined = lookup("~indefinite-value~", 18, 3);
     global_symbol(undefined);

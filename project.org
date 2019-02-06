@@ -164,3 +164,9 @@ threads sometimes return the wrong value(g001 instead of nil)
 work1/work2 should be some way of threadlocal 
 look at prog/return/go
 explode
+
+To synchronise threads:
+each thread has a gc_ready flag
+there is a global atomic counter: num_gc_ready
+first thread runs out of memory, calls reclaim
+they 
