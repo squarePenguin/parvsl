@@ -211,6 +211,9 @@ step2:	vsl
 arithtest:	arithtest.cpp arithlib.hpp
 	g++ $(FASTCFLAGS) arithtest.cpp -o arithtest
 
+arithtest-g:	arithtest.cpp arithlib.hpp
+	g++ $(CFLAGS) arithtest.cpp -o arithtest-g
+
 # Once Reduce is built it becomes possible to try its various test
 # scripts. The shell script "test.sh" does the work, and leaves its
 # results in the testlogs directory.

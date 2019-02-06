@@ -690,11 +690,14 @@ top (cond ((atom a) (return (reversip r))))
       ((bignump n) (cdr n))
       (t (error "number expected but received" n))))
 
+(global '(!~!~bignum))
+(setq !~!~bignum (compress '(!! !~ b i g n u m))
+
 (de !~sizecheck (l)
    (cond
       ((null l) 0)
       ((null (cdr l)) (car l))
-      (t (cons '!~bignum l))))
+      (t (cons !~!~bignum l))))
 
 % Various two-argument functions will be able to use built-in
 % vsl functions on floating point input but need to do more

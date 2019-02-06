@@ -61,6 +61,18 @@
 // need that. It should work on 32-bit systems as well, although one should
 // expect performance there to be lower.
 //
+// The code here tried to arrange that any operations that might overflow are
+// done using unsigned types, because in C++ overflow in signed arithmetic
+// yields undefined results - ie on some machines the values delivered could
+// be quite unrelated to the desired ones. This means that I do plenty of
+// arithmetic rather as
+//     int c = (int)((unsigned)a + (unsigned)b);
+// and I rely on the result being as woudl be seen with natural 2s complement
+// working. From C++20 onwards this is likely to be guaranteed by the standard,
+// but at present it is not, so although this could will work on almost all
+// known machines if judged against the standard at is at best relying on
+// implementation defined behaviour.
+//
 // If "softfloat_h" is defined I will suppose that there is a type "float128"
 // available and I will support conversions to and from that. In part because
 // this type is not supported in any standard way I will be assuming that the
@@ -427,14 +439,14 @@ static inline void abort1()
         arithlib::abort1(__VA_ARGS__);                                     \
     }
 
-#ifdef NEW
+// The following variable (well constant) enabled "assert" checking. The
+// effect might be a (probably tarher modest) slowdown.
+
 INLINE_VAR const bool debug_arith = true;
-#else
-INLINE_VAR const bool debug_arith = false;
-#endif
 
 template <typename F>
-static inline void assert1(bool ok, F&& action, const char *location)
+static inline void assert1(bool ok, const char *why,
+                           F&& action, const char *location)
 {
 // Use this as in:
 //     assert(predicate, [&]{...});
@@ -448,20 +460,21 @@ static inline void assert1(bool ok, F&& action, const char *location)
     }
 }
 
-static inline void assert1(bool ok, const char *location)
+static inline void assert1(bool ok, const char *why, const char *location)
 {
 // For simple use where a customised message is not required:
 //     assert(predicate);
     if (debug_arith && !ok)
     {   _abort_location = location;
-        abort1("failure reported via assert()");
+        abort1(why);
     }
 }
 
 #undef assert
 
-#define assert(...) \
-    arithlib::assert1(__VA_ARGS__, __FILE__ " line " STRINGIFY(__LINE__))
+#define assert(...)                                            \
+    arithlib::assert1(__VA_ARGS__, "assert(" #__VA_ARGS__ ")",   \
+                      __FILE__ " line " STRINGIFY(__LINE__))
 
 
 // At times during development it is useful to be able to send messages
@@ -490,7 +503,12 @@ static inline void logprintf(const char *fmt, ...)
 // right shifts on signed values may or may not propagate the sign bit
 // and a left shift on signed values might cause trouble in overflow cases.
 // So here are versions that should behave consistently across all
-// architectures.
+// architectures. Well it is probable that from C++20 onwards the language
+// specification will arrange that right shifts on arithmetic types
+// propagate the sign in the way that I want, and it is also liable to be
+// the case that g++ and clang on all the computers that interest me do things
+// the "obvious way" already, so the code here is something of an exercise
+// in pedantry.
 
 static inline int32_t ASR(int32_t a, int n)
 {   if (n<0 || n>=8*(int)sizeof(int32_t)) n=0;
@@ -1078,7 +1096,7 @@ inline intptr_t copy_if_no_garbage_collector(intptr_t pp)
 //=========================================================================
 
 inline uint64_t *reserve(size_t n)
-{   assert(n>0 && n<1000000);
+{   assert(n>0);
 // I must allow for alignment padding on 32-bit platforms.
     if (sizeof(LispObject)==4) n = n*sizeof(uint64_t) + 4;
     else n = n*sizeof(uint64_t);
@@ -1092,12 +1110,13 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
     {   intptr_t r = int_to_handle((int64_t)p[0]);
         return r;
     }
+    ((LispObject *)&p[-1])[0] =
+        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t));
 // If I am on a 32-bit system the data for a bignum is 8 bit aligned and
 // that leaves a 4-byte gat after the header. In such a case I will write
 // in a zero just to keep memory tidy.
-    if (sizeof(LispObject) == 4) p[-1] = 0;
-    *((LispObject *)&p[-1]) =
-        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t));
+    if (sizeof(LispObject) == 4)
+        ((LispObject *)&p[-1])[1] = 0;
 // Here I should reset fringe down by (final-n) perhaps. Think about that
 // later!
     return vector_to_handle(p);
@@ -1119,11 +1138,21 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   uintptr_t h = *(uintptr_t *)&p[-1];
+{
+// The odd looking cast here is because in arithlib I am passing around
+// arrays of explicitly 64-bit values, however in the underlying Lisp
+// I expect to be modelling memory as made up of intptr-sized items
+// that I arrange to have aligned on 8-byte boundaries. So to show some
+// though about strict aliasing and the like I will access memory as
+// an array of LispObject things when I access the header of an item.
+    uintptr_t h = (uintptr_t)*(LispObject *)&p[-1];
     size_t r = veclength(h);
+// On 32-bit systems a bignum will have a wasted 32-bit word after the
+// header and before the digits, so that the digits are properly aligned
+// in memory.
     if (sizeof(LispObject) == 4) r -= 4;
     r = r/sizeof(uint64_t);
-    assert(r>0 && r<1000000);
+    assert(r>0);
     return r;
 }
 
@@ -2288,6 +2317,13 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     lo = (uint64_t)r;
 }
 
+inline void signed_multiply64(int64_t a, int64_t b,
+                              int64_t &hi, uint64_t &lo)
+{   INT128 r = (INT128)a*(INT128)b;
+    hi = (int64_t)((UINT128)r >> 64);
+    lo = (uint64_t)r;
+}
+
 // divide {hi,lo} by divisor and generate a quotient and a remainder. The
 // version of the code that is able to use __int128 can serve as clean
 // documentation of the intent.
@@ -2374,6 +2410,16 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     if (u0 < c) u1++; 
     hi = u1;
     lo = u0;
+}
+
+inline void signed_multiply64(int64_t a, int64_t b,
+                              int64_t &hi, uint64_t &lo)
+{   uint64_t h, l;
+    multiply64((uint64_t)a, (uint64_t)b, h, l);
+    if (a < 0) h -= (uint64_t)b;
+    if (b < 0) h -= (uint64_t)a;
+    hi = (int64_t)h;
+    lo = l;
 }
 
 inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
@@ -2587,7 +2633,7 @@ INLINE_VAR uint64_t thread_local threadid =
 INLINE_VAR uint64_t seed_component_1 = (uint64_t)basic_randomness();
 INLINE_VAR uint64_t seed_component_2 = (uint64_t)basic_randomness();
 INLINE_VAR uint64_t seed_component_3 = (uint64_t)basic_randomness();
-INLINE_VAR thread_local uint64_t time_now = (uint64_t)time(NULL);
+INLINE_VAR thread_local uint64_t time_now = (uint64_t)std::time(NULL);
 INLINE_VAR thread_local uint64_t chrono_now = (uint64_t)
     (std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
@@ -2730,18 +2776,12 @@ inline void uniform_upto(uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 }
 
 inline intptr_t uniform_upto(intptr_t aa)
-{   uint64_t *a;
-    size_t lena;
-    uint64_t w[2];
-    if (stored_as_fixnum(aa))
-    {   w[1] = (uint64_t)int_of_handle(aa);
-        lena = 1;
-        a = &w[1];
+{   if (stored_as_fixnum(aa))
+    {   uint64_t r = uniform_uint64((uint64_t)int_of_handle(aa));
+        return int_to_handle(r);
     }
-    else
-    {   a = vector_of_handle(aa);
-        lena = number_size(a);
-    }
+    uint64_t *a = vector_of_handle(aa);
+    size_t lena = number_size(a);
     push(a);
     uint64_t *r = reserve(lena);
     pop(a);
@@ -3427,7 +3467,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
         }
         else sign = false;
         char buffer[24];
-        int len = 0;
+        size_t len = 0;
         while (v != 0)
         {   buffer[len++] = '0' + v%10;
             v = v/10;
@@ -3438,7 +3478,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
         if (sign) buffer[len++] = '-';
         else if (len == 0) buffer[len++] = '0';
         char *r = reserve_string(len);
-        for (int i=0; i<len; i++) r[i] = buffer[len-i-1];
+        for (size_t i=0; i<len; i++) r[i] = buffer[len-i-1];
         return confirm_size_string(r, len, len);
     }
 // The size (m) for the block of memory that I put my result in is
@@ -3537,7 +3577,7 @@ inline string_handle bignum_to_string(uint64_t *a, size_t lena,
 // digits into the buffer.
         top = r[p++];
 // For subsequent chunks I want to print exactly 19 decimal digits.
-        for (int i=0; i<18; i++)
+        for (size_t i=0; i<18; i++)
         {   p1[18-i] = '0' + top%10;
             top = top/10;
         }
@@ -5344,7 +5384,7 @@ intptr_t Square::op(int64_t a)
     if (a < 0) hi -= 2u*(uint64_t)a;
 // Now I have a 128-bit product of the inputs
     if ((hi == 0 && positive(lo)) ||
-        (hi == (uintptr_t)(-1) && negative(lo)))
+        (hi == (uint64_t)(-1) && negative(lo)))
     {   if (fits_into_fixnum((int64_t)lo)) return int_to_handle((int64_t)lo);
         else
         {   uint64_t *p = reserve(1);
@@ -5777,7 +5817,12 @@ inline void division(uint64_t *a, size_t lena,
 // The first case is when the single digit if b is a signed value in the
 // range -2^63 to 2^63-1.
     if (lenb == 1)
-    {   assert(b[0] != 0); // would be division by zero
+    {
+// At present I cause an attempt to divide by zero to crash with an assert
+// failure if I have build in debug mode or to do who knows what (possibly
+// raise an exception) otherwise. This maybe needs review. I wonder if
+// I should throw a "division by zero" exception?
+        assert(b[0] != 0); // would be division by zero
         signed_short_division(a, lena, (int64_t)b[0],
                               want_q, q, olenq, lenq,
                               want_r, r, olenr, lenr);
@@ -5946,7 +5991,8 @@ inline void division(uint64_t *a, size_t lena,
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
-    {   if (a_negative != b_negative)
+    {   if (negative(q[lenq-1])) q[lenq++] = 0;
+        if (a_negative != b_negative)
         {   internal_negate(q, lenq, q);
             truncate_negative(q, lenq);
         }
@@ -5955,6 +6001,7 @@ inline void division(uint64_t *a, size_t lena,
 //  else abandon(q);
     if (want_r)
     {   r = bb;
+        if (negative(r[lenr-1])) r[lenr++] = 0;
         if (a_negative)
         {   internal_negate(r, lenr, r);
             truncate_negative(r, lenr);
@@ -6074,7 +6121,7 @@ inline void unscale_for_division(uint64_t *r, size_t &lenr, int s)
         }
         assert(carry==0);
     }
-    truncate_positive(r, lenr);
+    truncate_unsigned(r, lenr);
 }
 
 // This function does long division on unsigned values, computing the
@@ -6118,10 +6165,10 @@ inline void unsigned_long_division(uint64_t *a, size_t &lena,
 // so if its top digit has its top bit set I need to prepend a zero;
     if (want_q)
     {   if (negative(q[lenq-1])) q[lenq++] = 0;
-        else truncate_positive(q, lenq);
+        else truncate_unsigned(q, lenq);
     }
     if (negative(a[lena-1])) a[lena++] = 0;
-    else truncate_positive(a, lena);
+    else truncate_unsigned(a, lena);
 }
 
 // Use unsigned_long_division when all that is required is the remainder.
@@ -6345,15 +6392,15 @@ inline bool shifted_reduce_for_gcd(uint64_t *a, size_t lena,
 // Here we compute r = u*a - v*b, where lenr >= min(lena, lenb). This
 // is for use in Lehmer reductions.
 // In general this will be used as in
-//    au_minus_bv(a, u1, b, v1, temp);
-//    bv_minus_bv(a, u2, b, v2, a);
+//    ua_minus_vb(a, u1, b, v1, temp);
+//    ua_minus_vb(a, u2, b, v2, a);
 //    copy from temp to b
 // so note that the destination may be the same vector as one of the inputs.
 // This will only be used when a and b are almost the same length. I leave
 // a result of length lena even though I very much expect that in at least
 // almost all cases the result will be almost 128 bits smaller!
 
-inline bool au_minus_bv(uint64_t *a, size_t lena,
+inline bool ua_minus_vb(uint64_t *a, size_t lena,
                         uint64_t u,
                         uint64_t *b, size_t lenb,
                         uint64_t v,
@@ -6372,18 +6419,25 @@ inline bool au_minus_bv(uint64_t *a, size_t lena,
         cb = hib;
     }
     lenr = lenb;
+// I want to report in whether u*a-v*b was negative. To do that I will
+// first note that the result that I am computing should be less than the
+// value of a, so I do not get too much messy overflow. I will look at the
+// borrow out from the top word of the result.
     if (lena > lenb)
-    {   a[lena-1] = ca - cb - borrow;
+    {   multiply64(a[lena-1], u, hia, loa);
+        hia += add_with_carry(loa, ca, loa);
+        borrow = subtract_with_borrow(loa, cb, borrow, r[lena-1]);
         lenr = lena;
+        return negative(hia - borrow);
     }
-    return negative(r[lenr-1]);
+    return negative(ca - cb - borrow);
 }
 
 // Since the code here is quite short I will also provide a version
 // for r = -u*a + b*v;
 // Again this supposes that a is at least as long as b.
 
-inline bool minus_au_plus_bv(uint64_t *a, size_t lena,
+inline bool minus_ua_plus_vb(uint64_t *a, size_t lena,
                         uint64_t u,
                         uint64_t *b, size_t lenb,
                         uint64_t v,
@@ -6392,8 +6446,6 @@ inline bool minus_au_plus_bv(uint64_t *a, size_t lena,
     uint64_t hia, loa, ca = 0, hib, lob, cb = 0, borrow = 0;
     for (size_t i=0; i<lenb; i++)
     {   multiply64(a[i], u, hia, loa);
-// hia is the high part of a product so carrying 1 into it can not cause it
-// to overflow. Just!
         hia += add_with_carry(loa, ca, loa);
         multiply64(b[i], v, hib, lob);
         hib += add_with_carry(lob, cb, lob);
@@ -6403,10 +6455,15 @@ inline bool minus_au_plus_bv(uint64_t *a, size_t lena,
     }
     lenr = lenb;
     if (lena > lenb)
-    {   a[lena-1] = cb - ca - borrow;
+    {   multiply64(a[lena-1], u, hia, loa);
+        hia += add_with_carry(loa, ca, loa);
+        borrow = subtract_with_borrow(cb, loa, borrow, r[lena-1]); 
         lenr = lena;
+// It will be perfectly reasonable for hia to be zero and borrow to be zero
+// and hence the overall result positive.
+        return negative(- hia - borrow);
     }
-    return negative(r[lenr-1]);
+    return negative(cb - ca - borrow);
 }
 
 // gcd_reduction starts with a > b and |b| >=2. It must reset a and
@@ -6496,9 +6553,11 @@ void gcd_reduction(uint64_t *&a, size_t &lena,
 // I am keeping these values as signed... but the code U have above that
 // calculates u*a-b*v will take unsigned inputs!
         int64_t ua = 1, va = 0, ub = 0, vb = 1;
+#ifdef LEHMER
 printf("For Lehmer:\n");
 printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
        "b = %.16" PRIx64 ":%.16" PRIx64 "\n", a0, a1, b0, b1);
+#endif
         while (b0!=0 || b1!=0)
         {   uint64_t q;
 // Here I want to set q = {a0,a1}/{b0,b1}, and I expect that the answer
@@ -6508,30 +6567,56 @@ printf("a = %.16" PRIx64 ":%.16" PRIx64 "\n"
 // because then I can do a (cheap) 64-by-64 division.
             int lza1 = a0==0 ? 64+nlz(a1) : nlz(a0);
             int lzb1 = b0==0 ? 64+nlz(b1) : nlz(b0);
-            if (lza1 > lzb1+60) break; // quotient will be too big
+            if (lzb1 > lza1+60) break; // quotient will be too big
             uint64_t ahi, bhi;
-            if (lza1 < 64) ahi = (a0<<lza1) | (a1>>(64-lza1));
+            if (lza1 == 0) ahi = a0;
+            else if (lza1 < 64) ahi = (a0<<lza1) | (a1>>(64-lza1));
             else if (lza1 == 64) ahi = a1;
             else ahi = a1<<(lza1-64);
-            if (lza1 < 64) bhi = (b0<<lza1) | (b1>>(64-lza1));
+            if (lza1 == 0) bhi = b0;
+            else if (lza1 < 64) bhi = (b0<<lza1) | (b1>>(64-lza1));
             else if (lza1 == 64) bhi = b1;
             else bhi = b1<<(lza1-64);
+#ifdef LEHMER
 printf("Find q from %" PRIx64 " / %" PRIx64 "\n", ahi, bhi);
+#endif
+            if (bhi == 0) break;
 // q could end up and over-estimate for the true quotient because bhi has
 // been truncated and so under-represents b. If that happens then a-q*b will
 // end up negative.
             q = ahi/bhi;
+            if (negative(q)) break;
+#ifdef LEHMER
 printf("q = %" PRIu64 "\n", q);
-// I will stop this shortly before vb overflows (I hope)
-            if (62-nlz(q) > nlz(vb<0 ? -vb : vb)) break;
+#endif
+            assert(q != 0);
 // Now I need to go
 //              ua -= q*va;
 //              ub -= q*vb;
 //              {a0,a1} -= q*{b0,b1}
 // Then if a is negative I will negate a and ua and ub.
 // Finally, if (as I mostly expect) now a<b I swap a<=>b, ua<=>ub and va<=>vb
-            ua -= q*va;
-            ub -= q*vb;
+// If I would get an overflow in updating ua or ub I will break out of the
+// loop.
+            int64_t h;
+            uint64_t l1, l2;
+            signed_multiply64(q, va, h, l1);
+            if ((uint64_t)h + (l1>>63) != 0) break;
+// There could be overflow in the following subtraction... So I check
+// if that was about to happen and break out of the loop if so.
+            if (ua >= 0)
+            {   if (ua - INT64_MAX > (int64_t)l1) break;
+            }
+            else if (ua - INT64_MIN < (int64_t)l1) break; 
+            signed_multiply64(q, vb, h, l2);
+            if ((uint64_t)h + (l2>>63) != 0) break;
+            if (ub >= 0)
+            {   if (ub - INT64_MAX > (int64_t)l2) break;
+            }
+            else if (ub - INT64_MIN < (int64_t)l2) break; 
+// I must either update both or neither of ua, ub.
+            ua -= l1;
+            ub -= l2;
             uint64_t hi, lo;
             multiply64(q, b1, hi, lo);
             hi += subtract_with_borrow(a1, lo, a1);
@@ -6544,9 +6629,11 @@ printf("q = %" PRIu64 "\n", q);
                 ua = -ua;
                 ub = -ub;
             }
+#ifdef LEHMER
 printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
        "  ua=%" PRId64 " ub=%" PRId64 "\n",
        q, a0, a1, ua, ub);
+#endif
             if (b0 > a0 ||
                 (b0 == a0 && b1 > a1))
             {   uint64_t w;
@@ -6572,23 +6659,36 @@ printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
             pop(a);
         }
         if (ub < 0)
-        {   if (au_minus_bv(a, lena, ua, b, lenb, -ub, temp, lentemp))
+        {   assert(ua >= 0);
+            if (ua_minus_vb(a, lena, ua, b, lenb, -ub, temp, lentemp))
                 internal_negate(temp, lentemp, temp);
         }
-        else if (minus_au_plus_bv(a, lena, -ua, b, lenb, ub, temp, lentemp))
-            internal_negate(temp, lentemp, temp);
-        truncate_positive(temp, lentemp);
+        else
+        {   assert(ua <= 0);
+            if (minus_ua_plus_vb(a, lena, -ua, b, lenb, ub, temp, lentemp))
+                internal_negate(temp, lentemp, temp);
+        }
+        truncate_unsigned(temp, lentemp);
+#ifdef LEHMER
+display("temp: ", temp, lentemp);
+#endif
         if (vb < 0)
-        {   if (au_minus_bv(a, lena, va, b, lenb, -vb, a, lena))
+        {   assert(va >= 0);
+            if (ua_minus_vb(a, lena, va, b, lenb, -vb, a, lena))
                 internal_negate(a, lena, a);
         }
-        else if (minus_au_plus_bv(a, lena, -va, b, lenb, vb, a, lena))
-            internal_negate(a, lena, a);
-        truncate_positive(a, lena);
+        else
+        {   assert(va <= 0);
+            if (minus_ua_plus_vb(a, lena, -va, b, lenb, vb, a, lena))
+                internal_negate(a, lena, a);
+        }
+        truncate_unsigned(a, lena);
         internal_copy(temp, lentemp, b);
         lenb = lentemp;
+#ifdef LEHMER
 display("new a: ", a, lena);
 display("new b: ", b, lenb);
+#endif
         return;
     }
 // If I drop through to here I will do a simple reduction. This happens
