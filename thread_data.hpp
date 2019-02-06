@@ -22,6 +22,12 @@ namespace par {
 // Segments are a way of splitting the memory into further chunks
 // such that every thread is only writing to a chunk at a time.
 
+static std::atomic_int num_symbols(0);
+
+thread_local std::vector<LispObject> fluid_locals;
+std::vector<LispObject> fluid_globals; // the global values
+
+
 class Thread_data {
 public:
     // CR VB: Should this be defined in terms of LispObject?
@@ -43,6 +49,26 @@ public:
      * TODO VB: right now we say always true 
      * */
     bool safe_memory = true;
+
+
+    /**
+     * [local_symbol]
+     * Works just like above, except you can specify the thread id to access.
+     * */
+    LispObject& local_symbol(int loc) {
+        auto& locals = *fluid_locals;
+
+        if (num_symbols > (int)locals.size()) {
+            locals.resize(num_symbols, undefined);
+        }
+
+        if (loc >= (int)locals.size()) {
+            std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
+            throw std::logic_error("bad thread_local index");
+        }
+
+        return locals[loc];
+    }
 };
 
 class Rw_lock {
@@ -101,11 +127,6 @@ thread_local Thread_data thread_data;
 
 std::unordered_map<int, Thread_data&> thread_table;
 thread_local int thread_index = -1;
-
-static std::atomic_int num_symbols(0);
-
-thread_local std::vector<LispObject> fluid_locals;
-std::vector<LispObject> fluid_globals; // the global values
 
 std::atomic_int num_threads(0);
 std::atomic_int paused_threads(0);
@@ -205,6 +226,7 @@ public:
     ~Thread_manager() {
         std::cerr << "~Thread_manager" << std::endl;
         num_threads -= 1;
+        thread_table.erase(thread_data.id);
     }
 };
 
@@ -215,6 +237,8 @@ int start_thread(std::function<void(void)> f) {
     tid += 1;
     auto twork = [f]() {
         Thread_manager tm;
+        std::cerr << "Thread " << thread_data.id << " started."<< std::endl;
+        std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
         f();
     };
 

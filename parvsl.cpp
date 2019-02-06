@@ -973,6 +973,10 @@ void inner_reclaim(LispObject *C_stack)
     for (auto t: par::thread_table) {
         auto& td = t.second;
 
+        std::cerr << "tid stackhead stackbase: " << td.id << ' ' 
+                  << std::hex << td.C_stackbase << ' ' << td.C_stackhead 
+                  << std::endl;
+
         for (s=(uintptr_t)td.C_stackhead;
             s<(uintptr_t)td.C_stackbase;
             s+=sizeof(LispObject))
@@ -1517,7 +1521,8 @@ void copy_symval(LispObject x) {
         int loc = qfixnum(qvalue(x));
         for (auto x: par::thread_table) {
             auto td = x.second;
-            auto& val = (*td.fluid_locals)[loc];
+            // TODO: need local_symbol here!
+            auto& val = td.local_symbol(loc);
             val = copy(val);
         }
 
