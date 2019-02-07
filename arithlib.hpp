@@ -6,10 +6,8 @@
 #define __arithlib_hpp 1
 
 // To do:
-//    [I believe that all the following are just optimizations]
-//    Finish coding GCD and Lehmer-style optimization there.
 //    Karatsuba-style multiplication when numbers are big enough.
-//    review all fixnum and fixnum/bignum cases for optimisation.
+//    Write full documentation.
 
 /**************************************************************************
  * Copyright (C) 2019, Codemist.                         A C Norman       *
@@ -268,6 +266,10 @@
 //   to get space for it. Across the call to reserve it will need to push
 //   its two arguments, because a copying garbage collector might relocate
 //   them.
+//   Further though: having "push and pop" suggests that a potentially large
+//   number of items might need to be saved. I suspect that the most I can
+//   ever encounter here will be perhaps 3. So having a fixed number of
+//   dedicated list basis to stash things in might be nicer.
 //   In Lisp mode it is anticipated that as well as a tagged representation
 //   of small integers that the generic arithemetic will need to support
 //   floating point numbers (and possibly multiple widths of floating point
@@ -400,6 +402,7 @@
 #include <thread>
 #include <ctime>
 #include <chrono>
+#include <utility>
 
 namespace arithlib
 {
@@ -1938,7 +1941,7 @@ public:
 };
 
 // I use a suffix "_Z" for bignums, with Z chosen to reminding me that this
-// gives me an Ingeger, wthe "Z" (typically written in a blackboard font)
+// gives me an Integer, the "Z" (typically written in a blackboard font)
 // standing for the ring of integers.
 inline Bignum operator "" _Z(const char *s)
 {   return Bignum(s);
@@ -2336,21 +2339,6 @@ inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
     r = dividend % divisor;
 }
 
-// Find the quotient and remainder when {a0,a1} is divided by {b0,b1},
-// putting the result in q and {r0,r1}. This is used from the GCD code and
-// in the case a>=b and b0!=0 (well actually b0>4).
-
-inline void quotrem128(uint64_t a0, uint64_t a1,
-                       uint64_t b0, uint64_t b1,
-                       uint64_t &q, uint64_t &r0, uint64_t &r1)
-{   assert(b0 > 4);
-    q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
-    UINT128 rr = pack128(a0, a1) % pack128(b0, b1);
-    r0 = (uint64_t)(rr >> 64);
-    r1 = (uint64_t)rr;
-}
-   
-
 #else // __SIZEOF_INT128__
 
 // If the C++ system I am using does not support and 128-bit integer
@@ -2484,17 +2472,6 @@ again2:
     }
     q = (q1 << 32) | q0;      // assemble and return quotient & remainder
     r = (un21*base + un0 - q0*c) >> s;
-}
-
-inline void remainder128(uint64_t a0, unit64_t a1,
-                         uint64_t b0, unit64_t b1;
-                         uint64_t &q, uint64_t &r0, uint64_t &r1);
-{   assert(b0 > 4);
-// This is still to be re-worked!
-    q = (uint64_t)(pack128(a0, a1) / pack128(b0, b1));
-    UINT128 rr = (uint64_t)(pack128(a0, a1) % pack128(b0, b1));
-    r0 = (uint64_t)(rr >> 64);
-    r1 = (uint64_t)rr;
 }
 
 #endif // __SIZEOF_INT128__
@@ -3874,6 +3851,8 @@ inline bool Eqn::op(int64_t a, double b)
 {
     static const int64_t range = ((int64_t)1)<<53;
     if (a >= -range && a <= range) return (double)a == b;
+// The value on the next line is a floating point representation of 2^63,
+// so any floating value at least that large is bigger than any int64_t value.
     if (b >= 9223372036854775808.0) return false;
     else if (b < -9223372036854775808.0) return false;
     if (std::isnan(b)) return false;
@@ -4551,7 +4530,9 @@ intptr_t Logand::op(uint64_t *a, uint64_t *b)
 }
 
 // The next two are not optimised - a case of (logand bignum positive-fixnum)
-// is guaranteed to end up a fixnum spo can be done more slickly.
+// is guaranteed to end up a fixnum so could be done more slickly - however
+// I am not going to expect that to be on the critical performance path for
+// enough programs for me to worry too much!
 
 intptr_t Logand::op(uint64_t *a, int64_t b)
 {   size_t lena = number_size(a);
@@ -4863,21 +4844,32 @@ size_t Integer_length::op(int64_t aa)
     else if (aa < 0) a = -(uint64_t)aa - 1;
     else a = aa;
     return (size_t)(64-nlz(a));
-
 }
 
 size_t Low_bit::op(uint64_t *a)
-{   return bignum_bits(a, number_size(a));
+{   size_t lena = number_size(a);
+    if (negative(a[lena-1])) // count trailing 1 bits!
+    {   size_t r=0, i=0;
+        while (a[i++]==-(uint64_t)1) r += 64;
+        uint64_t w = ~a[i-1];
+        return (size_t)(64-nlz(w & (-w))+r);
+    }
+    else if (lena==1 && a[0]==0) return 0;
+    else
+    {   size_t r=0, i=0;
+        while (a[i++]==0) r += 64;
+        uint64_t w = a[i-1];
+        return (size_t)(64-nlz(w & (-w))+r);
+    }
 }
 
 size_t Low_bit::op(int64_t aa)
 {   uint64_t a;
     if (aa == 0) return 0;
-    else if (a < 0) a = ~(uint64_t)aa;
+    else if (aa < 0) a = ~(uint64_t)aa;
     else a = aa;
-    aa = aa & (-aa); // keeps only the lowest bit
+    a = a & (-a); // keeps only the lowest bit
     return (size_t)(64-nlz(a));
-
 }
 
 size_t Logcount::op(uint64_t *a)
@@ -5991,7 +5983,10 @@ inline void division(uint64_t *a, size_t lena,
     if (want_r) internal_copy(r, lenr, bb); 
     abandon(r);
     if (want_q)
-    {   if (negative(q[lenq-1])) q[lenq++] = 0;
+    {   if (negative(q[lenq-1]))
+        {   assert(lenq < olenq);
+            q[lenq++] = 0;
+        }
         if (a_negative != b_negative)
         {   internal_negate(q, lenq, q);
             truncate_negative(q, lenq);
@@ -6001,7 +5996,10 @@ inline void division(uint64_t *a, size_t lena,
 //  else abandon(q);
     if (want_r)
     {   r = bb;
-        if (negative(r[lenr-1])) r[lenr++] = 0;
+        if (negative(r[lenr-1]))
+        {   assert(lenr < olenr);
+            r[lenr++] = 0;
+        }
         if (a_negative)
         {   internal_negate(r, lenr, r);
             truncate_negative(r, lenr);
@@ -6636,11 +6634,10 @@ printf("q=%" PRIu64 " a = %.16" PRIx64 ":%.16" PRIx64
 #endif
             if (b0 > a0 ||
                 (b0 == a0 && b1 > a1))
-            {   uint64_t w;
-                w = a0; a0 = b0; b0 = w;
-                w = a1; a1 = b1; b1 = w;
-                w = ua; ua = va; va = w;
-                w = ub; ub = vb; vb = w;
+            {   std::swap(a0, b0);
+                std::swap(a1, b1);
+                std::swap(ua, va);
+                std::swap(ub, vb);
             }
         }
 // Ahah now I am almost done. I want to go
@@ -6828,19 +6825,12 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
     pop(b); pop(av);
     if (negative(b[lenb-1])) internal_negate(b, lenb, bv);
     else internal_copy(b, lenb, bv);
-    if (big_unsigned_greaterp(bv, lenb, av, lena))
-    {   a = bv;
-        b = av;
-        size_t lenw = lena;
-        lena = lenb;
-        lenb = lenw;
-        lenw = olena;
-        olena = olenb;
-        olenb = lenw;
-    }
-    else
-    {   a = av;
-        b = bv;
+    a = av;
+    b = bv;
+    if (big_unsigned_greaterp(b, lenb, a, lena))
+    {   std::swap(a, b);
+        std::swap(lena, lenb);
+        std::swap(olena, olenb);
     }
 // Now a >= b and both numbers are in freshly allocated memory. I will
 // remember the sizes of these two arrays.
@@ -6873,15 +6863,9 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
     while (lenb != 1)
     {   gcd_reduction(a, lena, b, lenb, olena, olenb, temp, lentemp);
         if (big_unsigned_greaterp(b, lenb, a, lena))
-        {   uint64_t *ax = a;
-            a = b;
-            b = ax;
-            size_t lenax = lena;
-            lena = lenb;
-            lenb = lenax;
-            lenax = olena;
-            olena = olenb;
-            olenb = lenax;
+        {   std::swap(a, b);
+            std::swap(lena, lenb);
+            std::swap(olena, olenb);
 //          printf("Swapped a and b\n");
         }
     }
@@ -6969,11 +6953,7 @@ intptr_t Gcd::op(int64_t a, int64_t b)
     uint64_t aa = a < 0 ? -(uint64_t)a : a;
     uint64_t bb = b < 0 ? -(uint64_t)b : b;
 // Ensure that aa >= bb
-    if (bb > aa)
-    {   uint64_t cc = aa;
-        aa = bb;
-        bb = cc;
-    }
+    if (bb > aa) std::swap(aa, bb);
 // Do simple Euclidean algorithm
     while (bb != 0)
     {   uint64_t cc = aa % bb;
