@@ -98,6 +98,9 @@ int main(int argc, char *argv[])
 // basic arithmetic is in order.
 
     std::cout << "Some simple tests involving powers of 10" << std::endl;
+// Observe the custom integer format with suffix "_Z" so that bit integers
+// can be input easily. At present I have not put in code to support other
+// than decimal notation in this style.
     Bignum a = 10000000000000000000000000_Z;
     std::cout << "a = " << a << std::endl;
     std::cout << "a*a = " << (a*a) << std::endl;
