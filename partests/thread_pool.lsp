@@ -50,6 +50,8 @@
     (mutexunlock m)
     res))
 
+(global '(!*rawbig !*onlyraw))
+
 % a very simple thread thread_pool 
 % will use all hardware threads
 (de thread_pool ()

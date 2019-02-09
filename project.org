@@ -170,3 +170,9 @@ each thread has a gc_ready flag
 there is a global atomic counter: num_gc_ready
 first thread runs out of memory, calls reclaim
 they 
+
+* lookup
+- TODO lookup function needs a lock
+- add to dissertation
+- assert my atomics are lock free AND write in the dissertation
+- each bucket can be an atomic and  use CAS
