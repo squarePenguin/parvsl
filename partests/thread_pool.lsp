@@ -57,12 +57,13 @@
 (de thread_pool ()
     (global '(tp_q))
     (setq tp_q (safeq))
-    (let ((nthreads (sub1 (hardwarethreads))))
+    (let 
+        ((nthreads (sub1 (hardwarethreads))))
+    %    ((nthreads 2))
     (dotimes (i nthreads) (thread 
         % run indefinitely  
         '(while t
             (let ((task (safeq_pop tp_q)))
-            (print task)
             (eval task)
             )))))
     tp_q)
@@ -77,8 +78,10 @@
 (de test_tp2 (n)
     (dotimes (i n) (tp_addjob tp 'nil)))
 
-(global '(test3g))
+(global '(test3g numruns doublemutex))
 (setq test3g 2)
-(setq t3code '(let () (dotimes (i 10) (setq test3g (times test3g 2))) (print "done") (print test3g)))
+(setq doublemutex (mutex))
+(setq numruns 0)
+(setq t3code '(let () (dotimes (i 10) (mutexlock doublemutex) (setq test3g (times test3g 2)) (mutexunlock doublemutex)) (setq numruns (add1 numruns)) (print "done") (print test3g)))
 (de test_tp3 (n)
-    (dotimes (i n) (tp_addjob tp t3code)))
+    (dotimes (i n) (prin "adding job ") (print i) (tp_addjob tp t3code)))

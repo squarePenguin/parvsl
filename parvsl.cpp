@@ -969,14 +969,9 @@ void inner_reclaim()
 // to the start of an object in heap1 that has not alread been pinned.
 // When I find one I pin it and add it to heap2_pinchain.
 
-    std::cerr << "C_stackbase " << std::hex << C_stackbase << std::endl;
 // We have to scan the stacks of all threads
     for (auto t: par::thread_table) {
         auto& td = t.second;
-
-        std::cerr << "tid stackhead stackbase: " << td.id << ' ' 
-                  << std::hex << td.C_stackhead << ' ' << td.C_stackbase
-                  << std::endl;
 
         for (s=(uintptr_t)td.C_stackhead;
             s<(uintptr_t)td.C_stackbase;
@@ -1314,7 +1309,6 @@ void reclaim(int line)
         par::Gc_guard guard;
         return;
     }
-    std::cerr << "Starting reclaim" << std::endl;
 
     par::Gc_lock gc_lock;
 
@@ -5686,10 +5680,11 @@ void readevalprint(int loadp)
         else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
-        {   
+        {
             r = eval(r);
             if (showallreads || (unwindflag == unwindNONE && !loadp))
-            {   linepos += printf("Value: ");
+            {
+                linepos += printf("Value: ");
 #ifdef DEBUG
                 if (logfile != NULL) fprintf(logfile, "Value: ");
 #endif // DEBUG
