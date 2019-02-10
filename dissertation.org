@@ -1,0 +1,117 @@
+#+TITLE: Implementing parallelism in Lisp for REDUCE
+#+SUBTITLE: Progress report
+#+AUTHOR: Andrei Vlad Badelita
+#+EMAIL: avb40@cam.ac.uk
+
+* Introduction
+
+My work for the first half of the project mainly focused on the VSL language.
+The goal was to add multi-threading support, allowing the user to run
+code in parallel on a multi-core computer.
+
+The VSL language was not designed with mind, and many decisions in its implementation
+make it incompatible with a parallel model of computation.
+
+* Preparation
+
+* Implementation
+
+** Memory allocation
+
+Memory allocation is made in large continuous blocks. Global heap pointer
+variables manage these blocks and generally handle Lisp allocations
+by designating enough space within these blocks and incrementing the
+heap pointer.
+
+All the memory is global and shared, and multiple-threads will often try
+to allocate concurently, causing contention. A naive solution to this problem
+would have been to use a mutex lock on allocations. While this approach would
+have been the simplest to implement it would also significantly slow down the language.
+Allocations are on the critical path of the runtime, and they are needed constantly.
+Serialising allocations is guaranteed to slow down the language enough to cancel 
+any advantage multi-threading brings to the language.
+
+Instead, the approach was to further split the memory into isolated regions.
+The term /segment/ will be used throughout to talk about a thread_local block 
+within memory. Just like before, memory is allocated to the segments in the continuous 
+fashion. A pointer indicates the start of the non-allocated part of the segment(the /fringe/.), 
+while another tells us the end of the segment. Now, contention is reduced to getting a new
+segment. Each thread only allocates within its own segment, so allocations do not require
+any synchronisation, and they still only require incrementing one variable in most
+cases.
+
+The code was modified so that checks and operations on the global block "fringe"
+affect the thread-local segment fringe. The block fringe is only modified under a lock
+when a thread asks for a new segment. Segment sizes can be decided dinamically,
+but will generally be a minimum fixed size which has to be tuned for performance.
+The tradeoff here is performance vs memory. If the segments are too small then there
+will be contention as threads request new segments too often. When segments are larger than 
+needed, they hold chunks of memory from being used by other threads and can lead 
+to more garbage collection cycles. 
+
+** Shared memory and global variables
+
+VSL has dynamic scoping and exhibits shallow binding. This means there is a global
+storage mapping each symbol to exactly one value. A variable is defined as long 
+as the symbol is assigned a value. The user can explicitly mark a symbol as global
+or fluid. A global symbol only has a global value and cannot be locally bound.
+A fluid symbol can have both a global value and a locally bound value. The way this
+is accomplished is by saving the global value on every binding and then restoring it
+as soon as the binding is over. 
+
+This shallow binding approach is incompatible with a multi-threaded program: a symbol
+could be locally bound to different values on different threads. One approach to solving the
+issue is to use a deep-binding approach: passing around an associative list mapping the symbols
+to values. The approach would add a penalty to performance, however it should be investigated
+how significant the trade-off is. Instead, I have modified the code to try to keep the
+shallow-binding. Global values work just as before and no modification is needed. For local and
+fluids however, I added a thread-local storage array. The global storage now only
+holds a pointer to the array location where the actual value is stored. This way, each thread can
+hold its own version of the symbol and modify it safely. For fluids, there will still be a global
+shared value. Since I already used the global storage for the pointer, I added one more global
+array, where the pointer indicates the global value.
+
+** Thread data and garbage collection
+
+The garbage collector is stop-the-world and work by tracing reachable memory locations
+starting from a root set. There are two types of roots: ambiguous and unambigous. Unambiguous
+roots are the ones explicitly managed by the compiler, e.g the symbol table of variables.
+Since the compiler is written in C and memory is not tagged, we can also get ambigous pointer:
+values on the C stack which might be just values but could also be pointers to program storage.
+
+The handling of both of these root sets has to account for multiple running threads. All the new
+thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
+own stack so all the stacks has to be accounted for as the ambiguous root set. The latter is more complicated.
+All threads have to be paused before garbage collection can begin so that they do not interfere
+with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
+However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
+thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
+changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
+to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
+can proceed with the thread. This is still a work in progress.
+
+** Saving state to disk and reloading
+
+One important feature of the language is the ability to preserve the state of the world at any
+time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
+preserving when some of the threads are running a computation is tricky to define properly. To simplify
+matter, I have decided that all threads have to be joined before preserving. This way, the state of
+the world is consistent and relatively easy to restore. I have modified parts of the code to write
+all the thread-local data back into global storage and then restore it when reloading. This way the same
+file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
+
+** Implementing threads
+
+Once all the modifications above were made, implementing the actual multi-threading mechanism was an easy
+task. I used the standard library to start and join threads and created a thread table so that data about
+all threads can be accessed globally. WHen a  new thread is created, it registers a pointer to its thread-local
+data in the table. Using this, I added code to the garbage collector to handle all existing threads and
+extract the roots, but also to manage their allocation segments, which have to be reset after collection.
+Finally, primitive functions for threading were added to the language. They simply mirror their C++ counterparts.
+ 
+
+* Evaluation
+
+* Conclusions
+
+

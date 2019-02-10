@@ -306,10 +306,10 @@ static inline bool isEQHASHX(LispObject x)
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-INLINE const size_t MEM = 256;
+INLINE constexpr size_t MEM = 32;
 #endif // MEM
 
-INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
+INLINE constexpr size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
 // Each byte in the bitmap will allow marking for 8 entities, and each
 // entity is 8 bytes wide (both on 32 and 64-bit systems), hence each
 // bitmap uses 1/64th of the memory used by the region it maps.

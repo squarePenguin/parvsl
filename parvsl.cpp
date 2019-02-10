@@ -933,7 +933,7 @@ void par_reclaim() {
 extern void ensureheap2space(uintptr_t len);
 static uintptr_t space_used = 0;
 
-void inner_reclaim(LispObject *C_stack)
+void inner_reclaim()
 {
 // The strategy here is due to C J Cheyney ("A Nonrecursive List Compacting
 // Algorithm". Communications of the ACM 13 (11): 677-678, 1970),
@@ -972,10 +972,6 @@ void inner_reclaim(LispObject *C_stack)
 // We have to scan the stacks of all threads
     for (auto t: par::thread_table) {
         auto& td = t.second;
-
-        std::cerr << "tid stackhead stackbase: " << td.id << ' ' 
-                  << std::hex << td.C_stackbase << ' ' << td.C_stackhead 
-                  << std::endl;
 
         for (s=(uintptr_t)td.C_stackhead;
             s<(uintptr_t)td.C_stackbase;
@@ -1201,6 +1197,13 @@ void inner_reclaim(LispObject *C_stack)
     fflush(stdout);
 }
 
+// This force sets the stackhead of the gc thread.
+// Useful when inner_reclaim is called directly, e.g during preserve.
+void inner_reclaim(LispObject *C_stack) {
+    par::thread_data.C_stackhead = C_stack;
+    inner_reclaim();
+}
+
 volatile int volatile_variable = 12345;
 
 // VB: For now I naively lock this. Will probably very slow.
@@ -1306,7 +1309,6 @@ void reclaim(int line)
         par::Gc_guard guard;
         return;
     }
-    std::cerr << "Starting reclaim" << std::endl;
 
     par::Gc_lock gc_lock;
 
@@ -1595,7 +1597,7 @@ INLINE constexpr int printESCAPES = 2;
 // I suspect that linelength and linepos need to be maintained
 // independently for each output stream. At present that is not
 // done.
-int linelength = 80, linepos = 0, printflags = printESCAPES;
+thread_local int linelength = 80, linepos = 0, printflags = printESCAPES;
 
 #ifdef DEBUG
 FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
@@ -1603,7 +1605,7 @@ FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
 int32_t file_direction = 0, interactive = 0;
-int lispin = 0, lispout = 1;
+thread_local int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch(int c)
@@ -1648,8 +1650,8 @@ static History *el_history;
 static HistEvent el_history_event;
 
 INLINE constexpr int INPUT_LINE_SIZE = 256;
-static char input_line[INPUT_LINE_SIZE];
-static size_t input_ptr = 0, input_max = 0;
+thread_local static char input_line[INPUT_LINE_SIZE];
+thread_local static size_t input_ptr = 0, input_max = 0;
 char the_prompt[80] = "> ";
 
 // gcc moans if the value of snprintf is unused and there is any chance that
@@ -1684,7 +1686,12 @@ int rdch()
         if (lispfiles[lispin] == stdin && stdin_tty)
         {   if (input_ptr >= input_max)
             {   int n = -1;
-                const char *s = el_gets(el_struct, &n);
+                const char *s;
+                
+                {
+                    par::Gc_guard guard;
+                    s = el_gets(el_struct, &n);
+                }
 
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
@@ -1709,7 +1716,7 @@ void checkspace(int n)
 {   if (linepos + n >= linelength && lispout != -1 && lispout != -3) wrch('\n');
 }
 
-char printbuffer[32];
+thread_local char printbuffer[32];
 
 extern LispObject call1(const char *name, LispObject a1);
 extern LispObject call2(const char *name, LispObject a1, LispObject a2);
@@ -1945,7 +1952,7 @@ LispObject printc(LispObject a)
     return a;
 }
 
-int curchar = '\n', symtype = 0;
+thread_local int curchar = '\n', symtype = 0;
 
 int hexval(int n)
 {   if (isdigit(n)) return n - '0';
@@ -5673,10 +5680,11 @@ void readevalprint(int loadp)
         else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
-        {   
+        {
             r = eval(r);
             if (showallreads || (unwindflag == unwindNONE && !loadp))
-            {   linepos += printf("Value: ");
+            {
+                linepos += printf("Value: ");
 #ifdef DEBUG
                 if (logfile != NULL) fprintf(logfile, "Value: ");
 #endif // DEBUG
@@ -5804,6 +5812,7 @@ LispObject Lmutex(LispObject _data) {
 
 LispObject Lmutex_lock(LispObject lits, LispObject x) {
     int id = qfixnum(x);
+    par::Gc_guard guard; // now this thread is ready for gc.
     par::mutex_lock(id);
     return nil;
 }
@@ -5840,6 +5849,10 @@ LispObject Lcondvar_notify_all(LispObject lits, LispObject cv) {
 
 LispObject Lhardware_threads(LispObject _data) {
     return packfixnum(std::thread::hardware_concurrency());
+}
+
+LispObject Lthread_id(LispObject _data) {
+    return packfixnum(par::thread_data.id);
 }
 
 #define SETUPSPEC                                               \
@@ -5884,6 +5897,7 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("return",            Lreturn_0),         \
     SETUP_TABLE_SELECT("stop",              Lstop_0),           \
     SETUP_TABLE_SELECT("terpri",            Lterpri),           \
+    SETUP_TABLE_SELECT("thread_id",         Lthread_id),        \
     SETUP_TABLE_SELECT("time",              Ltime),             \
     SETUP_TABLE_SELECT("vector",            Lvector_0),
 

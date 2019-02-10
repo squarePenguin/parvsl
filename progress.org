@@ -1,0 +1,84 @@
+#+TITLE: Implementing Parallelism in Lisp for REDUCE
+#+SUBTITLE: Progress report
+#+AUTHOR: Andrei Vlad Badelita
+#+EMAIL: avb40@cam.ac.uk
+#+OPTIONS: toc:nil
+
+*Project supervisor*: Dr. Arthur C. Norman
+
+*Director of studies*: Prof. Frank Stajano
+
+*Overseers*: Prof. Jean Bacon, Dr. Amanda Prorok
+
+* Introduction
+
+The project aims to enable parallel computation capabilities in Reduce, a computer
+algebra system. Reduce runs on a Lisp kernel, and I am modifying a particular Lisp implementation
+called VSL.
+
+The VSL language was not written with multi-threading support in mind. The first part of my
+project involved carefully analysing and modifying the language in such a way that
+it is capable of running code in parallel without breaking, while keeping it
+backwards compatible.
+
+The second part consists of enabling the necessary primitives to run multi-threading code and modify
+parts of Reduce to test these capabilities.
+
+I have successfully implemented all the changes required in the first part and have also made progress
+with the second part of the project.
+
+* Modifying VSL Lisp
+
+I made significant changes to the VSL interpreter in order to support parallel computation.
+In order to do this, I first familiarised myself with the present codebase and identified three key
+areas that needed to be redesigned:
+
+** Memory allocation and garbage collection
+
+All the memory is global and shared, and multiple threads will often try
+to allocate concurently, causing contention. To avoid I further split the memory into isolated regions,
+called /segments/. Each thread only allocates within its own segment, so allocations do not 
+require any synchronisation. This way excess overhead on interlocks was avoided and performance
+was not noticeably degraded. 
+
+The garbage collector is stop-the-world and works by tracing reachable memory locations
+starting from a root set. Each thread has its own stack and set of thread-local locations,
+all of which had to be added to the root set. All threads have to be paused before garbage 
+collection can begin so that they do not interfere with memory. Simply polling a global flag 
+is not sufficient as it can cause deadlocks. I made all blocking functions put a thread 
+into a /safe/ state before sleeping, so the garbage collector can proceed. 
+
+** Shared memory and global variables
+
+VSL has dynamic scoping and exhibits shallow binding. This means there is a global
+storage mapping each symbol to exactly one value. Multiple threads could use the same variable name and rebind
+the same symbol. I have modified the code to include thread-local storage for variables. 
+The global storage now only holds a pointer to the array location where the actual value is stored. 
+This way, each thread can hold its own version of the symbol and modify it safely. The interpreter
+had to be modified to deal with the new memory layout.
+
+** Saving state to disk and reloading
+
+One important feature of the language is the ability to preserve the state of the world at any
+time and save to disk. When preserving, I join all threads and write
+all the thread-local data back into global storage so I can restore it when reloading. This way,
+I did not break compatibility between single and multi-threaded images. 
+
+* State of the project
+
+The work expected for the first half of the project was accomplished. After making the modifications above,
+among others, I was able to add basic support for starting threads, and for using synchronisation primitives (mutexes and
+condition variables). One success criterium for the project was to be able to implement a working thread-pool
+in VSL. I have already completed this task, demonstrating with simple workloads. 
+The compiler is also backwards compatible and is still able to build Reduce (a build involving tens of thousands 
+of lines of code which takes over ten minutes on a modern computer) and passes a comprehensive suite of regression tests. 
+Additionally, the penalty to single-threaded performance is negligible.
+
+* Looking forward
+
+The work ahead of me is to extend the suite of multi-threaded tests and hence find and fix potential bugs.
+Building all of Reduce is a two step process: first a reduce core is build followed by many independent libraries.
+It should be possible to build these libraries in parallel and improve the build times, providing a good example
+of parallelism in action. Afterwards, I will analyse some of the numerical algorithms in Reduce and attempt to 
+implement parallel versions.
+

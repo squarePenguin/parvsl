@@ -15,5 +15,8 @@ gmon.out
 *.pdf
 xx*
 bad*
-
-
+.vscode
+vsl
+parvsl
+fastparvsl
+*.tex
