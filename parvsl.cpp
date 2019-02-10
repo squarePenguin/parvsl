@@ -1611,7 +1611,7 @@ FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
 int32_t file_direction = 0, interactive = 0;
-int lispin = 0, lispout = 1;
+thread_local int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch(int c)
@@ -5856,6 +5856,10 @@ LispObject Lhardware_threads(LispObject _data) {
     return packfixnum(std::thread::hardware_concurrency());
 }
 
+LispObject Lthread_id(LispObject _data) {
+    return packfixnum(par::thread_data.id);
+}
+
 #define SETUPSPEC                                               \
     SETUP_TABLE_SELECT("quote",             Lquote),            \
     SETUP_TABLE_SELECT("cond",              Lcond),             \
@@ -5898,6 +5902,7 @@ LispObject Lhardware_threads(LispObject _data) {
     SETUP_TABLE_SELECT("return",            Lreturn_0),         \
     SETUP_TABLE_SELECT("stop",              Lstop_0),           \
     SETUP_TABLE_SELECT("terpri",            Lterpri),           \
+    SETUP_TABLE_SELECT("thread_id",         Lthread_id),        \
     SETUP_TABLE_SELECT("time",              Ltime),             \
     SETUP_TABLE_SELECT("vector",            Lvector_0),
 

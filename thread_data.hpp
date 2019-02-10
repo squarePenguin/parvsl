@@ -142,7 +142,7 @@ public:
     Gc_guard() : m(), lock(m) {
         // assert(false);
         // print_stacktrace();
-        std::cerr << "Gc_guard" << std::endl;
+        // std::cerr << "Gc_guard " << thread_data.id <<  std::endl;
         int stack_var = 0;
         thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
@@ -151,11 +151,11 @@ public:
     }
 
     ~Gc_guard() {
-        std::cerr << "Waiting gc guard" << std::endl;
+        // std::cerr << "Waiting gc guard " << thread_data.id << std::endl;
         gc_cv.wait(lock, []() { 
-            std::cerr << "gc_on: " << gc_on << std::endl;
+            // std::cerr << "gc_on: " << gc_on << std::endl;
             return !gc_on; });
-        std::cerr << "~Gc_guard" << std::endl;
+        // std::cerr << "~Gc_guard " << thread_data.id <<  std::endl;
         paused_threads -= 1;
         
         thread_data.C_stackhead = nullptr;
@@ -169,7 +169,7 @@ private:
 public:
     Gc_lock() : m(), lock(m) {
         assert(gc_on);
-        std::cerr << "waiting gc lock" << std::endl;
+        std::cerr << "waiting gc lock " << thread_data.id <<  std::endl;
 
         int stack_var = 0;
         thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
@@ -179,11 +179,11 @@ public:
             std::cerr << "paused: " << paused_threads << std::endl;
             std::cerr << "total: " << num_threads << std::endl;
             return paused_threads == num_threads; });
-        std::cerr << "Gc_lock" << std::endl;
+        std::cerr << "Gc_lock " << thread_data.id <<  std::endl;
     }
 
     ~Gc_lock() {
-        std::cerr << "~Gc_lock" << std::endl;
+        std::cerr << "~Gc_lock " << thread_data.id << std::endl;
         paused_threads -= 1;
         gc_on = false;
         thread_data.C_stackhead = nullptr;
@@ -238,7 +238,7 @@ int start_thread(std::function<void(void)> f) {
     auto twork = [f]() {
         Thread_manager tm;
         std::cerr << "Thread " << thread_data.id << " started."<< std::endl;
-        std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
+        // std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
         f();
     };
 
