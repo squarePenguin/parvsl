@@ -1,0 +1,149 @@
+#+OPTIONS: ':nil *:t -:t ::t <:t H:1 \n:nil ^:t arch:headline author:nil
+#+OPTIONS: broken-links:nil c:nil creator:nil d:(not "LOGBOOK") date:t e:t
+#+OPTIONS: email:nil f:t inline:t num:t p:nil pri:nil prop:nil stat:t tags:t
+#+OPTIONS: tasks:t tex:t timestamp:t title:t toc:nil todo:t |:t
+#+TITLE: Implementing Parallelism in Lisp for REDUCE
+#+SUBTITLE: Part II Project Progress Report
+#+DATE: 7 February 2019
+#+AUTHOR: Vlad Badelita (avb40)
+#+EMAIL: avb40@cam.ac.uk
+#+LANGUAGE: en
+#+SELECT_TAGS: export
+#+EXCLUDE_TAGS: noexport
+#+CREATOR: Emacs 26.1 (Org mode 9.1.14)
+#+latex_header: \author{Andrei-Vlad Badelita (\href{mailto:avb40@cam.ac.uk}{avb40}) \\ \and Supervisor: Dr. Arthur C. Norman}
+#+startup: beamer
+#+LaTeX_CLASS: beamer
+#+LaTeX_CLASS_OPTIONS: [bigger]
+#+BEAMER_FRAME_LEVEL: 1
+#+COLUMNS: %40ITEM %10BEAMER_env(Env) %9BEAMER_envargs(Env Args) %4BEAMER_col(Col) %10BEAMER_extra(Extra)
+
+* REDUCE and VSL
+
+- REDUCE is an open-source general purpose Computer Algebra System (CAS)
+- Written entirely in its own LISP dialect
+- VSL is a LISP implementation written in C which supports REDUCE
+- VSL had no multi-threading support nor was it designed for parallelism
+- Thread-support is essential to leveraging modern CPU designs
+
+** Note
+:PROPERTIES:
+:BEAMER_ENV: note
+:END:
+REDUCE is an open-source general purpose Computer Algebra System.
+It is written entirely in its own Lisp dialect, of which there are multiple implementations.
+VSL is an interpreted version of Lisp written in C, which is capable of running the entirety of Reduce.
+However, is was not designed with parallelism in mind and has no multi-threading support.
+The biggest advancement in modern CPU design is multi-core processors. However, none of the 
+open-source CAS programs (Maxima, Axiom, Reduce) support any parallelism, which leads to their
+performance stagnating. There are numerical algorithms (like matrix multiplication), or
+algebraic ones (like computing groebner basis) which have been shown to have particularly efficient
+parallel version.
+
+*** DONE trim it a little bit
+    CLOSED: [2019-02-07 Thu 18:30]
+*** DONE lose story about other CAS
+    CLOSED: [2019-02-07 Thu 18:30]
+* My project
+
+- Modify VSL to support multi-threading safely
+- Modify parts of REDUCE to run parallel alrogithms
+- Port VSL to C++ to gain cross-platform support for threads
+- Change internals to ensure safety under parallel shared memory access
+- Keep the language fully backwards-compatible, be able to build REDUCE fully
+
+** Note
+:PROPERTIES:
+:BEAMER_ENV: note
+:END:
+Subtext:
+My goal is to get rid of this limitation in Reduce and showcase the advantages of multi-threading in CAS program.
+I split the project into two main goals. The first was to modify VSL to support multi-threading safely. The second part
+is to modify parts of Reduce to run parallel algorithms. 
+
+On the VSL side, I had to port the compiler to C++, where I would gain standardised cross-platform multi-threading support.
+Then I had to slowly analyse the implementation and make multiple changes under the hood to ensure safety under parallel shared
+memory access. Afterwards, threading primitives could be added. It is important that the language remain fully
+backwards-compatible and be able to build Reduce and pass the regression tests.
+
+* Technical challenges
+- Memory allocation and garbage collection
+#+BEGIN_EXPORT latex
+\vspace*{-0.5cm}
+#+END_EXPORT
+#+CAPTION: Memory allocations in parallel
+#+NAME:   fig:allocation
+[[./allocation.png]]
+#+BEGIN_EXPORT latex
+\vspace*{-0.5cm}
+#+END_EXPORT
+- Shared memory and global variables
+- Preserving and restoring state
+
+** Note
+:PROPERTIES:
+:BEAMER_ENV: note
+:END:
+
+While working on the language, I encountered many challanges, of which I list three main ones:
+- memory allocations and garbage collection
+- shared memory and global variables
+- preserving and restoring state
+
+As an example, memory allocations was a critical part of the program which will be constantly executed
+in parallel. Adding interlocks on allocations would have been significantly prohibitive on performance.
+Illustrating on a large shared pool of memory represented as a contiguous array, I have dedicated
+separate segments for each thread. Each thread can only allocate within its own segment and now
+and contention is limited to segment allocation. Now, there are many complications to this simple view:
+the memory is split in multiple malloced blocks, there are extra pinned items within this array, 
+garbage collection has to deal with these segments, and so does preserving state.
+
+*** DONE at least 3 significant challanges
+    CLOSED: [2019-02-07 Thu 18:31]
+*** DONE say no interlocks on each allocation
+    CLOSED: [2019-02-07 Thu 18:31]
+*** DONE and the way the interpreter kept track of them
+    CLOSED: [2019-02-07 Thu 18:31]
+*** DONE stress that garbage collection changes were difficult
+    CLOSED: [2019-02-07 Thu 18:31]
+*** DONE had to think about preserving, and about GC coming in, and pinned, and that it's not contiguous
+    CLOSED: [2019-02-07 Thu 18:31]
+* Progress
+
+- Threads, mutexes and condition variables supported
+- REDUCE builds fully and regression tests pass
+- Implemented thread pool in VSL along with other small examples
+- Next steps:
+  - further testing and bug-fixing
+  - parallelising parts of the REDUCE build
+  - identifying Reduce algorithms to parallelise
+  - benchmarks
+  - the actual dissertation :)
+
+** Note
+:PROPERTIES:
+:BEAMER_ENV: note
+:END:
+
+Subtext: Thankfully, most of the work on the language has now been completed. PARVSL (as I call it)
+is now able to start threads and employ mutexes and condition variables safely. Meanwhile, REDUCE
+builds successfully (a process involving over 100k of code and 10 minutes to finish) and the regression
+tests are passing. Furthermore, I have implemented a thread pool in PARVSL and I'm able to showcase
+simple tasks running in parallel, fulfilling one of the success criteria. 
+
+Looking forward, the second part will involve me trying increasingly stressful tests for ParVsl,
+and fixing any bugs I missed I might have missed so far. Then, a good showcase for the threading will be
+to build independent Reduce libraries in parallel and hope to speed up the build times. Finally,
+I will identify some algorithms in reduce to implement parallel versions of. As mentioned above,
+Matrix multiplication and Gröbner basis should be good candidates.
+
+* The end
+
+Thank you!
+
+** Note
+:PROPERTIES:
+:BEAMER_ENV: note
+:END:
+
+

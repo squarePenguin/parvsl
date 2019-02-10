@@ -1692,7 +1692,12 @@ int rdch()
         if (lispfiles[lispin] == stdin && stdin_tty)
         {   if (input_ptr >= input_max)
             {   int n = -1;
-                const char *s = el_gets(el_struct, &n);
+                const char *s;
+                
+                {
+                    par::Gc_guard guard;
+                    s = el_gets(el_struct, &n);
+                }
 
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
@@ -5812,6 +5817,7 @@ LispObject Lmutex(LispObject _data) {
 
 LispObject Lmutex_lock(LispObject lits, LispObject x) {
     int id = qfixnum(x);
+    par::Gc_guard guard; // now this thread is ready for gc.
     par::mutex_lock(id);
     return nil;
 }
