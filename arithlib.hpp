@@ -917,7 +917,7 @@ public:
 INLINE_VAR freechains fc;
 
 inline uint64_t *reserve(size_t n)
-{   assert(n>0 && n<1000000);
+{   assert(n>0);
     return &(fc.allocate(n+1))[1];
 }
 
@@ -5262,42 +5262,52 @@ intptr_t Times::op(uint64_t *a, uint64_t *b)
     uint64_t *p = reserve(n);
     pop(b); pop(a);
     size_t final_n;
+// I might like to optimise the 2*2 case here or even 2*3 and 3*3?
     bigmultiply(a, lena, b, lenb, p, final_n);
     return confirm_size(p, n, final_n);
 }
 
 intptr_t Times::op(int64_t a, int64_t b)
-{   uint64_t aa[1], bb[1];
-    aa[0] = a;
-    bb[0] = b;
+{   int64_t hi;
+    uint64_t lo;
+    signed_multiply64(a, b, hi, lo);
+    if ((hi==0 && positive(lo)) ||
+        (hi==-1 && negative(lo)))
+    {   if (fits_into_fixnum((int64_t)lo))
+            return int_to_handle((int64_t)lo);
+        uint64_t *r = reserve(1);
+        r[0] = lo;
+        return confirm_size(r, 1, 1);
+    }
     uint64_t *r = reserve(2);
-    size_t final_n;
-    bigmultiply(aa, 1, bb, 1, r, final_n);
-    return confirm_size(r, 2, final_n);
+    r[0] = lo;
+    r[1] = hi;
+    return confirm_size(r, 2, 2);
 }
 
 intptr_t Times::op(int64_t a, uint64_t *b)
-{   uint64_t aa[1];
-    aa[0] = a;
-    size_t lenb = number_size(b);
+{   size_t lenb = number_size(b);
     push(b);
-    uint64_t *r = reserve(lenb+1);
+    uint64_t *c = reserve(lenb+1);
     pop(b);
-    size_t final_n;
-    bigmultiply(aa, 1, b, lenb, r, final_n);
-    return confirm_size(r, lenb+1, final_n);
+    uint64_t hi = 0;
+    for (size_t i=0; i<lenb; i++)
+        multiplyadd64(a, b[i], hi, hi, c[i]);
+    c[lenb] = hi;
+    if (negative(a))
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lenb; i++)
+            carry = add_with_carry(c[i+1], ~b[i], carry, c[i+1]);
+    }
+    if (negative(b[lenb-1])) c[lenb] -= a;
+    size_t lenc = lenb+1;
+    truncate_positive(c, lenc);
+    truncate_negative(c, lenc);
+    return confirm_size(c, lenb+1, lenc);
 }
 
 intptr_t Times::op(uint64_t *a, int64_t b)
-{   size_t lena = number_size(a);
-    uint64_t bb[1];
-    bb[0] = b;
-    push(a);
-    uint64_t *r = reserve(lena+1);
-    pop(a);
-    size_t final_n;
-    bigmultiply(a, lena, bb, 1, r, final_n);
-    return confirm_size(r, lena+1, final_n);
+{   return Times::op(b, a);
 }
 
 // For big multi-digit numbers squaring can be done almost twice as fast

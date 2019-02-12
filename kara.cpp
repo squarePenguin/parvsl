@@ -93,10 +93,7 @@ using namespace arithlib;
 // lenr words even if lena is a lot shorter.
 
 uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
-{   assert(lena <= lenr);
-    display("kadd  r:", r, lenr);
-    display("kadd  a:", a, lena);
-    uint64_t carry = 0;
+{   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lena; i++)
         carry = add_with_carry(a[i], r[i], carry, r[i]);
@@ -104,7 +101,6 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
     {   carry = add_with_carry(r[i], carry, r[i]);
         i++;
     }
-    display(carry ? "kadd R1:" : "kadd R0:", r, lenr);
     return carry;
 }
 
@@ -112,11 +108,8 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 
 uint64_t kadd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
               uint64_t *r, size_t lenr)
-{   assert(lena >= lenb && lena <= lenr);
-    uint64_t carry = 0;
+{   uint64_t carry = 0;
     size_t i;
-    display("kadd' a:", a, lena);
-    display("kadd' b:", b, lenb);
     for (i=0; i<lenb; i++)
         carry = add_with_carry(a[i], b[i], carry, r[i]);
     while (i<lena)
@@ -128,57 +121,29 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
         carry = 0;
     }
     while (i < lenr) r[i++] = 0;
-    display("kadd' R:", r, lenr);
     return carry;
 }
 
 // r = r - a;
 
 uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
-{   assert(lena <= lenr);
-    uint64_t borrow = 0;
+{   uint64_t borrow = 0;
     size_t i;
-    display("ksub  r:", r, lenr);
-    display("ksub  a:", a, lena);
     for (i=0; i<lena; i++)
         borrow = subtract_with_borrow(r[i], a[i], borrow, r[i]);
     while (borrow!=0 && i<lenr)
     {   borrow = subtract_with_borrow(r[i], borrow, r[i]);
         i++;
     }
-    display(borrow ? "ksub R1:" : "ksub R0:", r, lenr);
     return borrow;
 }
-
-//- // r = a - b;
-//- // For the 2-input addition I want lena >= lenb.
-//-
-//- uint64_t ksub(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
-//-               uint64_t *r, size_t lenr)
-//- {   assert(lena >= lenb && lena <= lenr);
-//-     uint64_t borrow = 0;
-//-     size_t i;
-//-     for (i=0; i<lenb; i++)
-//-         borrow = subtract_with_borrow(a[i], b[i], borrow, r[i]);
-//-     while (i<lena)
-//-     {   borrow = subtract_with_borrow(a[i], borrow, r[i]);
-//-         i++;
-//-     }
-//- // If I need to propagate a borrow up into fresh space I must write in the
-//- // value "-1" (ie all bits set).
-//-     while (i < lenr) r[i++] = -borrow;
-//-     return borrow;
-//- }
-
-
 
 // c += a*b;
 
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
                                uint64_t *r, size_t lenr)
-{   assert(lena+lenb <= lenr);
-    uint64_t carry = 0;
+{   uint64_t carry = 0;
     for (size_t i=0; i<lena; i++)
     {   uint64_t hi = 0;
         for (size_t j=0; j<lenb; j++)
@@ -197,7 +162,17 @@ inline void classical_multiply(uint64_t *a, size_t lena,
         carry = add_with_carry(r[i], carry, r[i]);
 }
 
-static const size_t KARATSUBA_CUTOFF = 2; // 10;
+// The cutoff here is potentially system-dependent, however the exact value
+// is not incredibly critical because for quite some range around it the
+// classical and Karatsuba methods will have pretty similar costs. The
+// value here was chosen after a few tests on x86_64 both using cygwin-64
+// and Linux. As a sanity check the corresponding threshold as used by
+// gmp was checked - there depending on exactly what computer is used they
+// move to the more complicated method at somewhere between 10 and 35 word
+// (well their term is "limb") numbers. The value 16 seems reasonably
+// consistent to use as a single fixed value.
+
+static const size_t KARATSUBA_CUTOFF = 16;
 
 inline void kara2(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
@@ -208,10 +183,7 @@ inline void kara1(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, size_t lenc,
                   uint64_t *w)
-{   display("kara1 a:", a, lena);
-    display("kara1 b:", b, lenb);
-    display("kara1 c:", c, lenc);
-    if (lena<KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, c, lenc);
+{   if (lena<KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, c, lenc);
     else
     {   if (lena>lenb && lenb%2==0)
         {   classical_multiply(a, 1, b, lenb, c, lenc);
@@ -222,7 +194,6 @@ inline void kara1(uint64_t *a, size_t lena,
         }
         kara2(a, lena, b, lenb, c, lenc, w);
     }
-    display("kara1 C:", c, lenc);
 }
 
 
@@ -239,16 +210,11 @@ inline void kara2(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, size_t lenc,
                   uint64_t *w)
-{   std::cout << "kara2 " << lena << " * " << lenb << " : " << lenc << std::endl;
-    assert(lena==lenb ||
-           (lena == lenb+1 && lena%2 == 0) ||
-           (lenb == lena+1 && lenb%2 == 0));
+{
 // The all the cases that are supported here the next line sets n to a
 // suitably rounded up half length.
     size_t n = (lena+1)/2;
-    assert(lena-n <= n);
     uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
-    assert(lenb-n <= n);
     uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
     kara1(w, n, w+n, n, c+n, lenc-n, w+2*n);         // (a0+a1)*(b0+b1)
     if (c1 != 0)
@@ -282,15 +248,10 @@ inline void kara(uint64_t *a, size_t lena,
     {   std::swap(a, b);
         std::swap(lena, lenb);
     }
-    display("kara a:", a, lena);
-    display("kara b:", b, lenb);
-    display("kara c:", c, lenc);
 // Now b is the shorter operand. If it is not too big I can just do
 // simple classical long multiplication.
     if (lenb < KARATSUBA_CUTOFF)
-    {   std::cout << "do a classical multiplication " << lena << " by " << lenb << std::endl;
-        classical_multiply(a, lena, b, lenb, c, lenc);
-        display("kara C:", c, lenc);
+    {   classical_multiply(a, lena, b, lenb, c, lenc);
         return;
     }
 // For equal lengths I can do just one call to Karatsuba.
@@ -306,19 +267,13 @@ inline void kara(uint64_t *a, size_t lena,
     size_t olenc = lenc;
     size_t len = lenb + (lenb & 1);
     while (lena>=len)
-    {   std::cout << "do a partial kara step " << len << " by " << lenb << std::endl;
-        kara1(a, len, b, lenb, c, lenc, w);
-        display("kara C:", oc, olenc);
+    {   kara1(a, len, b, lenb, c, lenc, w);
         a += len;
         lena -= len;
         c += len;
         lenc -= len;
     }
-    if (lena != 0)
-    {   std::cout << "do a final step " << lena << " by " << lenb << std::endl;
-        kara(b, lenb, a, lena, c, lenc, w);
-    }
-    display("kara C:", oc, olenc);
+    if (lena != 0) kara(b, lenb, a, lena, c, lenc, w);
 }
 
 // Finally I can provide the top-level entrypoint that accepts signed
@@ -352,13 +307,10 @@ inline void kmultiply(uint64_t *a, size_t lena,
         {   std::swap(a, b);
             std::swap(lena, lenb);
         }
-        size_t len, n=0;
-// I will arrange a workspace vector large enough for use of Karatsuba
-// dividing the shorter of my two operands.
-        for (len=lenb; len>=KARATSUBA_CUTOFF; len=(len+1)/2) n++;
-        while (n--!=0) len *= 2;
         push(a); push(b);
-        uint64_t *w = reserve(2*len); // overallocate for now!
+        size_t lenw = 2*lenb;
+        for (size_t i=lenb; i>8; i=i/2) lenw += 2;
+        uint64_t *w = reserve(lenw); // Just enough in worst cases I believe.
         pop(b); pop(a);
         kara(a, lena, b, lenb, r, lenr, w);
         abandon(w);
@@ -399,7 +351,6 @@ uint64_t w[MAX];
 
 size_t lena, lenb, lenc, lenc1, lenw;
 
-#define LEN 5
 
 int main(int argc, char *argv[])
 {   std::cout << "Karatsuba tests" << std::endl;
@@ -407,24 +358,36 @@ int main(int argc, char *argv[])
     {   a[i] = mersenne_twister();
         b[i] = mersenne_twister();
     }
-    lena = LEN;
-    lenb = LEN;
-    for (lena=1; lena<20; lena++)
-    for (lenb=1; lenb<20; lenb++)
-    { 
-    std::cout << std::endl << "***** " << lena << " " << lenb << " *****" << std::endl;
-    bigmultiply(a, lena, b, lenb, c, lenc);
-    for (size_t i=0; i<lena+lenb; i++) c1[i] = 0;
-    kmultiply(a, lena, b, lenb, c1, lenc1);
-    display("a", a, lena);
-    display("b", b, lenb);
-    display("c ", c,  lenc);
-    display("c1", c1, lenc1);
-    bool ok=(lenc == lenc1);
-    for (size_t i=0; ok && i<lenc; i++)
-        if (c[i] != c1[i]) ok = false;
-    std::cout << (ok ? "OK" : "Failed") << std::endl;
-    if (!ok) return 1;
+    for (lena=1; lena<40; lena++)
+    {   lenb = lena;
+        clock_t cl0 = clock();
+        for (size_t i=0; i<200000; i++)
+            bigmultiply(a, lena, b, lenb, c, lenc);
+        clock_t cl1 = clock();
+        for (size_t i=0; i<200000; i++)
+            kmultiply(a, lena, b, lenb, c1, lenc1);
+        clock_t cl2 = clock();
+        double t1 = cl1-cl0;
+        double t2 = cl2-cl1;
+        if (lena < KARATSUBA_CUTOFF)
+        {   t1 = 0.001;
+            t2 = 0.001;
+        }
+        std::cout << std::setw(10) << lena
+                          << "    " << (t1/(double)CLOCKS_PER_SEC)
+                          << "    " << (t2/(double)CLOCKS_PER_SEC)
+                          << "    " << (t1/t2)
+                          << std::endl;
+        bool ok=(lenc == lenc1);
+        for (size_t i=0; ok && i<lenc; i++)
+            if (c[i] != c1[i]) ok = false;
+        if (!ok)
+        {   display("a", a, lena);
+            display("b", b, lenb);
+            display("c ", c,  lenc);
+            display("c1", c1, lenc1);
+            return 1;
+        }
     }
     std::cout << "Finished" << std::endl;
     return 0;

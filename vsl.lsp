@@ -691,7 +691,7 @@ top (cond ((atom a) (return (reversip r))))
       (t (error "number expected but received" n))))
 
 (global '(!~!~bignum))
-(setq !~!~bignum (compress '(!! !~ b i g n u m))
+(setq !~!~bignum (compress '(!! !~ b i g n u m)))
 
 (de !~sizecheck (l)
    (cond
