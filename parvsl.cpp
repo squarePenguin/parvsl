@@ -5800,6 +5800,16 @@ LispObject Lthread(LispObject lits, LispObject x) {
     return packfixnum(tid);
 }
 
+LispObject Lthread2(LispObject lits, LispObject func, LispObject arg) {
+    auto f = [=]() {
+        LispObject r = Lapply(nil, func, arg);
+        print(r);
+    };
+
+    int tid = par::start_thread(f);
+    return packfixnum(tid);
+}
+
 LispObject Ljoin_thread(LispObject lits, LispObject x) {
     int tid = qfixnum(x);
     par::join_thread(tid);
@@ -6051,6 +6061,7 @@ LispObject Lthread_id(LispObject _data) {
     SETUP_TABLE_SELECT("rplaca",            Lrplaca),           \
     SETUP_TABLE_SELECT("rplacd",            Lrplacd),           \
     SETUP_TABLE_SELECT("set",               Lset),              \
+    SETUP_TABLE_SELECT("thread2",           Lthread2),          \
     SETUP_TABLE_SELECT("vector",            Lvector_2),
 
 #define SETUP2a
