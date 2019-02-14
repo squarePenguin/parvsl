@@ -927,6 +927,11 @@ void par_reclaim() {
         *(td.work1) = copy(*(td.work1));
         *(td.work2) = copy(*(td.work2));
     }
+
+    for (auto& x: par::thread_returns) {
+        // copy the values waiting to be joined
+        x.second = copy(x.second);
+    }
 }
 
 
@@ -5792,8 +5797,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 
 LispObject Lthread(LispObject lits, LispObject x) {
     auto f = [=]() {
-        LispObject r = eval(x);
-        print(r);
+        return eval(x);
     };
 
     int tid = par::start_thread(f);
@@ -5801,9 +5805,15 @@ LispObject Lthread(LispObject lits, LispObject x) {
 }
 
 LispObject Lthread2(LispObject lits, LispObject func, LispObject arg) {
+    LispObject arg_value = eval(arg);
+    std::cerr << "got here" << __LINE__ << std::endl;
+    std::cout << "arg=";
+    print(arg);
+    std::cout << "eval(arg)=";
+    print(arg_value);
+    
     auto f = [=]() {
-        LispObject r = Lapply(nil, func, arg);
-        print(r);
+        return Lapply(nil, func, arg);
     };
 
     int tid = par::start_thread(f);
@@ -5812,8 +5822,8 @@ LispObject Lthread2(LispObject lits, LispObject func, LispObject arg) {
 
 LispObject Ljoin_thread(LispObject lits, LispObject x) {
     int tid = qfixnum(x);
-    par::join_thread(tid);
-    return nil;
+    LispObject result = par::join_thread(tid);
+    return result;
 }
 
 LispObject Lmutex(LispObject _data) {

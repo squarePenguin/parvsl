@@ -126,6 +126,10 @@ public:
 thread_local Thread_data thread_data;
 
 std::unordered_map<int, Thread_data&> thread_table;
+
+// these are values on threads waiting to be joined.
+// TODO: add to Garbage collector
+std::unordered_map<int, LispObject> thread_returns;
 thread_local int thread_index = -1;
 
 std::atomic_int num_threads(0);
@@ -231,7 +235,7 @@ public:
 };
 
 std::mutex thread_mutex;
-int start_thread(std::function<void(void)> f) {
+int start_thread(std::function<LispObject(void)> f) {
     std::lock_guard<std::mutex> lock(thread_mutex);
 
     tid += 1;
@@ -239,17 +243,24 @@ int start_thread(std::function<void(void)> f) {
         Thread_manager tm;
         std::cerr << "Thread " << thread_data.id << " started."<< std::endl;
         // std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
-        f();
+        LispObject result = f();
+        thread_returns[thread_data.id] = result;
     };
 
     active_threads.emplace(tid, std::thread(twork));
     return tid;
 }
 
-void join_thread(int tid) {
-    // auto& t = active_threads[tid];
-    // t.join();
-    active_threads.erase(tid);
+LispObject join_thread(int tid) {
+    {
+        // this will block if the thread is still running
+        Gc_guard guard;
+        active_threads.erase(tid);
+    }
+
+    LispObject value = thread_returns[tid];
+    thread_returns.erase(tid);
+    return value;
 }
 
 // we are keeping mutexes in a map, just like thread

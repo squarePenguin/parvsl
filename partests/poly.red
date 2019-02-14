@@ -55,7 +55,31 @@ begin
   return interleave(add_polys(a0b0, 0 . a1b1), add_polys(a0b1, a1b0));
 end;
 
+% same as above but use threads
+symbolic procedure multiply_polys_par(a, b);
+begin
+  a_unwind := unwind(a);
+  b_unwind := unwind(b);
+  a0 := first a_unwind;
+  a1 := second a_unwind;
+  b0 := first b_unwind;
+  b1 := second b_unwind;
+  
+  t0 := thread2('multiply_polys, '(a0 b0));
+  t1 := thread2('multiply_polys, '(a0 b1));
+  t2 := thread2('multiply_polys, '(a1 b0));
+  t3 := thread2('multiply_polys, '(a1 b1));
+
+  a0b0 := jointhread(t0);
+  a0b1 := jointhread(t1);
+  a1b0 := jointhread(t2);
+  a1b1 := jointhread(t3);
+
+  return interleave(add_polys(a0b0, 0 . a1b1), add_polys(a0b1, a1b0));
+end;
+
 a := {21, 5, 0, -2, 3, 6};
 b := {-1, 3, 1, 4, -5};
 c := multiply_polys(a, b);
+c2 := multiply_polys2(a, b);
 cp := multiply_polys_par(a, b);
