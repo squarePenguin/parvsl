@@ -176,3 +176,12 @@ they
 - add to dissertation
 - assert my atomics are lock free AND write in the dissertation
 - each bucket can be an atomic and  use CAS
+
+
+talk about work1, work2 were not thread local
+talk about x as a global variable
+talk about bug which goes away when debugging(printing helps)
+
+just fixed bug where threads would get confused.
+turns out I was setting thread ids incorrectly. I thought I was incrementing an atomic
+under mutex so safe, but assignment was on the new thread so could see an incorrect value.

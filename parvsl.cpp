@@ -5805,13 +5805,6 @@ LispObject Lthread(LispObject lits, LispObject x) {
 }
 
 LispObject Lthread2(LispObject lits, LispObject func, LispObject arg) {
-    LispObject arg_value = eval(arg);
-    std::cerr << "got here" << __LINE__ << std::endl;
-    std::cout << "arg=";
-    print(arg);
-    std::cout << "eval(arg)=";
-    print(arg_value);
-    
     auto f = [=]() {
         return Lapply(nil, func, arg);
     };
@@ -7809,7 +7802,8 @@ int main(int argc, char *argv[])
     C_stackbase = (LispObject *)((intptr_t)&inputfilename &
                                     -sizeof(LispObject));
 
-    par::init_thread_data(C_stackbase);
+    // main threads is always id 0
+    par::init_thread_data(0, C_stackbase);
 
     coldstart = 0;
     interactive = 1;

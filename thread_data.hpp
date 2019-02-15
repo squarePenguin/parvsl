@@ -144,9 +144,6 @@ class Gc_guard {
 public:
 
     Gc_guard() : m(), lock(m) {
-        // assert(false);
-        // print_stacktrace();
-        // std::cerr << "Gc_guard " << thread_data.id <<  std::endl;
         int stack_var = 0;
         thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
@@ -155,11 +152,7 @@ public:
     }
 
     ~Gc_guard() {
-        // std::cerr << "Waiting gc guard " << thread_data.id << std::endl;
-        gc_cv.wait(lock, []() { 
-            // std::cerr << "gc_on: " << gc_on << std::endl;
-            return !gc_on; });
-        // std::cerr << "~Gc_guard " << thread_data.id <<  std::endl;
+        gc_cv.wait(lock, []() { return !gc_on; });
         paused_threads -= 1;
         
         thread_data.C_stackhead = nullptr;
@@ -209,9 +202,9 @@ void reset_segments() {
 std::unordered_map<int, Thread_RAII> active_threads;
 int tid = 0;
 
-void init_thread_data(LispObject *C_stackbase) {
+void init_thread_data(int id, LispObject *C_stackbase) {
     thread_data.C_stackbase = C_stackbase;
-    thread_data.id = tid;
+    thread_data.id = id;
     thread_data.fluid_locals = &fluid_locals;
     thread_data.work1 = &work1;
     thread_data.work2 = &work2;
@@ -221,14 +214,14 @@ void init_thread_data(LispObject *C_stackbase) {
 
 class Thread_manager {
 public:
-    Thread_manager() {
+    Thread_manager(int id) {
         int stack_var = 0;
-        init_thread_data((LispObject *)((intptr_t)&stack_var & -sizeof(LispObject)));
-        // num_threads += 1;
+        init_thread_data(id, (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject)));
+        // std::cerr << "ThreadManager " << thread_data.id << std::endl;
     }
 
     ~Thread_manager() {
-        std::cerr << "~Thread_manager" << std::endl;
+        // std::cerr << "~Thread_manager " << thread_data.id << std::endl;
         num_threads -= 1;
         thread_table.erase(thread_data.id);
     }
@@ -239,9 +232,11 @@ int start_thread(std::function<LispObject(void)> f) {
     std::lock_guard<std::mutex> lock(thread_mutex);
 
     tid += 1;
-    auto twork = [f]() {
-        Thread_manager tm;
-        std::cerr << "Thread " << thread_data.id << " started."<< std::endl;
+    int id = tid;
+
+    auto twork = [f, id]() {
+        Thread_manager tm(id);
+
         // std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
         LispObject result = f();
         thread_returns[thread_data.id] = result;

@@ -1,3 +1,6 @@
+lisp;
+global('(!~radix));
+
 symbolic procedure multiply_by_constant(n, l);
   if null l then nil
   else (n*car l) . multiply_by_constant(n, cdr l);
@@ -39,7 +42,7 @@ symbolic procedure unwind(l);
 
 % like parallel, but running sequentially O(N^2)
 symbolic procedure multiply_polys2(a, b);
-begin
+begin scalar a_unwind, b_unwind, a0, a1, b0, b1;
   a_unwind := unwind(a);
   b_unwind := unwind(b);
   a0 := first a_unwind;
@@ -57,18 +60,18 @@ end;
 
 % same as above but use threads
 symbolic procedure multiply_polys_par(a, b);
-begin
+begin scalar a_unwind, b_unwind, a0, a1, b0, b1, t0, t1, t2, t3;
   a_unwind := unwind(a);
   b_unwind := unwind(b);
   a0 := first a_unwind;
   a1 := second a_unwind;
   b0 := first b_unwind;
   b1 := second b_unwind;
-  
-  t0 := thread2('multiply_polys, '(a0 b0));
-  t1 := thread2('multiply_polys, '(a0 b1));
-  t2 := thread2('multiply_polys, '(a1 b0));
-  t3 := thread2('multiply_polys, '(a1 b1));
+
+  t0 := thread2('multiply_polys, {a0, b0});
+  t1 := thread2('multiply_polys, {a0, b1});
+  t2 := thread2('multiply_polys, {a1, b0});
+  t3 := thread2('multiply_polys, {a1, b1});
 
   a0b0 := jointhread(t0);
   a0b1 := jointhread(t1);
