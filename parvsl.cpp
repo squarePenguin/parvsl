@@ -90,6 +90,7 @@
 
 #include <iostream>
 
+#include <fstream>
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -100,7 +101,6 @@
 
 // I want libedit for local editing and history.
 #include <histedit.h>
-
 
 #ifdef WIN32
 #define popen _popen
@@ -5804,6 +5804,9 @@ LispObject Lthread(LispObject lits, LispObject x) {
     return packfixnum(tid);
 }
 
+/**
+ * thread2 allows passing a function and a list of arguments
+ * */
 LispObject Lthread2(LispObject lits, LispObject func, LispObject arg) {
     auto f = [=]() {
         return Lapply(nil, func, arg);
@@ -5825,7 +5828,6 @@ LispObject Lmutex(LispObject _data) {
 
 LispObject Lmutex_lock(LispObject lits, LispObject x) {
     int id = qfixnum(x);
-    par::Gc_guard guard; // now this thread is ready for gc.
     par::mutex_lock(id);
     return nil;
 }
@@ -5843,7 +5845,6 @@ LispObject Lcondvar(LispObject _data) {
 LispObject Lcondvar_wait(LispObject lits, LispObject cv, LispObject m) {
     int cvid = qfixnum(cv);
     int mid = qfixnum(m);
-    par::Gc_guard guard; // now this thread is ready for gc.
     par::condvar_wait(cvid, mid);
     return nil;
 }
@@ -7948,6 +7949,15 @@ int main(int argc, char *argv[])
             coldstart = 0;
         }
     }
+
+#ifdef DEBUG_GLOBALS
+    std::ofstream fout("global_syms.log", std::ios_base::app);
+    fout << "global symbols" << std::endl;
+    for (auto s: par::debug_globals) {
+        fout << s << " ";
+    }
+    fout << std::endl;
+#endif
     return 0;
 }
 

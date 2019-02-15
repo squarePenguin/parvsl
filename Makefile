@@ -166,12 +166,12 @@ rcore-arith:	vsl-arith library-arith.lsp vsl-arith.lsp
 		-Dnoinlines=t \
 		buildrcore-arith.lsp | tee rcore-arith.log
 
-parrcore:	parvsl
+parrcore:	parvsl parbuildrcore.lsp
 	mkdir -p parrcore.img.modules
 	rm -f parrcore.img.modules/* parrcore.img inline-defs.dat
 	time ./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildrcore.lsp | tee parrcore.log
+		parbuildrcore.lsp | tee parrcore.log
 
 fastrcore:	fastvsl
 	mkdir -p fastrcore.img.modules
@@ -187,12 +187,12 @@ fastrcore-arith:	fastvsl-arith library-arith.lsp vsl-arith.lsp
 		-Dnoinlines=t \
 		buildrcore-arith.lsp | tee fastrcore-arith.log
 
-fastparrcore:	fastparvsl
+fastparrcore:	fastparvsl parbuildrcore.lsp
 	mkdir -p fastparrcore.img.modules
 	rm -f fastparrcore.img.modules/* fastparrcore.img inline-defs.dat
 	time ./fastparvsl -z -ifastparrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildrcore.lsp | tee fastparrcore.log
+		parbuildrcore.lsp | tee fastparrcore.log
 
 # The target "step2" at one stage activated a script that started from
 # rcore and compiled additional parts of Reduce to bring it up to the

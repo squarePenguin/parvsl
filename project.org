@@ -185,3 +185,7 @@ talk about bug which goes away when debugging(printing helps)
 just fixed bug where threads would get confused.
 turns out I was setting thread ids incorrectly. I thought I was incrementing an atomic
 under mutex so safe, but assignment was on the new thread so could see an incorrect value.
+
+TODO modify lookup function to be lock-free
+TODO clean thread local storage on GC?
+TODO clean mutexes and condvars on GC?
