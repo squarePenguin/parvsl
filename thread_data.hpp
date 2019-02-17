@@ -15,8 +15,6 @@
 #include <thread>
 #include <unordered_map>
 
-#define DEBUG_GLOBALS
-
 // #include "stacktrace.h"
 
 extern LispObject print(LispObject);

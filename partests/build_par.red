@@ -153,11 +153,10 @@ symbolic procedure build_packages(packages);
 packages := {'assert, 'odesolve};
 
 % build_packages(packages);
-build_packages_par(packages);
+% build_packages_par(packages);
 
 % just make sure it didn't break too much
-2 + 2;
+preserve('begin, "Rcore", nil);
+stop 0;
 
-% bye;
-
-% ./fastparvsl -i fastparrcore.img partests/build_par.red -D@srcdir=. -D@reduce=.. -Dnoinlines=t
+% time ./fastparvsl -i fastparrcore.img partests/build_par.red -D@srcdir=. -D@reduce=.. -Dnoinlines=t
