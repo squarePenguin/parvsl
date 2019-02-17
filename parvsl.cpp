@@ -90,6 +90,7 @@
 
 #include <iostream>
 
+#include <list>
 #include <fstream>
 #include <functional>
 #include <unordered_map>
@@ -2459,7 +2460,7 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
                           LispObject a3, LispObject a4, LispObject a5up)
 {
     guard_gc();
-    LispObject bvl=nil, v2=nil, v3=nil, v4=nil, v5up=nil, w, v, a;
+    LispObject bvl=nil, v2=nil, v3=nil, v4=nil, v5up=nil, w, v;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
     if (bvl == nil ||
@@ -2483,29 +2484,30 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
     par::Shallow_bind bind_v2(v2, a2);
     par::Shallow_bind bind_v3(v3, a3);
     par::Shallow_bind bind_v4(v4, a4);
+
     v = v5up;
-    a = nil;
+    w = a5up;
+
+    // I'm using a list here to make sure there's no resizing, and thus destruction
+    std::list<par::Shallow_bind> binds_a5up;
     while (v != nil)
-    {   swap(par::symval(qcar(v)), qcar(a5up)); // bind another argument
+    {   
+        binds_a5up.emplace_back(qcar(v), qcar(w)); // bind another argument
         v = qcdr(v);
-        w = qcdr(a5up);
-        qcdr(a5up) = a;
-        a = a5up;
-        a5up = w;   // Collect saved values in reversed order.
+        w = qcdr(w);
     }
-    w = nil;
+
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    v = v5up = nreverse(v5up);
-    while (v != nil)
-    {   par::symval(qcar(v)) = qcar(a);
-        v = qcdr(v);
-        a = qcdr(a);
+
+    while (not binds_a5up.empty()) {
+        // make sure the elements destruct in reverse order
+        binds_a5up.pop_back();
     }
-    nreverse(v5up);
+
     return w;
 }
 
@@ -3086,6 +3088,12 @@ LispObject Lsetq(LispObject lits, LispObject x)
             return error1("bad variable in setq", x);
         w = eval(qcar(qcdr(x)));
         if (unwindflag != unwindNONE) return nil;
+
+#ifdef DEBUG_GLOBALS
+        if (is_global(qcar(x)) or par::is_fluid_bound(qcar(x))) {
+            par::add_debug_global(qcar(x));
+        }
+#endif
         par::symval(qcar(x)) = w;
         x = qcdr(qcdr(x));
     }
@@ -3107,19 +3115,20 @@ LispObject Lprogn(LispObject lits, LispObject x)
 LispObject Lprog(LispObject lits, LispObject x)
 {   
     guard_gc();
-    LispObject w, vars, saved = nil, save_x;
+    LispObject w, vars, save_x;
     if (!isCONS(x)) return nil;
     vars = qcar(x);
     x = qcdr(x);
+
+    std::list<par::Shallow_bind> bind_vars;
 // Now bind all the local variables, giving them the value nil.
     for (w=vars; isCONS(w); w=qcdr(w))
     {   LispObject v = qcar(w);
         if (!isSYMBOL(v))
             return error1("Not a symbol in variable list for prog", v);
-        saved = cons(par::symval(v), saved);
+        bind_vars.emplace_back(v, nil);
         if (unwindflag != unwindNONE) return nil;
     }
-    for (w=vars; isCONS(w); w=qcdr(w)) par::symval(qcar(w)) = nil;
     save_x = x;  // So that "go" can scan the whole block to find a label.
     work1 = nil;
     while (isCONS(x))
@@ -3138,16 +3147,9 @@ LispObject Lprog(LispObject lits, LispObject x)
         if (unwindflag != unwindNONE) break;
     }
 // Now I must unbind all the variables.
-    w = nreverse(vars);
-    vars = nil;
-    while (isCONS(w))
-    {   LispObject x = w;
-        w = qcdr(w);
-        qcdr(x) = vars;
-        vars = x;
-        x = qcar(vars);
-        par::symval(x) = qcar(saved);
-        saved = qcdr(saved);
+
+    while (not bind_vars.empty()) {
+        bind_vars.pop_back();
     }
     return work1;
 }
@@ -3320,6 +3322,7 @@ void unglobal_symbol(LispObject s) {
 void fluid_symbol(LispObject s) {
     // If it was global, move the value to thread_local storage
     // and store the location.
+    if (is_fluid(s)) return;
 
     LispObject oldval = par::symval(s);
 
@@ -3363,7 +3366,9 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 }
 
 LispObject Lglobal(LispObject lits, LispObject x) {
-    return chflag(x, global_symbol);
+    // TODO: this is a hack to prevent variables being made global. FIX IT!
+    std::cerr << "WARNING! tried to make global but made fluid!" << std::endl;
+    return chflag(x, fluid_symbol);
 }
 
 LispObject Lfluid(LispObject lits, LispObject x) {
@@ -5669,13 +5674,17 @@ static bool showallreads = false;
 void readevalprint(int loadp)
 {   while (symtype != EOF)
     {   LispObject r;
-        LispObject save_echo = par::symval(echo);
-        unwindflag = unwindNONE;
-        if (loadp) par::symval(echo) = nil;
-        if (showallreads) par::symval(echo) = lisptrue;
-        backtraceflag = backtraceHEADER | backtraceTRACE;
-        r = readS();
-        par::symval(echo) = save_echo;
+        // I make sure here that echo is locally bound here.
+        // Otherwise threads would content over the global value.
+        {
+            par::Shallow_bind(echo, par::symval(echo));
+            unwindflag = unwindNONE;
+            if (loadp) par::symval(echo) = nil;
+            if (showallreads) par::symval(echo) = lisptrue;
+            backtraceflag = backtraceHEADER | backtraceTRACE;
+            r = readS();
+        }
+
         if (showallreads)
         {   printf("item read was: ");
             print(r);
@@ -6263,7 +6272,7 @@ void setup()
     fluid_symbol(echo);
     par::symval(echo) = interactive ? nil : lisptrue;
 
-    {   
+    {
         LispObject nn = lookup("*nocompile", 10, 3);
         fluid_symbol(nn);
         par::symval(nn) = lisptrue;
@@ -6489,6 +6498,10 @@ void *relocate_fn(void *x)
 
 int warm_start_1(gzFile f, int *errcode)
 {
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = false;
+#endif
+
     uintptr_t i, b1;
     uint32_t setupsize;
     char (*imagesetup_names)[MAX_NAMESIZE];
@@ -6945,6 +6958,9 @@ int warm_start_1(gzFile f, int *errcode)
      work1_base = NULLATOM;
      work2_base = NULLATOM;
 
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = true;
+#endif
      return 0;
 }
 
@@ -7156,6 +7172,10 @@ static inline int write_image_1(gzFile f, int *errcode)
 
 void write_image(gzFile f)
 {
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = false;
+#endif
+
     // This should destruct all threads and thus wait for them to join.
     // TODO VB: don't care about non-termination yet
     par::active_threads.clear();
@@ -7211,6 +7231,10 @@ void write_image(gzFile f)
         else printf("+++ Error compressing image file (code=%d)\n", errcode);
         my_exit(EXIT_FAILURE);
     }
+
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = true;
+#endif
 }
 
 static void el_tidy() {
@@ -7952,11 +7976,15 @@ int main(int argc, char *argv[])
 
 #ifdef DEBUG_GLOBALS
     std::ofstream fout("global_syms.log", std::ios_base::app);
-    fout << "global symbols" << std::endl;
+    fout << "global symbols for command: " << std::endl;
+    for (int i = 0; i < argc; i += 1) {
+        fout << argv[i] << ' ';
+    }
+    fout << std::endl;
     for (auto s: par::debug_globals) {
         fout << s << " ";
     }
-    fout << std::endl;
+    fout << std::endl << std::endl;
 #endif
     return 0;
 }

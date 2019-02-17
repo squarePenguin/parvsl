@@ -189,3 +189,9 @@ under mutex so safe, but assignment was on the new thread so could see an incorr
 TODO modify lookup function to be lock-free
 TODO clean thread local storage on GC?
 TODO clean mutexes and condvars on GC?
+
+Global variables which are bad:
+echo
+dfprint
+
+I was not shallow binding arguments +5 properly

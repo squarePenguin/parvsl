@@ -15,6 +15,8 @@
 #include <thread>
 #include <unordered_map>
 
+#define DEBUG_GLOBALS
+
 // #include "stacktrace.h"
 
 extern LispObject print(LispObject);
@@ -25,11 +27,17 @@ namespace par {
 
 #ifdef DEBUG_GLOBALS
 
+bool debug_safe = true;
+
 std::set<std::string> debug_globals;
 
 void add_debug_global(LispObject s) {
+    if (not debug_safe) return;
     LispObject name = qpname(s);
-    std::string ns{qstring(name)};
+    assert(isSTRING(name));
+    size_t len = veclength(qheader(name));
+    assert(len < 100);
+    std::string ns{qstring(name), len};
     debug_globals.insert(ns);
 }
 
@@ -365,6 +373,15 @@ LispObject& local_symbol(int loc) {
     return fluid_locals[loc];
 }
 
+bool is_fluid_bound(LispObject s) {
+    if (not is_fluid(s)) return false;
+
+    int loc = qfixnum(qvalue(s));
+    LispObject local = local_symbol(loc);
+
+    return local == undefined;
+}
+
 /**
 * [symval] returns the real current value of the symbol on the current thread.
 * It handles, globals, fluid globals, fluid locals and locals.
@@ -373,11 +390,6 @@ LispObject& local_symbol(int loc) {
 LispObject& symval(LispObject s) {
     assert(isSYMBOL(s));
     if (is_global(s)) {
-        
-#ifdef DEBUG_GLOBALS
-        add_debug_global(s);
-#endif
-
         return qvalue(s);
     }
 
@@ -388,9 +400,6 @@ LispObject& symval(LispObject s) {
     // are actually global and those that have been bound. 
     // When the local value is undefined, I refer to the global value.
     if (is_fluid(s) && res == undefined) {
-#ifdef DEBUG_GLOBALS
-        add_debug_global(s);
-#endif
         return fluid_globals[loc];
     }
     // THis is either local or locally bound fluid
@@ -417,6 +426,8 @@ public:
         save = sv;
         sv = tval;
     }
+
+    Shallow_bind(Shallow_bind&&) noexcept = default;
 
     ~Shallow_bind() {
         local_symbol(loc) = save;
