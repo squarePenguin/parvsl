@@ -34,7 +34,7 @@
           (cv (caddr sq)))
     (mutexlock m)
     (q_push q x)
-    (condvar_notify_all cv)
+    (condvar_notify_one cv)
     (mutexunlock m)
     sq))
 

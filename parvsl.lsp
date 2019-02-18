@@ -9,11 +9,10 @@
 % instate temporary versions of "plus2" and "times2" that will
 % make it possible to read this file.
 
-(global '(!~!~bignum))
+(global '(!~!~bignum !~radix !$eol!$))
 (setq !~!~bignum (compress '(!! !~ b i g n u m)))
 
-(fluid '(minus blank tab !$eol!$ dollar lpar rpar))
-(fluid '(!~radix))
+(fluid '(minus blank tab dollar lpar rpar))
 
 (de plus2 (u v) (iplus u v))
 
