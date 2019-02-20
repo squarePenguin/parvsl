@@ -5,23 +5,86 @@
 
 * Introduction
 
-My work for the first half of the project mainly focused on the VSL language.
-The goal was to add multi-threading support, allowing the user to run
-code in parallel on a multi-core computer.
+The motivation of this project is to explore the implementation of multi-threading
+capabilities within a working compiler and assess the benefits and tradeoffs it brings
+to an established, real-world application with a large, actively-developed body of code. 
 
-The VSL language was not designed with mind, and many decisions in its implementation
-make it incompatible with a parallel model of computation.
+** REDUCE
 
-* Preparation
+[[https://reduce-algebra.sourceforge.io/][REDUCE]] is a portable general-purpose algebra system (CAS). It enables symbolic
+manipulation of mathematical expressions and provides a wide range of algorithms
+to solve problems spanning many fields, with arbitrary precision numerical approximation. 
+It has a friendly user interface and can display maths and generate graphics.
 
-* Implementation
+REDUCE is one of a few open-source general-purpose CAS programs, alongside Maxima and Axiom.
+The three projects are all built on top of different Lisp kernels. At the time of this writing,
+none of these projects have any multi-threaded capabilities. My aim is to remove this limitation
+for REDUCE. The project is using its own Lisp dialect which is similar to Common Lisp, but has its
+own design and set of capabilities.
 
-** Memory allocation
+** VSL
 
+Over the years, there have been multiple implementations of the Lisp compiler REDUCE is using, with
+different goals: PSL, CSL and VSL. VSL is an interpreted language written in the programming
+language C. It is fully capable of building the entirety of REDUCE, supports all the major 
+platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
+of being interpreted.
+
+** TODO Argue for the benefits of multithreading
+
+The idea of using parallel computing to speed up computer algebra computing has come
+up in research papers for many years ~TODO reference it~, but much of the activity now
+predates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
+they now provide. Moreover, advancements in single-core CPU performance has slowed down
+significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
+area of imrpovement in these new CPUs is their core count and number of hardware threads.
+Binding the performance of Reduce to single-threaded performance is likely to lead to
+a limitation in speed gains from new hardware.
+
+
+* TODO Preparation
+
+** From C to C++
+
+The VSL language was written in the programming language C. C is a language with no standardised
+multi-threaded model and no native support for multi-core programming. Furthermore, it has no well-defined
+memory model, and no ordering of memory accesses. Multi-threaded programming
+is only possible in C through a third-party library, such as ~Windows threads~ or the 
+the ~POSIX threads~ library on UNIX systems. Support further has to be guaranteed by individual compilers
+and operating systems and can break between versions.
+
+C++ is a superset of C and can compile existing, standard C code easily. The C++11 standard addresses the
+above omissions, making C++ a multi-threaded language. While in some cases the implementation uses the same
+libraries as the C equivalend (e.g POSIX), we do not have to think about these details and the code
+we write is fully portable. The only requirement is that a C++11 compliant compiler is used to compile the
+code and then which platforms these compilers can target.
+
+The first change I have made to the implementation is to clear it of any incompatible code and compile it
+with a C++ compiler. This was a trivial task and mostly involved adding a few more explicit casts.
+However, I have been slowly transitioning the code from idiomatic C++ as I analysed more parts of it
+and became confident those changes wouldn't affect the semantics.
+
+** TODO ParVSL
+
+I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
+
+
+** TODO Throughput vs latency
+** TODO Memory allocation
 Memory allocation is made in large continuous blocks. Global heap pointer
 variables manage these blocks and generally handle Lisp allocations
 by designating enough space within these blocks and incrementing the
 heap pointer.
+** TODO Garbage collector
+*** TODO Conservative GC
+*** TODO Cheaney's algorithm
+
+** TODO Saving state to disk
+
+* TODO Implementation
+
+** TODO Memory allocation
+
 
 All the memory is global and shared, and multiple-threads will often try
 to allocate concurently, causing contention. A naive solution to this problem
@@ -49,7 +112,7 @@ will be contention as threads request new segments too often. When segments are 
 needed, they hold chunks of memory from being used by other threads and can lead 
 to more garbage collection cycles. 
 
-** Shared memory and global variables
+** TODO Shared memory and global variables
 
 VSL has dynamic scoping and exhibits shallow binding. This means there is a global
 storage mapping each symbol to exactly one value. A variable is defined as long 
@@ -71,7 +134,7 @@ hold its own version of the symbol and modify it safely. For fluids, there will 
 shared value. Since I already used the global storage for the pointer, I added one more global
 array, where the pointer indicates the global value.
 
-** Thread data and garbage collection
+** TODO Thread data and garbage collection
 
 The garbage collector is stop-the-world and work by tracing reachable memory locations
 starting from a root set. There are two types of roots: ambiguous and unambigous. Unambiguous
@@ -90,7 +153,7 @@ changes. First, I must modify the functions in the interpreter to poll the globa
 to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
 can proceed with the thread. This is still a work in progress.
 
-** Saving state to disk and reloading
+** TODO Saving state to disk and reloading
 
 One important feature of the language is the ability to preserve the state of the world at any
 time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
@@ -100,7 +163,7 @@ the world is consistent and relatively easy to restore. I have modified parts of
 all the thread-local data back into global storage and then restore it when reloading. This way the same
 file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
 
-** Implementing threads
+** TODO Implementing threads
 
 Once all the modifications above were made, implementing the actual multi-threading mechanism was an easy
 task. I used the standard library to start and join threads and created a thread table so that data about
@@ -109,9 +172,16 @@ data in the table. Using this, I added code to the garbage collector to handle a
 extract the roots, but also to manage their allocation segments, which have to be reset after collection.
 Finally, primitive functions for threading were added to the language. They simply mirror their C++ counterparts.
  
+** TODO Thread communication
+** TODO Lock-free symbol lookup
 
-* Evaluation
+* TODO Evaluation
 
-* Conclusions
+** TODO Thread pool
+** TODO Parallel implementation of common algorithms
+** TODO Single-threaded building of Reduce
+** TODO Thread-local performance on Windows
+
+* TODO Conclusions
 
 
