@@ -49,7 +49,18 @@
 // to be able to use it. All the use of the word "inline" is so that if
 // you #include this from several source files there will not be trouble when
 // you link them together: you should still only end up with one copy of
-// each function in memory.
+// each function in memory. Note that until a few years ago the expectation
+// was that tagging a function as "inline" was advice to the compiler to
+// merge its definition into the body of functions that called it. When
+// that is to be done one wants to put the function definition in a header
+// file so that all compilation units gain access to it. If it was made
+// "static" there would risk being a compiled copy included  along with
+// every compilation uint, while if it was "extern" it could seem to be
+// multiply defined. Use of "inline" resolves that, leaving just one
+// copy in the eventual linked binary. From C++17 onwards data as well as
+// code can be tagged "inline" in this sense. Up until then data that is
+// used with inline functions probably needs to be made static and the
+// cost of multiple instances ending up in binaries suffered.
 //
 // This code uses 64-bit digits and a 2s complement representation for
 // negative numbers. This means it will work best on 64-bit platforms
@@ -284,7 +295,7 @@
 //   confirm_size_string. For Lisp purposes they will need to have a header
 //   word containing the string length.
 //
-// It might be helpful if I provide my own thoughts about when you mich decide
+// It might be helpful if I provide my own thoughts about when you might decide
 // to use this code and when you will probably not. Wikipedia lists rather
 // a large number of arbitrary precision arithmetic packages on the web page
 // en.wikipedia.org/wiki/List_of_arbitrary-precision_arithmetic_software.
@@ -341,18 +352,23 @@
 // type "uint64_t". This may result in there being significant scope for
 // better specialization for code to run on 32-bit targets.
 //
-// The files bench_*.cpp arrange e VERY SIMPLISTIC benchmark comparison
-// between this code and gmp. All that is tested is the low0level code for
-// multiplying a pair on N word integers to get a 2N word result. On x86_64
-// and compiling with "g++ -O3" I believe that this test suggests that
-// up to around 400 words (ie 25000 bits, 7700 decimal digits) the speed
-// ratio between gmp and arithlib is in the range 2 to 2.5, with it sometimes
-// being better for really small numbers. Beyond 400 words the use of
-// "TOOM3" by gmp leads to it gradually picking up large advantages.
+// I have run some VERY SIMPLISTIC benchmark comparisons between this code
+// and gmp. All that has been tested is the low-level code for multiplying
+// a pair on N word unsigned integers to get a 2N word result.
+// On x86_64 and compiling with "g++ -O3" I believe that this test suggests
+// that up to around 100 words (ie 6400 bits, 2000 decimal digits) the speed
+// ratio between gmp and arithlib is in the range 1 to 2 (on Ubuntu Linux).
+// Beyond that the use of "TOOM3" by gmp leads to it gradually picking
+// up advantages, reaching about a factor of 3 at around 1500 words (100000
+// bits, 30000 decimal digits).
 // This benchmark only tests multiplication of equally sized numbers and
 // its results will vary noticably across platforms, and so it is not liable
 // to be representative of overall results including mixes of all the
 // operations on mixed-size numbers, but at least it shows something!
+// For large enough inputs I believe I see multiplication being about 4 times
+// as costly on a 32-bit platform as on a 64-bit one, a result that is perhaps
+// no cause for great astonishment!
+
 
 
 
@@ -1037,7 +1053,7 @@ inline RES op_dispatch1(intptr_t a1)
 }
 
 template <class OP,class RES>
-inline RES op_dispatch1(intptr_t a1, int64_t n)
+inline RES op_dispatch1(intptr_t a1, int64_t &n)
 {   if (stored_as_fixnum(a1)) return OP::op(int_of_handle(a1), n);
     else return OP::op(vector_of_handle(a1), n);
 }
@@ -1630,12 +1646,24 @@ class Double
     static double op(uint64_t *);
 };
 
+class Frexp
+{   public:
+    static double op(int64_t, int64_t &x);
+    static double op(uint64_t *, int64_t &x);
+};
+
 #ifdef softfloat_h
 
 class Float128
 {   public:
     static float128_t op(int64_t);
     static float128_t op(uint64_t *);
+};
+
+class Frexp128
+{   public:
+    static float128_t op(int64_t, int64_t &x);
+    static float128_t op(uint64_t *, int64_t &x);
 };
 
 #endif
@@ -2061,7 +2089,19 @@ inline double double_bignum(const Bignum &x)
 {   return op_dispatch1<Double,double>(x.val);
 }
 
+// This will return a normalized double and an integer exponent.
+// It can be better than using frexp(double_bignum(x), ..) because it
+// avoids overflow.
+
+inline double frexp_bignum(const Bignum &x, int64_t &xx)
+{   return op_dispatch1<Frexp,double>(x.val, xx);
+}
+
 #ifdef softfloat_h
+
+inline double frexp128_bignum(const Bignum &x, int64_t &xx)
+{   return op_dispatch1<Float128,float128_t>(x.val, xx);
+}
 
 inline double float128_bignum(const Bignum &x)
 {   return op_dispatch1<Float128,float128_t>(x.val);
@@ -2083,7 +2123,7 @@ inline void display(const char *label, uint64_t *a, size_t lena)
     for (size_t i=0; i<lena; i++)
         std::cout << " "
                   << std::hex << std::setfill('0')
-                  << std::setw(16) << a[lena-i-1]
+                  << "0x" << std::setw(16) << a[lena-i-1]
                   << std::dec << std::setw(0);
     std::cout << std::endl;
 }
@@ -2102,7 +2142,8 @@ inline void display(const char *label, uint64_t *a, size_t lena, int shift)
     for (size_t i=0; i<=lena; i++)
         std::cout << " "
                   << std::hex << std::setfill('0')
-                  << std::setw(16) << shifted_digit(a, lena, shift, lena-i)
+                  << "0x" << std::setw(16)
+                  << shifted_digit(a, lena, shift, lena-i)
                   << std::dec << std::setw(0);
     std::cout << std::endl;
 }
@@ -2110,7 +2151,7 @@ inline void display(const char *label, uint64_t *a, size_t lena, int shift)
 inline void display(const char *label, intptr_t a)
 {   if (stored_as_fixnum(a))
     {   std::cout << label << " [fixnum] " << std::hex
-                  << a << std::dec << " = "
+                  << "0x" << a << std::dec << " = "
                   << int_of_handle(a) << std::endl;
         return;
     }
@@ -2120,7 +2161,7 @@ inline void display(const char *label, intptr_t a)
     for (size_t i=0; i<len; i++)
         std::cout << " "
                   << std::hex << std::setfill('0')
-                  << std::setw(16) << d[len-i-1]
+                  << "0x" << std::setw(16) << d[len-i-1]
                   << std::dec << std::setw(0);
     std::cout << std::endl;
 }
@@ -2137,6 +2178,37 @@ inline void display(const char *label, Bignum &a)
 // add-with-carry, multiplication and division.
 //=========================================================================
 //=========================================================================
+
+#ifdef __SIZEOF_INT128__
+
+// Well it seems that g++ and clang have different views about how to
+// ask for unsigned 128-bit integers! So I abstract that away via a typedef
+// called UNIT128.
+
+#ifdef __CLANG__
+typedef __int128  INT128;
+typedef __uint128 UINT128;
+#else // __CLANG__
+typedef __int128  INT128;
+typedef unsigned __int128 UINT128;
+#endif // __CLANG__
+
+// At least for debugging I may wish to display 128-bit integers. Here I
+// only do hex printing. I could do decimal and octal if I really wanted
+// but just for debugging that does not seem vital. If some C++ compiler
+// already supported printing of 128-bit ints this definition might clash
+// and would need commenting out.
+
+inline std::ostream & operator << (std::ostream &out, UINT128 a)
+{   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
+        << " "
+        << (uint64_t)a << std::dec << std::setw(0) << std::setfill(' '); 
+    return out;
+}
+
+inline UINT128 pack128(uint64_t hi, uint64_t lo)
+{   return (((UINT128)hi)<<64) | lo;
+}
 
 #ifdef __GNUC__
 
@@ -2218,79 +2290,38 @@ inline unsigned int log_next_power_of_2(size_t n)
 // must only have one of the values 0 or 1. The effect will be to set r to
 // the low 64-bits of a1+a2+c_in and return any carry that is generated.
 
-inline uint64_t add_with_carry(uint64_t a1, uint64_t a2,
-                               uint64_t c_in, uint64_t &r)
-{   uint64_t w = a1 + c_in;
-    if (w < c_in) // carry generated here. In this case the only possibility
-    {             // was that a1 was allbits and c_in was 1, and so we have
-                  // ended up with w==0. So the result sum is just a2 and the
-                  // carry out will be 1
-        r = a2;
-        return 1;
-    }
-    w = r = w + a2;
-    return (w < a2 ? 1 : 0);
-}
-
 // I have an overload of add_with_carry for use where it is known that
 // the input carry is zero. That cases saves a small amount of work.
+// The code as written here seems to lead to a good compiled version using
+// g++ on x86_64 and -O3.
 
 inline uint64_t add_with_carry(uint64_t a1, uint64_t a2, uint64_t &r)
-{   uint64_t w = r = a1 + a2;
-    return (w < a1 ? 1 : 0);
+{   return ((r = a1 + a2) < a1);
+}
+
+// Now the general version with a carry-in.
+
+inline uint64_t add_with_carry(uint64_t a1, uint64_t a2,
+                               uint64_t c_in, uint64_t &r)
+{   uint64_t w;
+    int c1 = add_with_carry(a1, c_in, w);
+    return c1 + add_with_carry(w, a2, r);
 }
 
 // subtract_with_borrow does
 //     r = a1 - a2 - b_in;
 // and returns 1 is there is a borrow out.
 
-inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2,
-                                     uint64_t b_in, uint64_t &r)
-{   uint64_t w = a1 - b_in;
-    uint64_t w1 = r = w - a2;
-    return (w > a1 || w1 > w ? 1 : 0);
-}
-
-// I have an overload of subtract_with_borrow for use where it is known that
-// the input borrow is zero. That cases saves a small amount of work. I take
-// care so that if a1 and r are references to the same variable nothing
-// untoward can happen - although a1 being passed by reference should avoid
-// risk anyway: my version of the code should make thinsg even clearer.
-
 inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2, uint64_t &r)
 {   r = a1 - a2;
-    return (r > a1 ? 1 : 0);
+    return (r > a1);
 }
 
-#ifdef __SIZEOF_INT128__
-
-// Well it seems that g++ and clang have different views about how to
-// ask for unsigned 128-bit integers! So I abstract that away via a typedef
-// called UNIT128.
-
-#ifdef __CLANG__
-typedef __int128  INT128;
-typedef __uint128 UINT128;
-#else // __CLANG__
-typedef __int128  INT128;
-typedef unsigned __int128 UINT128;
-#endif // __CLANG__
-
-// At least for debugging I may wish to display 128-bit integers. Here I
-// only do hex printing. I could do decimal and octal if I really wanted
-// but just for debugging that does not seem vital. If some C++ compiler
-// already supported printing of 128-bit ints this definition might clash
-// and would need commenting out.
-
-inline std::ostream & operator << (std::ostream &out, UINT128 a)
-{   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
-        << " "
-        << (uint64_t)a << std::dec << std::setw(0) << std::setfill(' '); 
-    return out;
-}
-
-inline UINT128 pack128(uint64_t hi, uint64_t lo)
-{   return (((UINT128)hi)<<64) | lo;
+inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2,
+                                     uint64_t b_in, uint64_t &r)
+{   uint64_t w;
+    int b1 = subtract_with_borrow(a1, b_in, w);
+    return b1 + subtract_with_borrow(w, a2, r);
 }
 
 // I want code that will multiply two 64-bit values and yield a 128-bit
@@ -2315,8 +2346,7 @@ inline void multiply64(uint64_t a, uint64_t b,
 
 inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
                           uint64_t &hi, uint64_t &lo)
-{   UINT128 r = (UINT128)a*(UINT128)b +
-                          (UINT128)c;
+{   UINT128 r = (UINT128)a*(UINT128)b + (UINT128)c;
     hi = (uint64_t)(r >> 64);
     lo = (uint64_t)r;
 }
@@ -2325,6 +2355,13 @@ inline void signed_multiply64(int64_t a, int64_t b,
                               int64_t &hi, uint64_t &lo)
 {   INT128 r = (INT128)a*(INT128)b;
     hi = (int64_t)((UINT128)r >> 64);
+    lo = (uint64_t)r;
+}
+
+inline void signed_multiplyadd64(int64_t a, int64_t b, uint64_t c,
+                                 int64_t &hi, uint64_t &lo)
+{   UINT128 r = (UINT128)((INT128)a*(INT128)b) + (UINT128)c;
+    hi = (int64_t)(r >> 64);
     lo = (uint64_t)r;
 }
 
@@ -2642,7 +2679,9 @@ INLINE_VAR thread_local std::mt19937_64 mersenne_twister(random_seed);
 
 // To re-seed I can just call this. I think that when I re-seed it will be
 // to gain more repeatable behaviour, and so I am fairly happy about
-// limiting the amount of input entropy here to 64-bits.
+// limiting the amount of input entropy here to 64-bits. If I was keen I
+// could provide a reseed-method taking a bignum argument that could have
+// lots of data in it.
 
 inline void reseed(uint64_t n)
 {   mersenne_twister.seed(n);
@@ -3093,7 +3132,7 @@ inline float Float::op(uint64_t *a)
     return ldexpf(d, (int)(128-24-lz+64*(lena-2)));
 }
 
-inline double Double::op(int64_t a)
+inline double Frexp::op(int64_t a, int64_t &x)
 {
 // The bad news here is that I am not confident that C++ will guarantee
 // to round large integer values in any particular way when it converts
@@ -3119,12 +3158,22 @@ inline double Double::op(int64_t a)
 // The next line should never introduce any rounding at all.
     double d = (double)top53;
     assert(top53 == (uint64_t)d);
-    d = std::ldexp(d, (int)(64-53-lz));
-    if (sign) return -d;
-    else return d;
+    if (sign) d = -d;
+    x =64-53-lz;
+    return d;
 }   
 
-inline double Double::op(uint64_t *a)
+inline double Double::op(int64_t a)
+{   int64_t x = 0;
+    double d = Frexp::op(a, x);
+// For truly ridiculously huge inputs the exponent could be one that
+// would not fit into an int. I truncate here so I am certain I will get
+// HUGE_VAL as the result from ldexp().
+    if (x > 10000) x = 10000;
+    return std::ldexp(d, (int)x);
+}
+
+inline double Frexp::op(uint64_t *a, int64_t &x)
 {   size_t lena = number_size(a);
     if (lena == 1) return Double::op((int64_t)a[0]);
 // Now I need to do something similar to that done for the int64_t case
@@ -3190,7 +3239,15 @@ inline double Double::op(uint64_t *a)
     double d = (double)top53;
     assert(top53 == (uint64_t)d);
     if (sign) d = -d;
-    return std::ldexp(d, (int)(128-53-lz+64*(lena-2)));
+    x = 128-53-lz+64*(lena-2);
+    return d;
+}
+
+inline double Double::op(uint64_t *a)
+{   int64_t x = 0;
+    double d = Frexp::op(a, x);
+    if (x > 10000) x = 10000;
+    return std::ldexp(d, (int)x);
 }
 
 #ifdef softfloat_h
@@ -3199,7 +3256,15 @@ inline float128_t Float128::op(int64_t a)
 {   return i64_to_f128(a);
 }   
 
-inline float128_t Double::op(uint64_t *a)
+inline float128_t Frexp128::op(int64_t a, int64_t &x)
+{   float128_t d = i64_to_f128(a), d1;
+    int xi = 0;
+    f128M_frex(&d, &d1, &xi); // in the CSL sources.
+    x = xi;
+    return d1;
+}   
+
+inline float128_t Frexp128::op(uint64_t *a, int54_t &x)
 {   size_t lena = number_size(a);
     if (lena == 1) return Float128::op((int64_t)a[0]);
     uint64_t top113, top113a;
@@ -3282,11 +3347,22 @@ inline float128_t Double::op(uint64_t *a)
     float128_t d = i64_to_f128(top113);
     d = f128_add(f128_multiply(2.0^64, d), u64_to_f128(top113a));
     if (sign) d = f128_negate(d);
-// There is an implementation of ldexp() for 128-bit floats in
-// the CSL source file arith14.cpp.
-    f128M_ldexp(&d, (int)(192-113-lz+64*(lena-2)));
+    x = 192-113-lz+64*(lena-2);
     return d;
 }
+
+inline double Float128::op(uint64_t *a)
+{   int64_t x = 0;
+    float128_t d = Frexp128::op(a, x);
+    if (x > 100000) x = 100000;
+// There is an implementation of ldexp() for 128-bit floats in
+// the CSL source file arith14.cpp.
+    f128M_ldexp(&d, (int)x);
+    return d;
+}
+
+
+
 
 #endif // softfloat_t
 
