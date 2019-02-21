@@ -39,7 +39,7 @@ void add_debug_global(LispObject s) {
     debug_globals.insert(ns);
 }
 
-#endif
+#endif // DEBUG_GLOBALS
 
 static std::atomic_int num_symbols(0);
 

@@ -70,7 +70,6 @@
 #define __STDC_FORMAT_MACROS 1
 #endif
 
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -85,639 +84,28 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <zlib.h>
+
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <list>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+// Multi-threading support
+#include <mutex>
+#include <thread>
+
 // I want libedit for local editing and history.
 #include <histedit.h>
-#ifdef __WIN32__
-#include <windows.h>
-#else
-#include <sys/mman.h>
-
-// There is a portability issue about MAP_ANONYMOUS: I hope that
-// the adjustments made here will leave everything workable
-// everywhere.
-#ifdef MAP_ANONYMOUS
-#define MMAP_FLAGS (MAP_PRIVATE|MAP_ANONYMOUS)
-#define MMAP_FD    -1
-#else 
-#ifdef MAP_ANON
-#define MMAP_FLAGS (MAP_PRIVATE|MAP_ANON)
-#define MMAP_FD    -1
-#else
-int devzero_fd = 0;
-#define MMAP_FLAGS MAP_PRIVATE
-#define MMAP_FD                                                   \
-    (devzero_fd == 0 ? (devzero_fd = open("/dev/zero", O_RDWR)) : \
-                       devzero_fd)
-#endif // MMAP_ANON
-#endif // MMAP_ANONYMOUS
-#endif // __WIN32__
-
-#ifdef __cpp_inline_variables
-// For versions of C++ up to C++17 I will put constant values in header
-// files using something along the line of "static const int VAR = VAL;".
-// This should give the compiler a chance to replace the name with its value
-// throughout the compilation unit, and if the compiler is clever enough it
-// will avoid leaving a word of memory with the value stored if all uses
-// have been dealt with more directly. However it will tend to lead to a
-// lot of "static variable defined but not used" warnings.
-// From C++17 onwards (and C++ mandates the __cpp_inline_variables macro to
-// indicate if the feature is in place) I will use
-// "inline const int VAR = VAL;" and now if memory is allocated for the
-// variable it will only be allocated once, and I hope that compilers will
-// not feel entitled to moan about cases where there are no references.
-//
-#define INLINE inline
-#else
-#define INLINE static
-#endif
-
-#include <string>
-#include <iostream>
-#include <fstream>
-
-//#ifdef WIN32
-//#define popen _popen
-//#endif
-
-#ifdef CRLIBM
-
-// crlibm aims to produce correctly rounded results in all cases.
-// The functions from it selected here are the ones that round to
-// nearest. Using this should guarantee constent floating point results
-// across al platforms.
-
-extern "C"
-{
-#include "crlibm.h"
-}
-
-// sqrt is not provided by crlibm, probably because it believes that
-// most other libraries will get that case exactly right anyway.
-
-double SQRT(double a)  { return  sqrt(a); }
-double TANH(double x)  { return  tanh(x); }
-
-double SIN(double a)   { return   sin_rn(a); }
-double COS(double a)   { return   cos_rn(a); }
-double TAN(double a)   { return   tan_rn(a); }
-double SINH(double a)  { return  sinh_rn(a); }
-double COSH(double a)  { return  cosh_rn(a); }
-double ASIN(double a)  { return  asin_rn(a); }
-double ACOS(double a)  { return  acos_rn(a); }
-double ATAN(double a)  { return  atan_rn(a); }
-double EXP(double a)   { return   exp_rn(a); }
-double LOG(double a)   { return   log_rn(a); }
-double LOG2(double a)  { return  log2_rn(a); }
-double LOG10(double a) { return log10_rn(a); }
-double POW(double a, double b)   { return   pow_rn(a, b); }
-
-#else // CRLIBM
-
-double SQRT(double a)  { return  sqrt(a); }
-double TANH(double x)  { return  tanh(x); }
-
-double SIN(double a)   { return   sin(a); }
-double COS(double a)   { return   cos(a); }
-double TAN(double a)   { return   tan(a); }
-double SINH(double a)  { return  sinh(a); }
-double COSH(double a)  { return  cosh(a); }
-double ASIN(double a)  { return  asin(a); }
-double ACOS(double a)  { return  acos(a); }
-double ATAN(double a)  { return  atan(a); }
-double EXP(double a)   { return   exp(a); }
-double LOG(double a)   { return   log(a); }
-double LOG2(double a)  { return  log2(a); }
-double LOG10(double a) { return log10(a); }
-double POW(double a, double b)   { return   pow(a, b); }
-
-#endif // CRLIBM
-
-// There are a load of elementary functions not provided by standard
-// libraries. I deal with that here.
-
-static const double _pi = 3.14159265358979323846;
-static const double _log_2 = 0.6931471805599453094;
-static const double _half_pi = ((12868.0 - 0.036490896206895257)/8192.0);
-
-double ASINH(double x)
-{   bool sign;
-    if (x < 0.0) x = -x, sign = true;
-    else sign = false;
-    if (x < 1.0e-3)
-    {   double xx = x*x;
-        x = x*(1 - xx*((1.0/6.0) - (3.0/40.0)*xx));
-    }
-    else if (x < 1.0e9)
-    {   x += sqrt(1.0 + x*x);
-        x = LOG(x);
-    }
-    else x = LOG(x) + _log_2;
-    if (sign) x = -x;
-    return x;
-}
-
-static double acosh_coeffs[] =
-{   -0.15718655513711019382e-5,          // x^11
-    +0.81758779765416234142e-5,          // x^10
-    -0.24812280287135584149e-4,          // x^9
-    +0.62919005027033514743e-4,          // x^8
-    -0.15404104307204835991e-3,          // x^7
-    +0.38339903706706128921e-3,          // x^6
-    -0.98871347029548821795e-3,          // x^5
-    +0.26854094489454297811e-2,          // x^4
-    -0.78918167367399344521e-2,          // x^3
-    +0.26516504294146930609e-1,          // x^2
-    -0.11785113019775570984,             // x
-    +1.41421356237309504786              // 1
-
-};
-
-double ACOSH(double x)
-{   bool sign;
-    if (x < -1.0) x = -x, sign = true;
-    else if (1.0 < x) sign = false;
-    else return 0.0;
-    if (x < 1.5)
-    {   int i;
-        double r = acosh_coeffs[0];
-        x = (x - 0.5) - 0.5;
-//
-// This is a minimax approximation to acosh(1+x)/sqrt(x) over the
-// range x=0 to 0.5
-//
-        for (i=1; i<=11; i++) r = x*r + acosh_coeffs[i];
-        x = sqrt(x)*r;
-    }
-    else if (x < 1.0e9)
-    {   x += sqrt((x - 1.0)*(x + 1.0));
-        x = LOG(x);
-    }
-    else x = LOG(x) + _log_2;
-    if (sign) return -x;
-    else return x;
-}
-
-double ATANH(double z)
-{   if (z > -0.01 && z < -0.01)
-    {   double zz = z*z;
-        return z * (1 + zz*((1.0/3.0) + zz*((1.0/5.0) + zz*(1.0/7.0))));
-    }
-    z = (1.0 + z) / (1.0 - z);
-    if (z < 0.0) z = -z;
-    return LOG(z) / 2.0;
-}
-
-static const double n180pi = 57.2957795130823208768;   // 180/pi
-static const double pi180  =  0.017453292519943295769; // pi/180
-
-double arg_reduce_degrees(double a, int *quadrant)
-//
-// Reduce argument to the range -45 to 45, and set quadrant to the
-// relevant quadant.  Returns arg converted to radians.
-//
-{   double w = a / 90.0;
-    int32_t n = (int)w;
-    w = a - 90.0*n;
-    while (w < -45.0)
-    {   n--;
-        w = a - 90.0*n;
-    }
-    while (w >= 45.0)
-    {   n++;
-        w = a - 90.0*n;
-    }
-    *quadrant = (int)(n & 3);
-    return pi180*w;
-}
-
-double SIND(double a)
-{   int quadrant;
-    a = arg_reduce_degrees(a, &quadrant);
-    switch (quadrant)
-    {   default:
-        case 0: return SIN(a);
-        case 1: return COS(a);
-        case 2: return SIN(-a);
-        case 3: return -COS(a);
-    }
-}
-
-double COSD(double a)
-{   int quadrant;
-    a = arg_reduce_degrees(a, &quadrant);
-    switch (quadrant)
-    {   default:
-        case 0: return COS(a);
-        case 1: return SIN(-a);
-        case 2: return -COS(a);
-        case 3: return SIN(a);
-    }
-}
-
-double TAND(double a)
-{   int quadrant;
-    a = arg_reduce_degrees(a, &quadrant);
-    switch (quadrant)
-    {   default:
-        case 0:
-        case 2: return TAN(a);
-        case 1:
-        case 3: return 1.0/TAN(-a);
-    }
-}
-
-static double COTD(double a)
-{   int quadrant;
-    a = arg_reduce_degrees(a, &quadrant);
-    switch (quadrant)
-    {   default:
-        case 0:
-        case 2: return 1.0/TAN(a);
-        case 1:
-        case 3: return TAN(-a);
-    }
-}
-
-double ACOT(double a)
-{   if (a >= 0.0)
-        if (a > 1.0) return ATAN(1.0/a);
-        else return _half_pi - ATAN(a);
-    else if (a < -1.0) return _pi - ATAN(-1.0/a);
-    else return _half_pi + ATAN(-a);
-}
-
-double ACOTD(double a)
-{   if (a >= 0.0)
-        if (a > 1.0) return n180pi*ATAN(1.0/a);
-        else return 90.0 - n180pi*ATAN(a);
-    else if (a < -1.0) return 180.0 - n180pi*ATAN(-1.0/a);
-    else return 90.0 + n180pi*ATAN(-a);
-}
-
-double CSC(double x)     { return 1.0/SIN(x); }
-double SEC(double x)     { return 1.0/COS(x); }
-double COT(double x)     { return 1.0/TAN(x); }
-double CSCH(double x)    { return 1.0/SINH(x); }
-double SECH(double x)    { return 1.0/COSH(x); }
-double COTH(double x)    { return 1.0/TANH(x); }
-double ACSC(double x)    { return ASIN(1.0/x); }
-double ASEC(double x)    { return ACOS(1.0/x); }
-double ACSCH(double x)   { return ASINH(1.0/x); }
-double ASECH(double x)   { return ACOSH(1.0/x); }
-double ACOTH(double x)   { return ATANH(1.0/x); }
-double ASIND(double x)   { return (180.0/_pi)*ASIN(x); }
-double ACOSD(double x)   { return (180.0/_pi)*ACOS(x); }
-double ATAND(double x)   { return (180.0/_pi)*ATAN(x); }
-double CSCD(double x)    { return 1.0/SIND(x); }
-double SECD(double x)    { return 1.0/COSD(x); }
-double ACSCD(double x)   { return ASIND(1.0/x); }
-double ASECD(double x)   { return ACOSD(1.0/x); }
-
 
 // This version is an extension of the minimal vsl system. It uses
 // a conservative garbage collector and will support a fuller and
 // higher performance Lisp.
 
-
-// A Lisp item is represented as an integer and the low 3 bits
-// contain tag information that specify how the rest will be used.
-
-typedef intptr_t LispObject;
-
-const intptr_t TAGBITS    = 0x7;
-
-const intptr_t tagCONS    = 0;     // Traditional Lisp "cons" item.
-const intptr_t tagSYMBOL  = 1;     // a symbol.
-const intptr_t tagFIXNUM  = 2;     // An immediate integer value (29 or 61 bits).
-const intptr_t tagFLOAT   = 3;     // A double-precision number.
-const intptr_t tagATOM    = 4;     // Something else that will have a header word.
-const intptr_t tagFORWARD = 5;     // Used during garbage collection.
-const intptr_t tagHDR     = 6;     // the header word at the start of an atom .
-const intptr_t tagSPARE   = 7;     // not used!
-
-// Note that in the above I could have used tagATOM to include the case
-// of symbols (aka identifiers) but as an optimisation I choose to make that
-// a special case. I still have one spare code (tagSPARE) that could be
-// used to extend the system.
-
-// Now I provide functions that test the tag bits. These are all rather obvious!
-
-static inline bool isCONS(LispObject x)
-{   return (x & TAGBITS) == tagCONS;
-}
-
-static inline bool isSYMBOL(LispObject x)
-{   return (x & TAGBITS) == tagSYMBOL;
-}
-
-static inline bool isFIXNUM(LispObject x)
-{   return (x & TAGBITS) == tagFIXNUM;
-}
-
-static inline bool isFLOAT(LispObject x)
-{   return (x & TAGBITS) == tagFLOAT;
-}
-
-static inline bool isATOM(LispObject x)
-{   return (x & TAGBITS) == tagATOM;
-}
-
-static inline bool isFORWARD(LispObject x)
-{   return (x & TAGBITS) == tagFORWARD;
-}
-
-static inline bool isHDR(LispObject x)
-{   return (x & TAGBITS) == tagHDR;
-}
-
-
-// In memory CONS cells and FLOATS exist as just 2-word items with
-// all their bits in use. All other sorts of data have a header word
-// at their start.
-// This contains extra information about the exact form of data present.
-
-const intptr_t TYPEBITS    = 0x78;
-const intptr_t TYPEBITSX   = 0x70;
-
-const intptr_t typeSYM     = 0x00;
-const intptr_t typeSTRING  = 0x08;
-const intptr_t typeVEC     = 0x10;
-const intptr_t typeBIGNUM  = 0x20;
-// EQHASH is a hash table that is in a good state and that is ready
-// for use. EQHASHX is one that contains all the correct data but that
-// needs re-hashing before it is used. This case arises because garbage
-// collection can rearrange memory and thus leave hash-codes out of date.
-const intptr_t typeEQHASH  = 0x30;
-const intptr_t typeEQHASHX = 0x38;
-// Codes 0x28, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68,
-// 0x70 and 0x78 spare!
-
-static inline size_t veclength(LispObject h)
-{   return ((uintptr_t)h) >> 7;
-}
-
-static inline constexpr LispObject packlength(size_t n)
-{   return (LispObject)(n << 7);
-}
-
-static inline LispObject *heapaddr(LispObject x)
-{   return (LispObject *)x;
-}
-
-// General indirection. Hmm I think this is an UGLY thing to have because
-// the issue of types for it are unclear. I will leave it as a macro for
-// now but try to remove it later on.
-
-#define qind(x)     (*((LispObject *)(x)))
-
-// Accessor macros the extract fields from LispObjects ...
-
-static inline LispObject &qcar(LispObject x)
-{   return (heapaddr(x))[0];
-}
-
-static inline LispObject &qcdr(LispObject x)
-{   return (heapaddr(x))[1];
-}
-
-// For all other types I must remove the tagging information before I
-// can use the item as a pointer.
-
-// An especially important case is that of Symbols. These are the fields that
-// they provide.
-
-typedef LispObject SpecialForm(LispObject lits, LispObject a1);
-// I will have separate entried for functions with from 0-4 args. For 5
-// or more arguments the first 4 will be passed individually with the rest
-// in a list.
-typedef LispObject LispFn0(LispObject lits);
-typedef LispObject LispFn1(LispObject lits, LispObject a1);
-typedef LispObject LispFn2(LispObject lits, LispObject a1, LispObject a2);
-typedef LispObject LispFn3(LispObject lits, LispObject a1,
-                           LispObject a2, LispObject a3);
-typedef LispObject LispFn4(LispObject lits, LispObject a1, LispObject a2,
-                           LispObject a3, LispObject a4);
-typedef LispObject LispFn5up(LispObject lits, LispObject a1, LispObject a2,
-                             LispObject a3, LispObject a4, LispObject a5up);
-
-static inline LispObject &qflags(LispObject x)
-{   return (heapaddr(x-tagSYMBOL))[0];
-}
-
-static inline LispObject &qvalue(LispObject x)
-{   return (heapaddr(x-tagSYMBOL))[1];
-}
-
-static inline LispObject &qplist(LispObject x)
-{   return (heapaddr(x-tagSYMBOL))[2];
-}
-
-static inline LispObject &qpname(LispObject x)
-{   return (heapaddr(x-tagSYMBOL))[3];
-}
-
-static inline LispObject &qlits(LispObject x)
-{   return (heapaddr(x-tagSYMBOL))[4];
-}
-
-static inline LispObject &qspare(LispObject x)
-{   return (heapaddr(x-tagSYMBOL))[5];
-}
-
-static inline LispFn0 *&qdefn0(LispObject x)
-{   return ((LispFn0 **)(heapaddr(x-tagSYMBOL)))[6];
-}
-
-static inline LispFn1 *&qdefn1(LispObject x)
-{   return ((LispFn1 **)(heapaddr(x-tagSYMBOL)))[7];
-}
-
-static inline LispFn2 *&qdefn2(LispObject x)
-{   return ((LispFn2 **)(heapaddr(x-tagSYMBOL)))[8];
-}
-
-static inline LispFn3 *&qdefn3(LispObject x)
-{   return ((LispFn3 **)(heapaddr(x-tagSYMBOL)))[9];
-}
-
-static inline LispFn4 *&qdefn4(LispObject x)
-{   return ((LispFn4 **)(heapaddr(x-tagSYMBOL)))[10];
-}
-
-static inline LispFn5up *&qdefn5up(LispObject x)
-{   return ((LispFn5up **)(heapaddr(x-tagSYMBOL)))[11];
-}
-
-INLINE const size_t SYMSIZE = 12;
-
-// Bits within the flags field of a symbol. Uses explained later on.
-
-INLINE const LispObject flagTRACED    = 0x0080;
-INLINE const LispObject flagSPECFORM  = 0x0100;
-INLINE const LispObject flagMACRO     = 0x0200;
-INLINE const LispObject flagGLOBAL    = 0x0400;
-INLINE const LispObject flagFLUID     = 0x0800;
-INLINE const LispObject flagGENSYM    = 0x1000;
-// There are LOTS more bits available for flags etc here if needbe!
-
-// Other atoms have a header that gives info about them. Well as a special
-// case I will allow that something tagged with tagATOM but with zero as
-// its address is a special marker value...
-
-INLINE const LispObject NULLATOM = tagATOM + 0;
-
-static inline LispObject &qheader(LispObject x)
-{   return (heapaddr((x)-tagATOM))[0];
-}
-
-// Fixnums and Floating point numbers are rather easy!
-
-// The behaviour of signed shifts is not nicely defined in C++, so what I
-// really expect to compile as (x>>3) needs to be expressed as division.
-//
-// Also note use of the C++11 "constexpr" annotation to encourage the idea
-// that when this is used ini initialization it can be processed at compile
-// time.
-
-static inline constexpr int64_t qfixnum(LispObject x)
-{   return ((int64_t)(x & ~(uint64_t)7)) / 8;
-}
-
-static inline LispObject packfixnum(int64_t n)
-{   return (LispObject)((uint64_t)n << 3) + tagFIXNUM;
-}
-
-INLINE const intptr_t MIN_FIXNUM = qfixnum(INTPTR_MIN);
-INLINE const intptr_t MAX_FIXNUM = qfixnum(INTPTR_MAX);
-
-static inline double &qfloat(LispObject x)
-{   return ((double *)(x-tagFLOAT))[0];
-}
-
-static inline bool isBIGNUM(LispObject x)
-{   return isATOM(x) && ((qheader(x) & TYPEBITSX) == typeBIGNUM);
-}
-
-static inline bool isSTRING(LispObject x)
-{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeSTRING);
-}
-
-static inline char *qstring(LispObject x)
-{   return (char *)(x - tagATOM + sizeof(LispObject));
-}
-
-static inline bool isVEC(LispObject x)
-{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeVEC);
-}
-
-static inline bool isEQHASH(LispObject x)
-{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASH);
-}
-
-static inline bool isEQHASHX(LispObject x)
-{   return isATOM(x) && ((qheader(x) & TYPEBITS) == typeEQHASHX);
-}
-
-// The Lisp heap will have fixed size.
-
-#ifndef MEM
-INLINE const size_t MEM = 1024;
-#endif // MEM
-
-INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
-// Each byte in the bitmap will allow marking for 8 entities, and each
-// entity is 8 bytes wide (both on 32 and 64-bit systems), hence each
-// bitmap uses 1/64th of the memory used by the region it maps.
-
-LispObject *C_stackbase;
-
-// This sets the size of the hash table used to store all the symbols
-// that Lisp knows about. I note that if I built a serious application
-// such as the Reduce algebra system (reduce-algebra.sourceforge.net) I would
-// end up with around 7000 symbols in a basic installation! So the size
-// table I use here intended to give decent performance out to that scale.
-// This is (of course) utterly over the top for the purpose of toy and
-// demonstration applications! I make the table size a prime in the hope that
-// that will help keep hashed distribution even across it.
-// Hmm - a full copy of everything that makes up Reduce involved around
-// 40K distinct symbols...
-
-INLINE const size_t OBHASH_SIZE   = 15013;
-INLINE const int MAX_LISPFILES = 30;
-
-// Some Lisp values that I will use frequently...
-// I am not quite clear that there would be any nice way to store all these
-// list-bases so that I could (a) refer to them by name and (b) scan then
-// in a nice loop when garbage collecting. Well I could set up a table that
-// contained references to each or a function that could read and write each.
-// I guess that that last idea is maybe the best option if I want to avoid
-// using the preprocessor in this manner:
-//-
-//- extern Lispobject nil, undefined, ...;
-//- LispObject nil, undefined, ... 
-//- INLINE LispObject read_base(size_t n)
-//- {   switch (n)
-//-     {
-//-     case 0:     return nil;
-//-     case 1:     return undefined;
-//-     ..
-//-     }
-//- }
-//- INLINE void set_base(size_t n, LispObject v)
-//- {   switch (n)
-//-     {
-//-     case 0:     nil = v;
-//-     case 1:     undefined = v;
-//-     ..
-//-     }
-//- }
-
-#define nil        listbases[0]
-#define undefined  listbases[1]
-#define lisptrue   listbases[2]
-#define lispsystem listbases[3]
-#define echo       listbases[4]
-#define symlambda  listbases[5]
-#define quote      listbases[6]
-#define backquote  listbases[7]
-#define comma      listbases[8]
-#define comma_at   listbases[9]
-#define eofsym     listbases[10]
-#define cursym     listbases[11]
-#define work1      listbases[12]
-#define work2      listbases[13]
-#define restartfn  listbases[14]
-#define expr       listbases[15]
-#define subr       listbases[16]
-#define fexpr      listbases[17]
-#define fsubr      listbases[18]
-#define macro      listbases[19]
-#define input      listbases[20]
-#define output     listbases[21]
-#define pipe       listbases[22]
-#define symraise   listbases[23]
-#define symlower   listbases[24]
-#define dfprint    listbases[25]
-//#define bignum     listbases[26]
-//#define symfluid   listbases[27]
-//#define symglobal  listbases[28]
-const int BASES_SIZE = MAX_LISPFILES+29;
-
-#define filecursym (&listbases[29])
-
-LispObject listbases[BASES_SIZE];
-LispObject obhash[OBHASH_SIZE];
-
-static inline LispObject allocateatom(size_t n);
-
-// ... and non-LispObject values that need to be saved as part of a
-// heap image.
-
-// I will #include the code for big-numbers once I have all my tag bits etc
-// specified.
-
-#define LISP 1
-#include "arithlib.hpp"
+#include "common.hpp"
+#include "thread_data.hpp"
 
 void my_exit(int n)
 {
@@ -871,7 +259,7 @@ void hexdump()
 {
     uintptr_t i;
     uintptr_t j, k;
-    return;   //@@
+    return; //@@
     for (i=0; i<nblocks; i++)
     {   block_header *b = (block_header *)blocks_by_age[i];
         printf("Block %" PRIdPTR "\n", i);
@@ -1058,16 +446,10 @@ void allocateheap()
     limit1  = ((block_header *)blocks_by_age[0])->h1top;
     limit2  = ((block_header *)blocks_by_age[0])->h2top;
     heap1_pinchain = heap2_pinchain = packfixnum(0);
+    par::reset_segments();
 }
 
 // Now I have enough to let me define various allocation functions.
-
-extern void reclaim(int line);
-extern LispObject error2(const char *s, const char *s1, LispObject a);
-extern LispObject error1(const char *s, LispObject a);
-extern LispObject error0(const char *s);
-extern LispObject quiet_error();
-extern void check_space(int nbytes, int line);
 
 LispObject undefined0(LispObject env)
 {
@@ -1138,55 +520,52 @@ LispObject wrongnumber5up(LispObject env, LispObject a, LispObject a2,
 static inline LispObject cons(LispObject a, LispObject b)
 {
     check_space(2*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    qcar(fringe1) = a;
-    qcdr(fringe1) = b;
-    a = fringe1;
-    fringe1 += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = a;
+    qcdr(par::thread_data.segment_fringe) = b;
+    a = par::thread_data.segment_fringe;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject list2star(LispObject a, LispObject b, LispObject c)
 {   // (cons a (cons b c))
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    qcar(fringe1) = a;
-    qcdr(fringe1) = fringe1 + 2*sizeof(LispObject);
-    a = fringe1;
-    fringe1 += 2*sizeof(LispObject);
-    setheapstarts(fringe1);
-    qcar(fringe1) = b;
-    qcdr(fringe1) = c;
-    fringe1 += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = a;
+    qcdr(par::thread_data.segment_fringe) = par::thread_data.segment_fringe + 2*sizeof(LispObject);
+    a = par::thread_data.segment_fringe;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = b;
+    qcdr(par::thread_data.segment_fringe) = c;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject acons(LispObject a, LispObject b, LispObject c)
 {   // (cons (cons a b) c)
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    qcar(fringe1) = fringe1 + 2*sizeof(LispObject);
-    qcdr(fringe1) = c;
-    c = fringe1;
-    fringe1 += 2*sizeof(LispObject);
-    setheapstarts(fringe1);
-    qcar(fringe1) = a;
-    qcdr(fringe1) = b;
-    fringe1 += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = par::thread_data.segment_fringe + 2*sizeof(LispObject);
+    qcdr(par::thread_data.segment_fringe) = c;
+    c = par::thread_data.segment_fringe;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::thread_data.segment_fringe);
+    qcar(par::thread_data.segment_fringe) = a;
+    qcdr(par::thread_data.segment_fringe) = b;
+    par::thread_data.segment_fringe += 2*sizeof(LispObject);
     return c;
 }
-
-// There is a prospect that sometime soon Reduce will wish to accept IEEE
-// infinities an NaNs and so the error check here wcan then be removed.
 
 static inline LispObject boxfloat(double a)
 {   if (!std::isfinite(a)) return error0("floating point error");
     LispObject r;
     check_space(8, __LINE__);
-    setheapstartsandfp(fringe1);
-    r = fringe1 + tagFLOAT;
+    setheapstartsandfp(par::thread_data.segment_fringe);
+    r = par::thread_data.segment_fringe + tagFLOAT;
     qfloat(r) = a;
-    fringe1 += 8;
+    par::thread_data.segment_fringe += 8;
     return r;
 }
 
@@ -1196,10 +575,10 @@ static inline LispObject boxfloat(double a)
 static inline LispObject allocatesymbol(LispObject pname)
 {   LispObject r;
     check_space(SYMSIZE*sizeof(LispObject), __LINE__);
-    setheapstarts(fringe1);
-    r = fringe1 + tagSYMBOL;
+    setheapstarts(par::thread_data.segment_fringe);
+    r = par::thread_data.segment_fringe + tagSYMBOL;
     qflags(r) = tagHDR + typeSYM;
-    qvalue(r) = undefined;
+    qvalue(r) = packfixnum(par::allocate_symbol());
     qplist(r) = nil;
     qpname(r) = pname;
     qspare(r) = nil;
@@ -1210,7 +589,7 @@ static inline LispObject allocatesymbol(LispObject pname)
     qdefn4(r) = undefined4;
     qdefn5up(r) = undefined5up;
     qlits(r)  = r;
-    fringe1 += SYMSIZE*sizeof(LispObject);
+    par::thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
     return r;
 }
 
@@ -1223,16 +602,17 @@ static inline LispObject allocateatom(size_t n)
 // header and must then be rounded up to be a multiple of 8.
     int nn = ALIGN8(sizeof(LispObject) + n);
     check_space(nn, __LINE__);
-    setheapstarts(fringe1);
-    r = fringe1 + tagATOM;
+    setheapstarts(par::thread_data.segment_fringe);
+    r = par::thread_data.segment_fringe + tagATOM;
 // I mark the new vector as being a string so that it is GC safe
     qheader(r) = tagHDR + typeSTRING + packlength(n);
-    fringe1 += nn;
+    par::thread_data.segment_fringe += nn;
     return r;
 }
 
 static inline LispObject makestring(const char *s, int len)
-{   LispObject r = allocateatom(len);
+{
+    LispObject r = allocateatom(len);
 //  qheader(r) = tagHDR + typeSTRING + packlength(len); // already done!
     memcpy(qstring(r), s, len);
     return r;
@@ -1463,27 +843,11 @@ static LispObject Lchar_downcase(LispObject data, LispObject arg)
     else return arg;
 }
 
-INLINE const size_t BOFFO_SIZE = 4096;
+INLINE constexpr size_t BOFFO_SIZE = 4096;
 char boffo[BOFFO_SIZE+4];
 size_t boffop;
 
-static inline void swap(uintptr_t &a, uintptr_t &b)
-{   uintptr_t w = a;
-    a = b;
-    b = w;
-}
-
-static inline void swap(LispObject &a, LispObject &b)
-{   uintptr_t w = a;
-    a = b;
-    b = w;
-}
-
-static inline void swapmap(uint32_t *&a, uint32_t *&b)
-{   uint32_t *wmap = a;
-    a = b;
-    b = wmap;
-}
+using std::swap;
 
 static inline LispObject copy(LispObject x);
 static inline LispObject copycontent(LispObject s);
@@ -1534,11 +898,28 @@ void *allocate_memory(uintptr_t n)
     return p;
 }
 
+/*
+* [par::reclaim] copies over the thread-local data for garbage collection
+*/
+void par_reclaim() {
+    for (auto x: par::thread_table) {
+        auto td = x.second;
+
+        *(td.work1) = copy(*(td.work1));
+        *(td.work2) = copy(*(td.work2));
+    }
+
+    for (auto& x: par::thread_returns) {
+        // copy the values waiting to be joined
+        x.second = copy(x.second);
+    }
+}
+
 
 extern void ensureheap2space(uintptr_t len);
 static uintptr_t space_used = 0;
 
-void inner_reclaim(LispObject *C_stack)
+void inner_reclaim()
 {
 // The strategy here is due to C J Cheyney ("A Nonrecursive List Compacting
 // Algorithm". Communications of the ACM 13 (11): 677-678, 1970),
@@ -1554,6 +935,7 @@ void inner_reclaim(LispObject *C_stack)
     {   block_header *b = (block_header *)blocks[i];
         clearpinned(b);
     }
+    
 // Here at the start of garbage collection heap1 contains a list (now
 // called heap2_pinchain) of all the items in heap2 that were pinned.
 // These should be the only things present in heap2, and the list is used
@@ -1572,57 +954,65 @@ void inner_reclaim(LispObject *C_stack)
 // Now scan the stack (ie the ambiguous bases) looking for a reference
 // to the start of an object in heap1 that has not alread been pinned.
 // When I find one I pin it and add it to heap2_pinchain.
-    for (s=(uintptr_t)C_stack;
-         s<(uintptr_t)C_stackbase;
-         s+=sizeof(LispObject))
-    {   LispObject a = qind(s);
-// If a value points within heap1 then any item if points to or within is
-// to be treated as "pinned". I will allow pinning even if the ambiguous
-// value has dubious tag bits or appears to point within an object rather
-// than properly at its head. Taking this stance should provide more
-// resilience aginst agressive optimistion by a compiler, and also could
-// allow me to put either native or byte-coded compiled material in the heap
-// secure in the knowledge that program counters and return addresses
-// that reference into it will be coped with gracefully.
-        if (inheap1(a))
-        {
-            a &= ~(LispObject)TAGBITS;
-// The next line is going to assume that the very first location in any heap
-// section has its "starts" bit set, and so the loop can never zoom down and
-// drop beyond the bottom of a segment.
-            block_header *block_a = find_block(a);
-            while (!getheapstarts(a))
+
+// We have to scan the stacks of all threads
+    for (auto t: par::thread_table) {
+        auto& td = t.second;
+
+        for (s=(uintptr_t)td.C_stackhead;
+            s<(uintptr_t)td.C_stackbase;
+            s+=sizeof(LispObject))
+        {   LispObject a = qind(s);
+    // If a value points within heap1 then any item if points to or within is
+    // to be treated as "pinned". I will allow pinning even if the ambiguous
+    // value has dubious tag bits or appears to point within an object rather
+    // than properly at its head. Taking this stance should provide more
+    // resilience aginst agressive optimistion by a compiler, and also could
+    // allow me to put either native or byte-coded compiled material in the heap
+    // secure in the knowledge that program counters and return addresses
+    // that reference into it will be coped with gracefully.
+            if (inheap1(a))
             {
-                a -= 8;
-                block_header *block_b = find_block(a);
-                assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
-                assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
-            }
-            if (!getpinned(a))
-            {   LispObject h;
-// ensureheapspace is here to arrange to skip past any of the pinned items
-// that are in heap2 already.
-                ensureheap2space(2*sizeof(LispObject));
-                setheapstarts(fringe2);
-// Arrange that the ambiguous pointer gets proper tag-bits attached
-// so that it can not cause confusion later on. I could have had a model
-// where a value was only treated as a reference if its tag bits were at
-// least consistent with the data in memory pointed at. But by ignoring tag
-// bits in the (ambigious) reference (but re-creating some here) I am more
-// secure against compiler optimisations that save intermediate values that
-// have tags removed.
-                h = qcar(a);
-                if (getheapfp(a)) a += tagFLOAT;
-                else if (isHDR(h))
-                {   if ((h & TYPEBITS) == typeSYM) a += tagSYMBOL;
-                    else a += tagATOM;
+                a &= ~(LispObject)TAGBITS;
+    // The next line is going to assume that the very first location in any heap
+    // section has its "starts" bit set, and so the loop can never zoom down and
+    // drop beyond the bottom of a segment.
+                block_header *block_a = find_block(a);
+                LispObject initial_a = a;
+                while (!getheapstarts(a))
+                {
+                    a -= 8;
+                    block_header *block_b = find_block(a);
+                    assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
+                    assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
                 }
-                qcar(fringe2) = a;
-                qcdr(fringe2) = heap1_pinchain;
-                heap1_pinchain = fringe2;
-                fringe2 += 2*sizeof(LispObject);
-                setpinned(a);
-                npins++;
+    if (initial_a == 123456) printf("ook\n"); // to get it used.
+                if (!getpinned(a))
+                {   LispObject h;
+    // ensureheapspace is here to arrange to skip past any of the pinned items
+    // that are in heap2 already.
+                    ensureheap2space(2*sizeof(LispObject));
+                    setheapstarts(fringe2);
+    // Arrange that the ambiguous pointer gets proper tag-bits attached
+    // so that it can not cause confusion later on. I could have had a model
+    // where a value was only treated as a reference if its tag bits were at
+    // least consistent with the data in memory pointed at. But by ignoring tag
+    // bits in the (ambigious) reference (but re-creating some here) I am more
+    // secure against compiler optimisations that save intermediate values that
+    // have tags removed.
+                    h = qcar(a);
+                    if (getheapfp(a)) a += tagFLOAT;
+                    else if (isHDR(h))
+                    {   if ((h & TYPEBITS) == typeSYM) a += tagSYMBOL;
+                        else a += tagATOM;
+                    }
+                    qcar(fringe2) = a;
+                    qcdr(fringe2) = heap1_pinchain;
+                    heap1_pinchain = fringe2;
+                    fringe2 += 2*sizeof(LispObject);
+                    setpinned(a);
+                    npins++;
+                }
             }
         }
     }
@@ -1645,10 +1035,13 @@ void inner_reclaim(LispObject *C_stack)
 // to reduce any big waste blocks that could arise when a vector needed
 // to be copied.
 //
-// Next I copy all objects directly accessible from proper list bases.
+// Next I copy all objects directly accessible from proper list list bases.
     for (o=0; o<BASES_SIZE; o++) listbases[o] = copy(listbases[o]);
     for (o=0; o<OBHASH_SIZE; o++)
         obhash[o] = copy(obhash[o]);
+
+    par_reclaim();
+
 // Items that are pinned and are in heap1 may have the pinning pointer as
 // the only reference to them. Ones in heap2 may lie beyond where fringe2
 // will reach to. So I need to take special action to do copycontent on
@@ -1680,8 +1073,8 @@ void inner_reclaim(LispObject *C_stack)
     {   block_header *b = (block_header *)blocks[i];
         swap(b->h1base, b->h2base);
         swap(b->h1top, b->h2top);
-        swapmap(b->h1starts, b->h2starts);
-        swapmap(b->h1fp, b->h2fp);
+        swap(b->h1starts, b->h2starts);
+        swap(b->h1fp, b->h2fp);
     }
 // The pinchain now refers to heap2.
     heap2_pinchain = heap1_pinchain;
@@ -1790,7 +1183,24 @@ void inner_reclaim(LispObject *C_stack)
     fflush(stdout);
 }
 
+// This force sets the stackhead of the gc thread.
+// Useful when inner_reclaim is called directly, e.g during preserve.
+void inner_reclaim(LispObject *C_stack) {
+    par::thread_data.C_stackhead = C_stack;
+    inner_reclaim();
+}
+
 volatile int volatile_variable = 12345;
+
+// VB: For now I naively lock this. Will probably very slow.
+std::mutex check_space_mutex;
+
+// simple call to check if gc has started and wait
+void guard_gc() {
+    if (par::gc_on) {
+        par::Gc_guard guard;
+    }
+}
 
 void check_space(int len, int line)
 {
@@ -1801,35 +1211,62 @@ void check_space(int len, int line)
 // the garbage collector while copying into heap2. The treatment of large
 // memory blocks here will be a little tedious and coule be improved by
 // checking the bitmap word at a time not bit at a time.
+
+    guard_gc();
+
     intptr_t i;
     for (;;) // loop for when pinned items intrude.
-    {   if (fringe1+len >= limit1)
-        {   reclaim(line);
-            continue;
+    {
+        // Check if we can just fit in the current segment
+        if (par::thread_data.segment_fringe + len >= par::thread_data.segment_limit) {
+
+            std::lock_guard<std::mutex> lock(check_space_mutex);
+            int a = par::Thread_data::SEGMENT_SIZE; // Doesn't compile without the indirection
+            uintptr_t size = std::max(a, len);
+
+            if (fringe1 + size >= limit1) {
+                reclaim(line);
+                if (fringe1 + size >= limit1) {
+                    // not enough memory
+                    my_exit(137);
+                }
+                continue;
+            } else {
+                // printf("segfringe %llu seglimit %llu size %d \n", par::thread_data.segment_fringe, par::thread_data.segment_limit, size);
+                par::thread_data.segment_fringe = fringe1;
+                par::thread_data.segment_limit = par::thread_data.segment_fringe + size;
+                fringe1 += size;
+            }
         }
-// here fringe1+len < limit1
+
+        // printf("%lld %lld %lld %lld\n", thread_data.segment_fringe, fringe1, thread_data.segment_limit, limit1);
+        // VB: if a segment has been assigned we make these assertions
+        assert(par::thread_data.segment_fringe < par::thread_data.segment_limit);
+        assert(par::thread_data.segment_limit <= limit1);
+
+// here thread_data.segment_fringe+len < thread_data.segment_limit
         for (i=0; i<len; i+=8)
-            if (getheapstarts(fringe1+i)) break;
+            if (getheapstarts(par::thread_data.segment_fringe+i)) break;
         if (i >= len) return; // success
 // a block that looks like a string will serve as a padder...
         if (i > 0)
-        {   qcar(fringe1) =
+        {   qcar(par::thread_data.segment_fringe) =
                 tagHDR + typeSTRING + packlength(i-sizeof(LispObject));
-            setheapstarts(fringe1);
-            fringe1 += i;
+            setheapstarts(par::thread_data.segment_fringe);
+            par::thread_data.segment_fringe += i;
             heap1_pads += i;
         }
-        while (getheapstarts(fringe1))
+        while (getheapstarts(par::thread_data.segment_fringe))
         {   LispObject h;
 // I now need to skip over the pinned item. If it is floating point,
 // a cons cell or a symbol I have to detect that, otherwise its
 // header gives its length explicitly.
-            if (getheapfp(fringe1)) fringe1 += 8;
-            else if (!isHDR(h = qcar(fringe1)))
-                fringe1 += 2*sizeof(LispObject);
+            if (getheapfp(par::thread_data.segment_fringe)) par::thread_data.segment_fringe += 8;
+            else if (!isHDR(h = qcar(par::thread_data.segment_fringe)))
+                par::thread_data.segment_fringe += 2*sizeof(LispObject);
             else if ((h & TYPEBITS) == typeSYM)
-                 fringe1 += SYMSIZE*sizeof(LispObject);
-            else fringe1 += ALIGN8(sizeof(LispObject) + veclength(h));
+                 par::thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
+            else par::thread_data.segment_fringe += ALIGN8(sizeof(LispObject) + veclength(h));
         }
     }
 }
@@ -1847,10 +1284,20 @@ void middle_reclaim()
         middle_reclaim();     // never executed!
     }
     inner_reclaim((LispObject *)((intptr_t)&w & -sizeof(LispObject)));
+    par::reset_segments();
 }
 
 void reclaim(int line)
 {
+    bool expected = false;
+    if (!par::gc_on.compare_exchange_strong(expected, true)) {
+        // any later thread ends up here and only waits for gc to finish
+        par::Gc_guard guard;
+        return;
+    }
+
+    par::Gc_lock gc_lock;
+
 // The purpose of this function is to force any even partially
 // reasonable C compiler into putting all registers that contain
 // values from the caller onto the stack. It assumes that there
@@ -2053,6 +1500,25 @@ static inline LispObject copy(LispObject x)
 // s points at an object in the heap (old or new). Copy the
 // components of the object and return the address one beyond it.
 
+void copy_symval(LispObject x) {
+    assert(isSYMBOL(x));
+
+    if (is_global(x)) {
+        qvalue(x) = copy(qvalue(x));
+    } else {
+        int loc = qfixnum(qvalue(x));
+        for (auto x: par::thread_table) {
+            auto td = x.second;
+            // TODO: need local_symbol here!
+            auto& val = td.local_symbol(loc);
+            val = copy(val);
+        }
+
+        auto& global = par::fluid_globals[loc];
+        global = copy(global);
+    }
+}
+
 static inline LispObject copycontent(LispObject s)
 {   LispObject h = s, w;
     assert(inheap(h) && getheapstarts(h));
@@ -2078,7 +1544,8 @@ static inline LispObject copycontent(LispObject s)
     {   case typeSYM:
             w = s + tagSYMBOL;
             // qflags(w) does not need adjusting
-            qvalue(w) = copy(qvalue(w));
+            // par::symval(w) = copy(par::symval(w));
+            copy_symval(w);
             qplist(w) = copy(qplist(w));
             qpname(w) = copy(qpname(w));
             qlits(w)  = copy(qlits(w));
@@ -2110,15 +1577,15 @@ static inline LispObject copycontent(LispObject s)
     }
 }
 
-INLINE const int printPLAIN = 1;
-INLINE const int printESCAPES = 2;
-INLINE const int printHEX = 4;
+INLINE constexpr int printPLAIN = 1;
+INLINE constexpr int printESCAPES = 2;
+INLINE constexpr int printHEX = 4;
 
 // I suspect that linelength and linepos need to be maintained
 // independently for each output stream. At present that is not
 // done. And also blank_pending.
-int linelength = 80, linepos = 0, printflags = printESCAPES;
-bool blank_pending = false;
+thread_local int linelength = 80, linepos = 0, printflags = printESCAPES;
+thread_local bool blank_pending = false;
 
 LispObject Llinelength(LispObject lits, LispObject a1)
 {   int oo = linelength;
@@ -2190,11 +1657,14 @@ static EditLine *el_struct;
 static History *el_history;
 static HistEvent el_history_event;
 
-INLINE const int INPUT_LINE_SIZE = 256;
-static char input_line[INPUT_LINE_SIZE];
-static size_t input_ptr = 0, input_max = 0;
-char the_prompt[80] = "> ";
+INLINE constexpr int INPUT_LINE_SIZE = 256;
+thread_local static char input_line[INPUT_LINE_SIZE];
+thread_local static size_t input_ptr = 0, input_max = 0;
+thread_local char the_prompt[80] = "> ";
 
+// gcc moans if the value of snprintf is unused and there is any chance that
+// truncation arose. To get rid of the warning message I dump the value of
+// snprintf somewhere were in fact I will not look at it!.
 
 LispObject Lsetpchar(LispObject lits, LispObject a)
 {   LispObject r = makestring(the_prompt, strlen(the_prompt));
@@ -2224,10 +1694,16 @@ int rdch()
         if (lispfiles[lispin] == stdin && stdin_tty)
         {   if (input_ptr >= input_max)
             {   int n = -1;
-                const char *s = el_gets(el_struct, &n);
-                if (s == NULL) return EOF;
+                const char *s;
+                
+                {
+                    par::Gc_guard guard;
+                    s = el_gets(el_struct, &n);
+                }
+
                 // Need to manually enter line to history.
                 history(el_history, &el_history_event, H_ENTER, s);
+                if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
                 strncpy(input_line, s, n);
                 input_line[INPUT_LINE_SIZE-1] = 0;
@@ -2237,7 +1713,7 @@ int rdch()
             c = input_line[input_ptr++];
         }
         else c = getc(lispfiles[lispin]);
-        if (c != EOF && qvalue(echo) != nil) wrch(c);
+        if (c != EOF && par::symval(echo) != nil) wrch(c);
         return c;
     }
 }
@@ -2251,7 +1727,7 @@ void checkspace(int n)
         lispout != -3) wrch('\n');
 }
 
-char printbuffer[32];
+thread_local char printbuffer[32];
 
 //
 // I want the floating point print style that I use to match the
@@ -2628,7 +2104,7 @@ void errprin(LispObject a)
     lispout = saveout; printflags = saveflags;
 }
 
-int curchar = '\n', symtype = 0;
+thread_local int curchar = '\n', symtype = 0;
 
 int hexval(int n)
 {   if (isdigit(n)) return n - '0';
@@ -2636,6 +2112,7 @@ int hexval(int n)
     else if ('A' <= n && n <= 'F') return n - 'A' + 10;
     else return 0;
 }
+
 static LispObject Nminus(LispObject a);
 static LispObject Nplus2(LispObject a, LispObject b);
 static LispObject Ntimes2(LispObject a, LispObject b);
@@ -2676,8 +2153,8 @@ LispObject token()
                curchar == '_' ||
                curchar == '!')
         {   if (curchar == '!') curchar = rdch();
-            else if (curchar != EOF && qvalue(symlower) != nil) curchar = tolower(curchar);
-            else if (curchar != EOF && qvalue(symraise) != nil) curchar = toupper(curchar);
+            else if (curchar != EOF && par::symval(symlower) != nil) curchar = tolower(curchar);
+            else if (curchar != EOF && par::symval(symraise) != nil) curchar = toupper(curchar);
             if (curchar != EOF)
             {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
                 curchar = rdch();
@@ -2877,9 +2354,13 @@ LispObject readT()
     }
 }
 
+// I lock the entire lookup function to prevent the same symbol being created twice
+std::mutex lookup_lock;
 
 LispObject lookup(const char *s, size_t len, int flag)
-{   LispObject w, pn;
+{   
+    std::lock_guard<std::mutex> lock(lookup_lock);
+    LispObject w, pn;
     size_t i, hash = 1;
     for (i=0; i<len; i++) hash = 13*hash + s[i];
     hash = hash % OBHASH_SIZE;
@@ -2894,6 +2375,7 @@ LispObject lookup(const char *s, size_t len, int flag)
         w = qcdr(w);
     }
 // here the symbol as required was not already present.
+// TODO: add mutex lock here
     if ((flag & 1) == 0) return undefined;
     pn = makestring(s, len);
     w = allocatesymbol(pn);
@@ -2901,19 +2383,19 @@ LispObject lookup(const char *s, size_t len, int flag)
     return w;
 }
 
-INLINE unsigned int unwindNONE      = 0;
-INLINE unsigned int unwindERROR     = 1;
-INLINE unsigned int unwindBACKTRACE = 2;
-INLINE unsigned int unwindGO        = 4;
-INLINE unsigned int unwindRETURN    = 8;
-INLINE unsigned int unwindPRESERVE  = 16;
-INLINE unsigned int unwindRESTART   = 32;
+INLINE constexpr unsigned int unwindNONE      = 0;
+INLINE constexpr unsigned int unwindERROR     = 1;
+INLINE constexpr unsigned int unwindBACKTRACE = 2;
+INLINE constexpr unsigned int unwindGO        = 4;
+INLINE constexpr unsigned int unwindRETURN    = 8;
+INLINE constexpr unsigned int unwindPRESERVE  = 16;
+INLINE constexpr unsigned int unwindRESTART   = 32;
 
-unsigned int unwindflag = unwindNONE;
+thread_local unsigned int unwindflag = unwindNONE;
 
-int backtraceflag = 0;
-INLINE int backtraceHEADER = 1;
-INLINE int backtraceTRACE  = 2;
+thread_local int backtraceflag = -1;
+INLINE constexpr int backtraceHEADER = 1;
+INLINE constexpr int backtraceTRACE  = 2;
 
 LispObject error0(const char *msg)
 {   if ((backtraceflag & backtraceHEADER) != 0)
@@ -2990,6 +2472,8 @@ LispObject eval(LispObject x);
 
 LispObject interpreted0(LispObject b)
 {
+    guard_gc();
+
     LispObject bvl, r;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -3008,31 +2492,32 @@ LispObject interpreted0(LispObject b)
 
 LispObject interpreted1(LispObject b, LispObject a1)
 {
-    LispObject bvl, r, save1;
-    bvl = qcar(b);
+    guard_gc();
+
+    // LispObject bvl, r, save1;
+    LispObject bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
     if (bvl == nil) return error1("Too many arguments provided", bvl);
-    r = qcar(bvl);
+    LispObject r = qcar(bvl);
     bvl = qcdr(bvl);
     if (bvl != nil)  // Could legally be (v1 &rest v2)
     {
         return error1("Not enough arguments provided", bvl);
     }
     bvl = r;
-    save1 = qvalue(bvl);
-    qvalue(bvl) = a1;
+    par::Shallow_bind bind_bvl(bvl, a1);
     r = nil;
     while (isCONS(b))
     {   r = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(bvl) = save1;
     return r;
 }
 
 LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
 {
+    guard_gc();
     LispObject bvl, v2, w;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -3045,22 +2530,22 @@ LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
     }
     bvl = qcar(bvl);
     v2 = qcar(v2);
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
+
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
     return w;
 }
 
 LispObject interpreted3(LispObject b, LispObject a1,
                         LispObject a2, LispObject a3)
 {
+    guard_gc();
     LispObject bvl, v2, v3, w;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -3075,24 +2560,22 @@ LispObject interpreted3(LispObject b, LispObject a1,
     bvl = qcar(bvl);
     v2 = qcar(v2);
     v3 = qcar(v3);
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
-    swap(a3, qvalue(v3));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    par::Shallow_bind bind_v3(v3, a3);
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(v3) = a3;
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
     return w;
 }
 
 LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
                         LispObject a3, LispObject a4)
 {
+    guard_gc();
     LispObject bvl, v2, v3, v4, w;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
@@ -3109,20 +2592,16 @@ LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
     v2 = qcar(v2);
     v3 = qcar(v3);
     v4 = qcar(v4);
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
-    swap(a3, qvalue(v3));
-    swap(a4, qvalue(v4));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    par::Shallow_bind bind_v3(v3, a3);
+    par::Shallow_bind bind_v4(v4, a4);
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    qvalue(v4) = a4;
-    qvalue(v3) = a3;
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
     return w;
 }
 
@@ -3140,7 +2619,8 @@ LispObject nreverse(LispObject a)
 LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
                           LispObject a3, LispObject a4, LispObject a5up)
 {
-    LispObject bvl, v2, v3, v4, v5up, w, v, a;
+    guard_gc();
+    LispObject bvl=nil, v2=nil, v3=nil, v4=nil, v5up=nil, w, v;
     bvl = qcar(b);
     b = qcdr(b);       // Body of the function.
     if (bvl == nil ||
@@ -3160,37 +2640,34 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
            (n>0 ? "Not enough arguments provided" :
                   "Too many arguments provided"), bvl);
     }
-    swap(a1, qvalue(bvl));
-    swap(a2, qvalue(v2));
-    swap(a3, qvalue(v3));
-    swap(a4, qvalue(v4));
+    par::Shallow_bind bind_bvl(bvl, a1);
+    par::Shallow_bind bind_v2(v2, a2);
+    par::Shallow_bind bind_v3(v3, a3);
+    par::Shallow_bind bind_v4(v4, a4);
+
     v = v5up;
-    a = nil;
+    w = a5up;
+
+    // I'm using a list here to make sure there's no resizing, and thus destruction
+    std::list<par::Shallow_bind> binds_a5up;
     while (v != nil)
-    {   swap(qvalue(qcar(v)), qcar(a5up)); // bind another argument
+    {   
+        binds_a5up.emplace_back(qcar(v), qcar(w)); // bind another argument
         v = qcdr(v);
-        w = qcdr(a5up);
-        qcdr(a5up) = a;
-        a = a5up;
-        a5up = w;   // Collect saved values in reversed order.
+        w = qcdr(w);
     }
-    w = nil;
+
     while (isCONS(b))
     {   w = eval(qcar(b));
         if (unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
-    v = v5up = nreverse(v5up);
-    while (v != nil)
-    {   qvalue(qcar(v)) = qcar(a);
-        v = qcdr(v);
-        a = qcdr(a);
+
+    while (not binds_a5up.empty()) {
+        // make sure the elements destruct in reverse order
+        binds_a5up.pop_back();
     }
-    nreverse(v5up);
-    qvalue(v4) = a4;
-    qvalue(v3) = a3;
-    qvalue(v2) = a2;
-    qvalue(bvl) = a1;
+
     return w;
 }
 
@@ -3249,9 +2726,10 @@ LispObject eval(LispObject x)
         }
     }
     if (isSYMBOL(x))
-    {   LispObject v = qvalue(x);
-        if (v == undefined)
+    {   LispObject v = par::symval(x);
+        if (v == undefined) {
             return error1("undefined variable", x);
+        }
         else return v;
     }
     else if (!isCONS(x)) return x;
@@ -3586,17 +3064,17 @@ LispObject eval(LispObject x)
 LispObject Lprogn(LispObject lits, LispObject x);
 
 
+// @@@ interpret used to live here...
+
 LispObject interpretspecform(LispObject lits, LispObject x)
 {   // lits should be ((var) body...)
-    LispObject v, v_value;
+    LispObject v;
     if (!isCONS(lits)) return nil;
     v = qcar(lits);
     lits = qcdr(lits);
     if (!isCONS(v) || !isSYMBOL(v = qcar(v))) return nil;
-    v_value = qvalue(v);
-    qvalue(v) = x;
+    par::Shallow_bind(v, x);
     lits = Lprogn(nil, lits);
-    qvalue(v) = v_value;
     return lits;
 }
 
@@ -3770,14 +3248,22 @@ LispObject Lsetq(LispObject lits, LispObject x)
             return error1("bad variable in setq", x);
         w = eval(qcar(qcdr(x)));
         if (unwindflag != unwindNONE) return nil;
-        qvalue(qcar(x)) = w;
+
+#ifdef DEBUG_GLOBALS
+        if (is_global(qcar(x)) or par::is_fluid_bound(qcar(x))) {
+            par::add_debug_global(qcar(x));
+        }
+#endif
+        par::symval(qcar(x)) = w;
         x = qcdr(qcdr(x));
     }
     return w;
 }
 
 LispObject Lprogn(LispObject lits, LispObject x)
-{   LispObject r = nil;
+{   
+    guard_gc();
+    LispObject r = nil;
     while (isCONS(x))
     {   r = eval(qcar(x));
         x = qcdr(x);
@@ -3807,19 +3293,22 @@ LispObject Lunwind_protect(LispObject lits, LispObject x)
 }
 
 LispObject Lprog(LispObject lits, LispObject x)
-{   LispObject w, vars, saved = nil, save_x;
+{   
+    guard_gc();
+    LispObject w, vars, save_x;
     if (!isCONS(x)) return nil;
     vars = qcar(x);
     x = qcdr(x);
+
+    std::list<par::Shallow_bind> bind_vars;
 // Now bind all the local variables, giving them the value nil.
     for (w=vars; isCONS(w); w=qcdr(w))
     {   LispObject v = qcar(w);
         if (!isSYMBOL(v))
             return error1("Not a symbol in variable list for prog", v);
-        saved = cons(qvalue(v), saved);
+        bind_vars.emplace_back(v, nil);
         if (unwindflag != unwindNONE) return nil;
     }
-    for (w=vars; isCONS(w); w=qcdr(w)) qvalue(qcar(w)) = nil;
     save_x = x;  // So that "go" can scan the whole block to find a label.
     work1 = nil;
     while (isCONS(x))
@@ -3838,16 +3327,9 @@ LispObject Lprog(LispObject lits, LispObject x)
         if (unwindflag != unwindNONE) break;
     }
 // Now I must unbind all the variables.
-    w = nreverse(vars);
-    vars = nil;
-    while (isCONS(w))
-    {   LispObject x = w;
-        w = qcdr(w);
-        qcdr(x) = vars;
-        vars = x;
-        x = qcar(vars);
-        qvalue(x) = qcar(saved);
-        saved = qcdr(saved);
+
+    while (not bind_vars.empty()) {
+        bind_vars.pop_back();
     }
     return work1;
 }
@@ -3990,6 +3472,114 @@ LispObject Lvector_5up(LispObject lits, LispObject a1, LispObject a2,
         len++;
     }
     return r;
+}
+
+void global_symbol(LispObject s) {
+    if ((qflags(s) & flagGLOBAL) == 0) {
+        // If it was not global already, move value back from thread_local storage
+        qvalue(s) = par::symval(s);
+        if (qvalue(s) == undefined) qvalue(s) = nil;
+        qflags(s) &= ~flagFLUID; // disable fluid
+        qflags(s) |= flagGLOBAL;
+    }
+
+    if (qvalue(s) == undefined) {
+        qvalue(s) = nil;
+    }
+}
+
+void unglobal_symbol(LispObject s) {
+    if ((qflags(s) & flagGLOBAL) != 0) {
+        int loc = par::allocate_symbol();
+        LispObject val = qvalue(s);
+        // par::local_symbol(loc) = qvalue(s);
+        qvalue(s) = packfixnum(loc);
+        qflags(s) &= ~flagGLOBAL;
+        par::symval(s) = val;
+    }
+}
+
+void fluid_symbol(LispObject s) {
+    // If it was global, move the value to thread_local storage
+    // and store the location.
+    if (is_fluid(s)) return;
+
+    LispObject oldval = par::symval(s);
+
+    if (qflags(s) & flagGLOBAL) {
+        int loc = par::allocate_symbol();
+        // par::local_symbol(loc) = qvalue(s);
+        // LispObject val = qvalue(s);
+        qvalue(s) = packfixnum(loc);
+        qflags(s) &= ~flagGLOBAL; // disable global
+
+        // par::symval(s) = val;
+    }
+
+    qflags(s) |= flagFLUID;
+
+    par::symval(s) = oldval;
+
+    if (par::symval(s) == undefined) {
+        par::symval(s) = nil;
+    }
+}
+
+void unfluid_symbol(LispObject s) {
+    LispObject val = par::symval(s);
+    qflags(s) &= ~flagFLUID;
+    par::symval(s) = val;
+
+    // if (par::symval(s) == undefined) {
+    //     par::symval(s) = nil;
+    // }
+}
+
+LispObject chflag(LispObject x, void (*f)(LispObject)) {
+    while (isCONS(x)) {
+        LispObject a = qcar(x);
+        x = qcdr(x);
+        if (!isSYMBOL(a)) continue;
+        f(a);
+    }
+    return nil;
+}
+
+LispObject Lglobal(LispObject lits, LispObject x) {
+    // TODO: this is a hack to prevent variables being made global. FIX IT!
+#ifdef DEBUG_GLOBALS
+    std::cerr << "WARNING! tried to make global but made fluid!" << std::endl;
+    return chflag(x, fluid_symbol);
+#else
+    return chflag(x, global_symbol);
+#endif
+}
+
+LispObject Lfluid(LispObject lits, LispObject x) {
+    return chflag(x, fluid_symbol);
+}
+
+LispObject Lunglobal(LispObject lits, LispObject x) {
+    return chflag(x, unglobal_symbol);
+}
+
+LispObject Lunfluid(LispObject lits, LispObject x) {
+    return chflag(x, unfluid_symbol);
+}
+
+LispObject Lfluidp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagFLUID)!=0) return lisptrue;
+    else return nil;
+}
+
+LispObject Lglobalp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagGLOBAL)!=0) return lisptrue;
+    else return nil;
+}
+
+LispObject Lgensymp(LispObject lits, LispObject x)
+{   if (isSYMBOL(x) && (qflags(x)&flagGENSYM)!=0) return lisptrue;
+    else return nil;
 }
 
 LispObject Lcar(LispObject lits, LispObject x)
@@ -4840,12 +4430,12 @@ LispObject Lmember(LispObject lits, LispObject a, LispObject l)
 LispObject Lset(LispObject lits, LispObject x, LispObject y)
 {
     if (!isSYMBOL(x)) return error1("bad arg for set", x);
-    return (qvalue(x) = y);
+    return (par::symval(x) = y);
 }
 
 LispObject Lboundp(LispObject lits, LispObject x)
 {
-    return (isSYMBOL(x) && qvalue(x)!=undefined) ? lisptrue : nil;
+    return (isSYMBOL(x) && par::symval(x)!=undefined) ? lisptrue : nil;
 }
 
 LispObject Lgensym_0(LispObject lits)
@@ -5047,65 +4637,6 @@ LispObject Lremprop(LispObject lits, LispObject x, LispObject y)
         p = *(prev = &qcdr(p));
     }
     return nil;
-}
-
-LispObject Lfluid(LispObject lits, LispObject x)
-{   while (isCONS(x))
-    {   LispObject v = qcar(x);
-        x = qcdr(x);
-        if (!isSYMBOL(v)) continue;
-        qflags(v) &= ~flagGLOBAL;
-        qflags(v) |= flagFLUID;
-        if (qvalue(v) == undefined) qvalue(v) = nil;
-    }
-    return nil;
-}
-
-LispObject Lglobal(LispObject lits, LispObject x)
-{   while (isCONS(x))
-    {   LispObject v = qcar(x);
-        x = qcdr(x);
-        if (!isSYMBOL(v)) continue;
-        qflags(v) &= ~flagFLUID;
-        qflags(v) |= flagGLOBAL;
-        if (qvalue(v) == undefined) qvalue(v) = nil;
-    }
-    return nil;
-}
-
-LispObject Lunfluid(LispObject lits, LispObject x)
-{   while (isCONS(x))
-    {   LispObject v = qcar(x);
-        x = qcdr(x);
-        if (!isSYMBOL(v)) continue;
-        qflags(v) &= ~flagFLUID;
-    }
-    return nil;
-}
-
-LispObject Lunglobal(LispObject lits, LispObject x)
-{   while (isCONS(x))
-    {   LispObject v = qcar(x);
-        x = qcdr(x);
-        if (!isSYMBOL(v)) continue;
-        qflags(v) &= ~flagGLOBAL;
-    }
-    return nil;
-}
-
-LispObject Lfluidp(LispObject lits, LispObject x)
-{   if (isSYMBOL(x) && (qflags(x)&flagFLUID)!=0) return lisptrue;
-    else return nil;
-}
-
-LispObject Lglobalp(LispObject lits, LispObject x)
-{   if (isSYMBOL(x) && (qflags(x)&flagGLOBAL)!=0) return lisptrue;
-    else return nil;
-}
-
-LispObject Lgensymp(LispObject lits, LispObject x)
-{   if (isSYMBOL(x) && (qflags(x)&flagGENSYM)!=0) return lisptrue;
-    else return nil;
 }
 
 LispObject Lmkvect(LispObject lits, LispObject x)
@@ -7217,8 +6748,8 @@ LispObject Lreadch(LispObject lits)
 {   int c = rdch();
     if (c == EOF) return eofsym;
     char ch[4];
-    ch[0] = qvalue(symlower) != nil ? tolower(c) :
-            qvalue(symraise) != nil ? toupper(c) : c;
+    ch[0] = par::symval(symlower) != nil ? tolower(c) :
+            par::symval(symraise) != nil ? toupper(c) : c;
     ch[1] = 0;
     return lookup(ch, 1, 1);
 }
@@ -7292,7 +6823,7 @@ LispObject Lwrs(LispObject lits, LispObject x)
     return error1("wrs failed", x);
 }
 
-INLINE const unsigned int LONGEST_LEGAL_FILENAME = 1000;
+INLINE constexpr unsigned int LONGEST_LEGAL_FILENAME = 1000;
 char filename[LONGEST_LEGAL_FILENAME];
 static char imagename[LONGEST_LEGAL_FILENAME];
 INLINE const char *programDir = ".";
@@ -7320,7 +6851,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
                      "@%.*s", (int)(p-qstring(x))-1, 1+qstring(x));
         if (r<0) strcpy(filename, "badfile");
         else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits))
             r = snprintf(filename, sizeof(filename),
                          "%.*s%.*s",
@@ -7362,7 +6893,7 @@ LispObject Lfilep(LispObject lits, LispObject x)
                      (int)(p-qstring(x))-1, 1+qstring(x));
         if (r<0) strcpy(filename, "badfile");
         else if ((unsigned int)r>=sizeof(filename)) filename[sizeof(filename)-1] = 0;
-        lits = qvalue(lookup(filename, strlen(filename), 0));
+        lits = par::symval(lookup(filename, strlen(filename), 0));
         if (isSTRING(lits)) r = snprintf(filename,
            sizeof(filename), "%.*s%.*s",
            (int)veclength(qheader(lits)), qstring(lits),
@@ -7425,7 +6956,7 @@ LispObject Lclose(LispObject lits, LispObject x)
             if (lispfiles[n] != NULL) fclose(lispfiles[n]);
             lispfiles[n] = NULL;
             file_direction &= ~(1<<n);
-       }
+        }
     }
     return nil;
 }
@@ -7436,23 +6967,28 @@ static bool showallreads = false;
 void readevalprint(int loadp)
 {   while (symtype != EOF)
     {   LispObject r;
-        LispObject save_echo = qvalue(echo);
-        unwindflag = unwindNONE;
-        if (loadp) qvalue(echo) = nil;
-        if (showallreads) qvalue(echo) = lisptrue;
-        backtraceflag = backtraceHEADER | backtraceTRACE;
-        r = readS();
-        qvalue(echo) = save_echo;
+        // I make sure here that echo is locally bound here.
+        // Otherwise threads would content over the global value.
+        {
+            par::Shallow_bind(echo, par::symval(echo));
+            unwindflag = unwindNONE;
+            if (loadp) par::symval(echo) = nil;
+            if (showallreads) par::symval(echo) = lisptrue;
+            backtraceflag = backtraceHEADER | backtraceTRACE;
+            r = readS();
+        }
+
         if (showallreads)
         {   printf("item read was: ");
             print(r);
         }
         fflush(stdout);
         if (unwindflag != unwindNONE) /* Do nothing */ ;
-        else if (loadp || qvalue(dfprint) == nil ||
+        else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
-        {   r = eval(r);
+        {
+            r = eval(r);
             if (showallreads || (unwindflag == unwindNONE && !loadp))
             {   if (linepos != 0) wrch('\n');
                 linepos += printf("Value: ");
@@ -7465,7 +7001,7 @@ void readevalprint(int loadp)
         }
         else
         {   r = cons(r, nil);
-            if (unwindflag == unwindNONE) Lapply(nil, qvalue(dfprint), r);
+            if (unwindflag == unwindNONE) Lapply(nil, par::symval(dfprint), r);
         }
         if ((unwindflag & (unwindPRESERVE | unwindRESTART)) != 0) return;
     }
@@ -7552,12 +7088,87 @@ LispObject Lerrorset_3(LispObject lits, LispObject a1,
     return a1;
 }
 
+
 LispObject Lerrorset_2(LispObject lits, LispObject a1, LispObject a2)
 {   return Lerrorset_3(lits, a1, a2, nil);
 }
 
 LispObject Lerrorset_1(LispObject lits, LispObject a1)
 {   return Lerrorset_3(lits, a1, nil, nil);
+}
+
+LispObject Lthread(LispObject lits, LispObject x) {
+    auto f = [=]() {
+        return eval(x);
+    };
+
+    int tid = par::start_thread(f);
+    return packfixnum(tid);
+}
+
+/**
+ * thread2 allows passing a function and a list of arguments
+ * */
+LispObject Lthread2(LispObject lits, LispObject func, LispObject arg) {
+    auto f = [=]() {
+        return Lapply(nil, func, arg);
+    };
+
+    int tid = par::start_thread(f);
+    return packfixnum(tid);
+}
+
+LispObject Ljoin_thread(LispObject lits, LispObject x) {
+    int tid = qfixnum(x);
+    LispObject result = par::join_thread(tid);
+    return result;
+}
+
+LispObject Lmutex(LispObject _data) {
+    return packfixnum(par::mutex());
+}
+
+LispObject Lmutex_lock(LispObject lits, LispObject x) {
+    int id = qfixnum(x);
+    par::mutex_lock(id);
+    return nil;
+}
+
+LispObject Lmutex_unlock(LispObject lits, LispObject x) {
+    int id = qfixnum(x);
+    par::mutex_unlock(id);
+    return nil;
+}
+
+LispObject Lcondvar(LispObject _data) {
+    return packfixnum(par::condvar());
+}
+
+LispObject Lcondvar_wait(LispObject lits, LispObject cv, LispObject m) {
+    int cvid = qfixnum(cv);
+    int mid = qfixnum(m);
+    par::condvar_wait(cvid, mid);
+    return nil;
+}
+
+LispObject Lcondvar_notify_one(LispObject lits, LispObject cv) {
+    int cvid = qfixnum(cv);
+    par::condvar_notify_one(cvid);
+    return nil;
+}
+
+LispObject Lcondvar_notify_all(LispObject lits, LispObject cv) {
+    int cvid = qfixnum(cv);
+    par::condvar_notify_all(cvid);
+    return nil;
+}
+
+LispObject Lhardware_threads(LispObject _data) {
+    return packfixnum(std::thread::hardware_concurrency());
+}
+
+LispObject Lthread_id(LispObject _data) {
+    return packfixnum(par::thread_data.id);
 }
 
 // Here is a place where I use #define and exploit string concatenation
@@ -7580,6 +7191,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
 
 #define SETUP0                                                  \
     SETUP_TABLE_SELECT("append",            Lappend_0),         \
+    SETUP_TABLE_SELECT("condvar",           Lcondvar),          \
     SETUP_TABLE_SELECT("date",              Ldate),             \
     SETUP_TABLE_SELECT("date-and-time",     Ldate_and_time_0),  \
     SETUP_TABLE_SELECT("list",              Llist_0),           \
@@ -7600,6 +7212,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("error1",            Lquiet_error),      \
     SETUP_TABLE_SELECT("gensym",            Lgensym_0),         \
     SETUP_TABLE_SELECT("get-lisp-directory",Lget_lisp_directory), \
+    SETUP_TABLE_SELECT("hardwarethreads",   Lhardware_threads), \
+    SETUP_TABLE_SELECT("mutex",             Lmutex),            \
     SETUP_TABLE_SELECT("oblist",            Loblist),           \
     SETUP_TABLE_SELECT("posn",              Lposn),             \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_0),       \
@@ -7610,9 +7224,9 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("restart-csl",       Lrestart_lisp_0),   \
     SETUP_TABLE_SELECT("restart-lisp",      Lrestart_lisp_0),   \
     SETUP_TABLE_SELECT("return",            Lreturn_0),         \
-    SETUP_TABLE_SELECT("return",            Lreturn_0),         \
     SETUP_TABLE_SELECT("stop",              Lstop_0),           \
     SETUP_TABLE_SELECT("terpri",            Lterpri),           \
+    SETUP_TABLE_SELECT("thread_id",         Lthread_id),        \
     SETUP_TABLE_SELECT("time",              Ltime),             \
     SETUP_TABLE_SELECT("vector",            Lvector_0),
 
@@ -7679,6 +7293,8 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("code-char",         Lcodechar),         \
     SETUP_TABLE_SELECT("compress",          Lcompress),         \
     SETUP_TABLE_SELECT("spaces",            Lspaces),           \
+    SETUP_TABLE_SELECT("condvar_notify_all", Lcondvar_notify_all), \
+    SETUP_TABLE_SELECT("condvar_notify_one", Lcondvar_notify_one), \
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
     SETUP_TABLE_SELECT("eval",              Leval),             \
@@ -7737,11 +7353,14 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("getd",              Lgetd),             \
     SETUP_TABLE_SELECT("length",            Llength),           \
     SETUP_TABLE_SELECT("linelength",        Llinelength),       \
+    SETUP_TABLE_SELECT("jointhread",        Ljoin_thread),      \
     SETUP_TABLE_SELECT("list2string",       Llist2string),      \
     SETUP_TABLE_SELECT("load-module",       Lload_module),      \
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_1),         \
     SETUP_TABLE_SELECT("mkvect",            Lmkvect),           \
     SETUP_TABLE_SELECT("not",               Lnull),             \
+    SETUP_TABLE_SELECT("mutexlock",         Lmutex_lock),       \
+    SETUP_TABLE_SELECT("mutexunlock",       Lmutex_unlock),     \
     SETUP_TABLE_SELECT("null",              Lnull),             \
     SETUP_TABLE_SELECT("onep",              Lonep),             \
     SETUP_TABLE_SELECT("plist",             Lplist),            \
@@ -7820,6 +7439,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("vectorp",           Lvectorp),          \
     SETUP_TABLE_SELECT("wrs",               Lwrs),              \
     SETUP_TABLE_SELECT("vector",            Lvector_1),         \
+    SETUP_TABLE_SELECT("thread",            Lthread),           \
     SETUP_TABLE_SELECT("zerop",             Lzerop),
 
 #define SETUP2                                                  \
@@ -7850,6 +7470,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("logxor2",           Llogxor_2),         \
     SETUP_TABLE_SELECT("apply",             Lapply),            \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_2),       \
+    SETUP_TABLE_SELECT("condvar_wait",      Lcondvar_wait),     \
     SETUP_TABLE_SELECT("cons",              Lcons),             \
     SETUP_TABLE_SELECT("eq",                Leq),               \
     SETUP_TABLE_SELECT("neq",               Lneq),              \
@@ -7919,6 +7540,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("rplaca",            Lrplaca),           \
     SETUP_TABLE_SELECT("rplacd",            Lrplacd),           \
     SETUP_TABLE_SELECT("set",               Lset),              \
+    SETUP_TABLE_SELECT("thread2",           Lthread2),          \
     SETUP_TABLE_SELECT("vector",            Lvector_2),
 
 #define SETUP3                                                  \
@@ -8135,44 +7757,40 @@ void setup()
 // setup code, so I can omit all checks for error conditions.
     int i;
     undefined = lookup("~indefinite-value~", 18, 3);
-    qflags(undefined) |= flagGLOBAL;
-    qvalue(undefined) = undefined;
+    global_symbol(undefined);
+    par::symval(undefined) = undefined;
     nil = lookup("nil", 3, 3);
-    qflags(nil) |= flagGLOBAL;
-    qvalue(nil) = nil;
-    lisptrue = lookup("t", 1, 3);
-    qflags(lisptrue) |= flagGLOBAL;
-    qvalue(lisptrue) = lisptrue;
-//    symfluid = lookup("fluid", 5, 3);
-//    symglobal = lookup("global", 6, 3);
-//    Lput(nil, nil, symglobal, lisptrue);
-//    Lput(nil, lisptrue, symglobal, lisptrue);
-//    Lput(nil, undefined, symglobal, lisptrue);
+    global_symbol(nil);
+    par::symval(nil) = nil;
 
-    qvalue(echo = lookup("*echo", 5, 3)) = nil;
-// interactive ? nil : lisptrue;
-    qflags(echo) |= flagFLUID;
-//    Lput(nil, echo, symfluid, lisptrue);
-    {   LispObject nn;
-        qvalue(nn = lookup("*nocompile", 10, 3)) = lisptrue;
-        qflags(nn) |= flagFLUID;
-//        Lput(nil, nn, symfluid, lisptrue);
+    lisptrue = lookup("t", 1, 3);
+    global_symbol(lisptrue);
+    par::symval(lisptrue) = lisptrue;
+
+    echo = lookup("*echo", 5, 3);
+    fluid_symbol(echo);
+    par::symval(echo) = interactive ? nil : lisptrue;
+
+    {
+        LispObject nn = lookup("*nocompile", 10, 3);
+        fluid_symbol(nn);
+        par::symval(nn) = lisptrue;
     }
-    qvalue(lispsystem = lookup("lispsystem*", 11, 1)) =
+
+    lispsystem = lookup("lispsystem*", 11, 1);
+    global_symbol(lispsystem);
+    par::symval(lispsystem) =
         list2star(lookup("vsl", 3, 1), lookup("csl", 3, 1),
                   list2star(lookup("embedded", 8, 1),
                       cons(lookup("image", 5, 3),
                            makestring(imagename, strlen(imagename))), nil));
-    qflags(lispsystem) |= flagGLOBAL;
-//    Lput(nil, lispsystem, symglobal, lisptrue);
     quote = lookup("quote", 5, 3);
     backquote = lookup("`", 1, 3);
     comma = lookup(",", 1, 3);
     comma_at = lookup(",@", 2, 3);
     eofsym = lookup("$eof$", 5, 3);
-    qflags(eofsym) |= flagGLOBAL;
-//    Lput(nil, eofsym, symglobal, lisptrue);
-    qvalue(eofsym) = eofsym;
+    global_symbol(eofsym);
+    par::symval(eofsym) = eofsym;
     symlambda = lookup("lambda", 6, 3);
     expr = lookup("expr", 4, 3);
     subr = lookup("subr", 4, 3);
@@ -8182,15 +7800,18 @@ void setup()
     input = lookup("input", 5, 3);
     output = lookup("output", 6, 3);
     pipe = lookup("pipe", 4, 3);
-    qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
-    qflags(dfprint) |= flagFLUID;
-//    Lput(nil, dfprint, symfluid, lisptrue);
-    qvalue(symraise = lookup("*raise", 6, 3)) = nil;
-    qvalue(symlower = lookup("*lower", 6, 3)) = lisptrue;
-    qflags(symraise) |= flagFLUID;
-    qflags(symlower) |= flagFLUID;
-//    Lput(nil, symraise, symfluid, lisptrue);
-//    Lput(nil, symlower, symfluid, lisptrue);
+    dfprint = lookup("dfprint*", 8, 3);
+    fluid_symbol(dfprint);
+    par::symval(dfprint) = nil;
+
+    symraise = lookup("*raise", 6, 3);
+    symlower = lookup("*lower", 6, 3);
+    fluid_symbol(symraise);
+    fluid_symbol(symlower);
+    par::symval(symraise) = nil;
+    par::symval(symlower) = lisptrue;
+    // Lput(nil, symraise, symfluid, lisptrue);
+    // Lput(nil, symlower, symfluid, lisptrue);
     cursym = nil;
     work1 = work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
@@ -8380,6 +8001,10 @@ void *relocate_fn(void *x)
 
 int warm_start_1(gzFile f, int *errcode)
 {
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = false;
+#endif
+
     uintptr_t i, b1;
     uint32_t setupsize;
     char (*imagesetup_names)[MAX_NAMESIZE];
@@ -8451,7 +8076,7 @@ int warm_start_1(gzFile f, int *errcode)
         setuphash2v[h] = setup_defs[i];
     }
 // The hash tables that cope with entrypoints are now in place - next
-// the reliable heap bases can be reloaded. I am going to assume that
+// the reliable heap listbases can be reloaded. I am going to assume that
 // the sizes of these match between image file and running system.
 // I should probably encode the sizes as part of the image format so as
 // to police that...
@@ -8625,7 +8250,7 @@ int warm_start_1(gzFile f, int *errcode)
 // Now the data is all in place, but heap1 may have its bytes in a bad order
 // and it certainly contains address references that relate to the computer
 // that created the image, not the one that is now running. So I need to
-// scan and fix things up. First deal with the list bases...
+// scan and fix things up. First deal with the list listbases...
     for (i=0; i<BASES_SIZE; i++)
         listbases[i] = relocate(listbases[i]);
     for (i=0; i<OBHASH_SIZE; i++)
@@ -8645,6 +8270,7 @@ int warm_start_1(gzFile f, int *errcode)
     b1 = 0;
     fr1 = ((block_header *)blocks_by_age[b1])->h1base;
     lim1 = ((block_header *)blocks_by_age[b1])->h1top;
+
     while (fr1 != fringe1)
     {   LispObject h, w;
         if (fr1 == lim1 )
@@ -8659,7 +8285,8 @@ int warm_start_1(gzFile f, int *errcode)
             continue;
         }
         if (!isHDR(h = qcar(fr1))) // A simple cons cell
-        {   qcar(fr1) = relocate(h);
+        {
+            qcar(fr1) = relocate(h);
             fr1 += sizeof(LispObject);
             if (fr1 == lim1 )
             {   b1++;
@@ -8682,8 +8309,24 @@ int warm_start_1(gzFile f, int *errcode)
 // having memory in (possibly) several chunks. However it is not so the
 // exact layout is relied upon here. The first chunk of code here relocates
 // that part of the symbol that lies within the current segment of heap.
-                    if (fr1+sizeof(LispObject) < lim1)
+                    if (fr1+sizeof(LispObject) < lim1) {
                         qvalue(w) = relocate(qvalue(w));
+                        // during warm_start, all values are still stored globally
+                        // we first relocate them then copy to thread_local
+                        // TODO VB: separate function
+                        if (!is_global(w)) {
+                            // reallocate on thread_local storage
+                            int loc = par::allocate_symbol();
+                            LispObject val = qvalue(w);
+                            qvalue(w) = packfixnum(loc);
+                            if (is_fluid(w)) {
+                                par::symval(w) = val;
+                                par::fluid_globals[loc] = val;
+                            } else {
+                                par::local_symbol(loc) = val;
+                            }
+                        }
+                    }
                     if (fr1+2*sizeof(LispObject) < lim1)
                         qplist(w) = relocate(qplist(w));
                     if (fr1+3*sizeof(LispObject) < lim1)
@@ -8705,6 +8348,7 @@ int warm_start_1(gzFile f, int *errcode)
                     if (fr1+11*sizeof(LispObject) < lim1)
                         qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
                     fr1 += SYMSIZE*sizeof(LispObject);
+                    
 // Now if the symbol was split across two heap segments I need to relocate
 // the parts of it at the start of the next heap block. What a mess!
                     if (fr1 > lim1 )
@@ -8716,8 +8360,24 @@ int warm_start_1(gzFile f, int *errcode)
                         newblock = fr1;
                         fr1 += (leftover - SYMSIZE*sizeof(LispObject));
                         w = fr1 + tagSYMBOL;
-                        if (fr1+sizeof(LispObject) >= newblock)
+                        if (fr1+sizeof(LispObject) >= newblock) {
                             qvalue(w) = relocate(qvalue(w));
+                            // during warm_start, all values are still stored globally
+                            // we first relocate them then copy to thread_local
+                            // TODO VB: separate function
+                            if (!is_global(w)) {
+                                // reallocate on thread_local storage
+                                int loc = par::allocate_symbol();
+                                LispObject val = qvalue(w);
+                                qvalue(w) = packfixnum(loc);
+                                if (is_fluid(w)) {
+                                    par::symval(w) = val;
+                                    par::fluid_globals[loc] = val;
+                                } else {
+                                    par::local_symbol(loc) = val;
+                                }
+                            }
+                        }
                         if (fr1+2*sizeof(LispObject) >= newblock)
                             qplist(w) = relocate(qplist(w));
                         if (fr1+3*sizeof(LispObject) >= newblock)
@@ -8793,7 +8453,17 @@ int warm_start_1(gzFile f, int *errcode)
     }
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
-     qvalue(echo) = nil; // interactive ? nil : lisptrue;
+     par::symval(echo) = interactive ? nil : lisptrue;
+
+    // Restore the work bases to thread_local storage.
+     work1 = work1_base;
+     work2 = work2_base;
+     work1_base = NULLATOM;
+     work2_base = NULLATOM;
+
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = true;
+#endif
      return 0;
 }
 
@@ -8899,7 +8569,7 @@ static inline int write_image_1(gzFile f, int *errcode)
         (int)sizeof(setup_names)) return 1;
     if (gzwrite(f, setup_defs, (unsigned int)sizeof(setup_defs)) !=
         (int)sizeof(setup_defs)) return 1;
-// There are a number of list bases that need to be saved. If the
+// There are a number of list listbases that need to be saved. If the
 // number or layout of these ever changes then it will be important to
 // change VERSION, and a discrepancy in that must cause images to
 // be rejected as un-re-loadable.
@@ -9007,9 +8677,48 @@ static inline int write_image_1(gzFile f, int *errcode)
 
 void write_image(gzFile f)
 {
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = false;
+#endif
+
+    // This should destruct all threads and thus wait for them to join.
+    // TODO VB: don't care about non-termination yet
+    par::active_threads.clear();
+
+    // at this stage only the main thread is running. we can store
+    // the work variables inside listbases for preservation
+    work1_base = work1;
+    work2_base = work2;
+
     int errcode;
     inner_reclaim(C_stackbase); // To compact memory.
     inner_reclaim(C_stackbase); // in the conservative case GC twice.
+
+    // VB: we want to find all symbols and move everything back from thread_local data to global
+    // THis has do be done after compaction, as we invalidate the [symval] calls.
+    for (size_t i = 0; i < OBHASH_SIZE; i += 1) {
+        for (LispObject l = obhash[i]; isCONS(l); l = qcdr(l)) {
+            LispObject x = qcar(l);
+            if (isSYMBOL(x) && !is_global(x)) {
+                // If it wasn't a global symbol, the value is thread_local;
+                int loc = qfixnum(qvalue(x));
+                if (is_fluid(x)) {
+                    // VB: I'm basically assuming here that we only care about the global
+                    // value of a fluid on preserve. This further assumes preserve is called
+                    // only in the global scope.
+                    qvalue(x) = par::fluid_globals[loc];
+
+                    // TODO: this is a hack. need to keep both values
+                    if (qvalue(x) == undefined) {
+                        qvalue(x) = par::local_symbol(loc);
+                    }
+                } else {
+                    qvalue(x) = par::local_symbol(loc);
+                }
+            }
+        }
+    }
+
     hexdump();
     switch (write_image_1(f, &errcode))
     {
@@ -9027,6 +8736,10 @@ void write_image(gzFile f)
         else printf("+++ Error compressing image file (code=%d)\n", errcode);
         my_exit(EXIT_FAILURE);
     }
+
+#ifdef DEBUG_GLOBALS
+    par::debug_safe = true;
+#endif
 }
 
 static void el_tidy() {
@@ -9043,6 +8756,7 @@ void setup_prompt() {
     if (stdin_tty) {
         el_struct = el_init("vsl", stdin, stdout, stderr);
         el_history = history_init();
+
         atexit(el_tidy);
         history(el_history, &el_history_event, H_SETSIZE, 1000);
         el_set(el_struct, EL_PROMPT, get_prompt);
@@ -9632,6 +9346,10 @@ int main(int argc, char *argv[])
     nblocks = 1;
     C_stackbase = (LispObject *)((intptr_t)&inputfilename &
                                     -sizeof(LispObject));
+
+    // main threads is always id 0
+    par::init_thread_data(0, C_stackbase);
+
     coldstart = 0;
     interactive = 1;
 #ifdef DEBUG
@@ -9654,11 +9372,12 @@ int main(int argc, char *argv[])
 //        filename   read from that file rather than from the standard input.
         if (strcmp(argv[i], "-z") == 0) coldstart = 1;
         else if (strncmp(argv[i], "-i", 2) == 0)
-        {   if (argv[i][2] != 0) strcpy(imagename, argv[i]+2);
+        {   if (argv[i][2]!=0) strcpy(imagename, argv[i]+2);
             else if (i<argc-1) strcpy(imagename, argv[++i]);
         }
         else if (argv[i][0] != '-') inputfilename = argv[i], interactive = 0;
     }
+    printf("imagename = <%s>\n", imagename);
     printf("VSL version %d.%.3d\n", IVERSION, FVERSION); fflush(stdout);
     linepos = 0;
     for (size_t i=0; i<MAX_LISPFILES; i++) lispfiles[i] = 0;
@@ -9714,7 +9433,7 @@ int main(int argc, char *argv[])
 // In general through setup (and I count this as still being setup)
 // I will code on the basis that there will not be any garbage collection
 // so I do not need to think about the effects of data movement during GC.
-                qvalue(lookup(argv[i]+2, (d1-argv[i])-2, 3)) =
+                par::symval(lookup(argv[i]+2, (d1-argv[i])-2, 3)) =
                     makestring(d1+1, strlen(d1+1));
             }
         }
@@ -9768,6 +9487,19 @@ int main(int argc, char *argv[])
             coldstart = 0;
         }
     }
+
+#ifdef DEBUG_GLOBALS
+    std::ofstream fout("global_syms.log", std::ios_base::app);
+    fout << "global symbols for command: " << std::endl;
+    for (int i = 0; i < argc; i += 1) {
+        fout << argv[i] << ' ';
+    }
+    fout << std::endl;
+    for (auto s: par::debug_globals) {
+        fout << s << " ";
+    }
+    fout << std::endl << std::endl;
+#endif
     return 0;
 }
 

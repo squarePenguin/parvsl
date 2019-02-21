@@ -6407,7 +6407,7 @@ void setup()
     input = lookup("input", 5, 3);
     output = lookup("output", 6, 3);
     pipe = lookup("pipe", 4, 3);
-    qvalue(dfprint = lookup("dfprint*", 6, 3)) = nil;
+    qvalue(dfprint = lookup("dfprint*", 8, 3)) = nil;
     qflags(dfprint) |= flagFLUID;
     Lput(nil, dfprint, symfluid, lisptrue);
     bignum = lookup("~bignum", 7, 3);
