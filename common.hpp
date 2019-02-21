@@ -327,8 +327,8 @@ LispObject *C_stackbase;
 // Hmm - a full copy of everything that makes up Reduce involved around
 // 40K distinct symbols...
 
-INLINE const size_t OBHASH_SIZE   = 10007;
-INLINE const int MAX_LISPFILES = 30;
+INLINE constexpr size_t OBHASH_SIZE   = 10007;
+INLINE constexpr int MAX_LISPFILES = 30;
 
 // Some Lisp values that I will use frequently...
 // I am not quite clear that there would be any nice way to store all these
