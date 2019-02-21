@@ -30,6 +30,8 @@ language C. It is fully capable of building the entirety of REDUCE, supports all
 platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
 of being interpreted.
 
+*** TODO medium sized program. say no of lines
+
 ** TODO Argue for the benefits of multithreading
 
 The idea of using parallel computing to speed up computer algebra computing has come
@@ -43,6 +45,11 @@ a limitation in speed gains from new hardware.
 
 
 * TODO Preparation
+
+** TODO ParVSL
+
+I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
+ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
 
 ** From C to C++
 
@@ -62,22 +69,64 @@ code and then which platforms these compilers can target.
 The first change I have made to the implementation is to clear it of any incompatible code and compile it
 with a C++ compiler. This was a trivial task and mostly involved adding a few more explicit casts.
 However, I have been slowly transitioning the code from idiomatic C++ as I analysed more parts of it
-and became confident those changes wouldn't affect the semantics.
-
-** TODO ParVSL
-
-I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
-
+and became confident those changes wouldn't affect the semantics of the program.
 
 ** TODO Throughput vs latency
+
+WHen optimising for performance in a programming language, we have to analyse the tradeoff between
+total thoughput and latency. Optimising for latency means minimising the duration of any individual
+task in the program, and increasing availability. Optimising for throughput involves minimising the
+total running time of the program. For example, a web server would benefit more from reducing latency
+of any individual request.
+
+In a CAS program the user is most likely to care about throughput, i.e. compute the output of large 
+problem sizes as quickly as possible. The program is single-user and has a simple interface. The only case
+for low latency is in the responsiveness of the graphical user interface. This is already provided by the 
+operating system so our main goal is directed towards minimising throughput in the application. This is particularly
+important when designing the garbage collector, described below.
+
 ** TODO Memory allocation
-Memory allocation is made in large continuous blocks. Global heap pointer
-variables manage these blocks and generally handle Lisp allocations
+
+Memory allocation is made in large continuous blocks. The intrepreter allocates increasingly large
+blocks using ~malloc~ and manages them to provide a continuous memory model.
+Global heap pointer variables manage these blocks and generally handle Lisp allocations
 by designating enough space within these blocks and incrementing the
 heap pointer.
 ** TODO Garbage collector
-*** TODO Conservative GC
+
+An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer
+to design code without having to worry about the lifecycle of their data, the internal memory model and
+managing pointers. This makes Lisp code significantly easier to write, leaving the burden of providing safety and
+efficiency to the compiler.
+
+In effect, the garbage collector is an important component of the VSL interpreter and careful considerations
+have to be made when modifying it. First of all, any bugs in the garbage collector may leave the memory in 
+an invalid state, corrupting the state of the program and leading to undefined behaviour in C. Such errors 
+are also very difficult to spot and debug, as they can go undetected until the particular region of memory
+is accessed again.
+
 *** TODO Cheaney's algorithm
+
+The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
+Before the first garbage collection cycle, memory can simply be allocated in a continuous fashion, making it
+compact and fast. When the garbage collector finds unreachable objects and eliminates them, they will leave /gaps/ behind
+and causing /fragmentation/. Not dealing with fragmentation of memory leads to wasted memory. Keeping track of the gaps
+and filling them with objects of the right size involves extra book-keeping which can be quite expensive. Ultimately,
+it is impossible to guarantee the gaps are filled efficiently, because the garbage collector cannot predict future
+memory allocations, and thus heuristics have to be employed.
+
+VSL avoids this problem entirely by using a copying garbage collector. This means it compacts memory by moving 
+traceable objects to a new region. The unreachable objects are simply not moved and they will eventually be overwritten. 
+This method has the advantage that it fully compacts memory, fixing the issue of fragmentation in an efficient,
+straight-forward way. The main trade-off this approach has is the total memory usage. A region of memory at least
+as large as the one in use has to be used to copy the live objects into. In addition, when a very large amount 
+of memory is in use, the copying of all live memory might become more expensive than managing the free memory.
+The problem sizes in REDUCE are usually not bound by memory on modern computers, with none of the applications
+being known to use more than one gigabyte. This makes the copying approach suitable for the language. 
+
+*** TODO Conservative GC
+
+
 
 ** TODO Saving state to disk
 
