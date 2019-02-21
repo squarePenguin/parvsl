@@ -31,6 +31,14 @@ platforms and architectures, and is well optimised for speed, minimising the per
 of being interpreted.
 
 *** TODO medium sized program. say no of lines
+*** TODO Concurrency stuff
+explain there was 
+*** TODO have a hard part
+
+*** TODO Talk about bugs in VSL
+*** TODO enough of the system has to work just to evalute RLISP
+*** TODO talk about planning
+*** TODO describe how I could have debugged it well
 
 ** TODO Argue for the benefits of multithreading
 
@@ -223,13 +231,29 @@ Finally, primitive functions for threading were added to the language. They simp
  
 ** TODO Thread communication
 ** TODO Lock-free symbol lookup
+** TODO Bugs in VSL
+*** The symbol `x`
+
 
 * TODO Evaluation
 
 ** TODO Thread pool
+
+** Stress tests
 ** TODO Parallel implementation of common algorithms
+*** FFT
+*** 
 ** TODO Single-threaded building of Reduce
+*** Coverage
+** TODO Parallel building of Reduce
+** TODO baby groebner base package
 ** TODO Thread-local performance on Windows
+
+*** TODO look at other thread-supporting lisps systems
+Chez scheme?
+
+
+
 
 * TODO Conclusions
 
