@@ -56,9 +56,19 @@ vsl-arith:	vsl-arith.cpp arithlib.hpp
 		vsl-arith.cpp $(LIBS) -o vsl-arith \
 		2>&1 | tee vsl-arith.log
 
+parvsl-arith:	parvsl-arith.cpp arithlib.hpp
+	g++ $(CFLAGS) -pthread \
+		parvsl-arith.cpp $(LIBS) -o parvsl-arith \
+		2>&1 | tee parvsl-arith.log
+
 fastvsl-arith:	vsl-arith.cpp arithlib.hpp
 	g++ $(FASTCFLAGS) \
 		vsl-arith.cpp $(LIBS) -o fastvsl-arith \
+		2>&1 | tee fastvsl-arith.log
+
+fastparvsl-arith:	parvsl-arith.cpp arithlib.hpp
+	g++ $(FASTCFLAGS) -pthread \
+		parvsl-arith.cpp $(LIBS) -o fastparvsl-arith \
 		2>&1 | tee fastvsl-arith.log
 
 # parvsl and fastparvsl represent the version of the code that will
@@ -86,8 +96,14 @@ fastvsl.img:	fastvsl library.lsp vsl.lsp
 vsl-arith.img:	vsl-arith library-arith.lsp vsl-arith.lsp
 	time ./vsl-arith -z library-arith.lsp | tee vsl-arith.img.log
 
+parvsl-arith.img:	parvsl-arith library-arith.lsp vsl-arith.lsp
+	time ./parvsl-arith -z library-arith.lsp | tee parvsl-arith.img.log
+
 fastvsl-arith.img:	fastvsl-arith library-arith.lsp vsl-arith.lsp
 	time ./fastvsl-arith -z library-arith.lsp | tee fastvsl-arith.img.log
+
+fastparvsl-arith.img:	fastparvsl-arith library-arith.lsp vsl-arith.lsp
+	time ./fastparvsl-arith -z library-arith.lsp | tee fastparvsl-arith.img.log
 
 parvsl.img:	parvsl parlibrary.lsp parvsl.lsp
 	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
@@ -147,6 +163,13 @@ fastreduce-arith:	fastvsl-arith
 	time ./fastvsl-arith -z -ifastreduce-arith.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
 		buildreduce-arith.lsp | tee fastreduce-arith.log
+
+fastparreduce-arith:	fastparvsl-arith fastparvsl-arith.img
+	mkdir -p fastparreduce-arith.img.modules
+	rm -f fastparreduce-arith.img.modules/* fastparreduce-arith.img inline-defs.dat
+	time ./fastparvsl-arith -z -ifastparreduce-arith.img -D@srcdir=. -D@reduce=.. \
+		-Dnoinlines=t \
+		buildreduce-arith.lsp | tee fastparreduce-arith.log
 
 # rcore is a core of Reduce. Building it will be a LOT cheaper than
 # building the full copy of Reduce, so this will be good for testing an

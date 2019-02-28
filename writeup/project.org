@@ -195,3 +195,25 @@ echo
 dfprint
 
 I was not shallow binding arguments +5 properly
+
+* Groebner
+
+multi-variate polynomials
+express as:
+((dx dy d) coeff) ...)
+
+dx is degree in x etc.
+
+there are different orderings for these pairs
+start with +, -, * on that
+
+e.g (sqrt(2)^2 - 2) = 0
+not conffluent, won't always find a solution
+
+while you can
+find critical pairs:
+
+
+when you get stuck: it's a groebner base
+allows you to work with many multivariate polynomial equations
+generilsation of gcd and gaussian

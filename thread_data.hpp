@@ -39,7 +39,7 @@ void add_debug_global(LispObject s) {
     debug_globals.insert(ns);
 }
 
-#endif
+#endif // DEBUG_GLOBALS
 
 static std::atomic_int num_symbols(0);
 
@@ -185,21 +185,21 @@ private:
 public:
     Gc_lock() : m(), lock(m) {
         assert(gc_on);
-        std::cerr << "waiting gc lock " << thread_data.id <<  std::endl;
+        // std::cerr << "waiting gc lock " << thread_data.id <<  std::endl;
 
         int stack_var = 0;
         thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
         paused_threads += 1;
         gc_waitall.wait(lock, []() { 
-            std::cerr << "paused: " << paused_threads << std::endl;
-            std::cerr << "total: " << num_threads << std::endl;
+            // std::cerr << "paused: " << paused_threads << std::endl;
+            // std::cerr << "total: " << num_threads << std::endl;
             return paused_threads == num_threads; });
-        std::cerr << "Gc_lock " << thread_data.id <<  std::endl;
+        // std::cerr << "Gc_lock " << thread_data.id <<  std::endl;
     }
 
     ~Gc_lock() {
-        std::cerr << "~Gc_lock " << thread_data.id << std::endl;
+        // std::cerr << "~Gc_lock " << thread_data.id << std::endl;
         paused_threads -= 1;
         gc_on = false;
         thread_data.C_stackhead = nullptr;

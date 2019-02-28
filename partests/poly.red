@@ -83,6 +83,6 @@ end;
 
 a := {21, 5, 0, -2, 3, 6};
 b := {-1, 3, 1, 4, -5};
-c := multiply_polys(a, b);
-c2 := multiply_polys2(a, b);
-cp := multiply_polys_par(a, b);
+% c := multiply_polys(a, b);
+% c2 := multiply_polys2(a, b);
+% cp := multiply_polys_par(a, b);

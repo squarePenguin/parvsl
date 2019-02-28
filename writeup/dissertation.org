@@ -1,0 +1,406 @@
+#+TITLE: Implementing parallelism in Lisp for REDUCE
+#+SUBTITLE: Progress report
+#+AUTHOR: Andrei Vlad Badelita
+#+EMAIL: avb40@cam.ac.uk
+
+* Introduction
+
+The motivation of this project is to explore the implementation of multi-threading
+capabilities within a working compiler and assess the benefits and tradeoffs it brings
+to an established, real-world application with a large, actively-developed body of code. 
+
+** REDUCE
+
+[[https://reduce-algebra.sourceforge.io/][REDUCE]] is a portable general-purpose algebra system (CAS). It enables symbolic
+manipulation of mathematical expressions and provides a wide range of algorithms
+to solve problems spanning many fields, with arbitrary precision numerical approximation. 
+It has a friendly user interface and can display maths and generate graphics.
+
+REDUCE is one of a few open-source general-purpose CAS programs, alongside Maxima and Axiom.
+The three projects are all built on top of different Lisp kernels. At the time of this writing,
+none of these projects have any multi-threaded capabilities. My aim is to remove this limitation
+for REDUCE. The project is using its own Lisp dialect which is similar to Common Lisp, but has its
+own design and set of capabilities.
+
+** VSL
+
+Over the years, there have been multiple implementations of the Lisp compiler REDUCE is using, with
+different goals: PSL, CSL and VSL. VSL is an interpreted language written in the programming
+language C. It is fully capable of building the entirety of REDUCE, supports all the major 
+platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
+of being interpreted.
+
+*** TODO medium sized program. say no of lines
+*** TODO Concurrency stuff
+explain there was 
+*** TODO have a hard part
+
+*** TODO Talk about bugs in VSL
+*** TODO enough of the system has to work just to evalute RLISP
+*** TODO talk about planning
+*** TODO describe how I could have debugged it well
+
+** TODO Argue for the benefits of multithreading
+
+The idea of using parallel computing to speed up computer algebra computing has come
+up in research papers for many years ~TODO reference it~, but much of the activity now
+predates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
+they now provide. Moreover, advancements in single-core CPU performance has slowed down
+significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
+area of imrpovement in these new CPUs is their core count and number of hardware threads.
+Binding the performance of Reduce to single-threaded performance is likely to lead to
+a limitation in speed gains from new hardware.
+
+
+* TODO Preparation
+
+** TODO ParVSL
+
+I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
+ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
+
+** From C to C++
+
+The VSL language was written in the programming language C. C is a language with no standardised
+multi-threaded model and no native support for multi-core programming. Furthermore, it has no well-defined
+memory model, and no ordering of memory accesses. Multi-threaded programming
+is only possible in C through a third-party library, such as ~Windows threads~ or the 
+the ~POSIX threads~ library on UNIX systems. Support further has to be guaranteed by individual compilers
+and operating systems and can break between versions.
+
+C++ is a superset of C and can compile existing, standard C code easily. The C++11 standard addresses the
+above omissions, making C++ a multi-threaded language. While in some cases the implementation uses the same
+libraries as the C equivalend (e.g POSIX), we do not have to think about these details and the code
+we write is fully portable. The only requirement is that a C++11 compliant compiler is used to compile the
+code and then which platforms these compilers can target.
+
+The first change I have made to the implementation is to clear it of any incompatible code and compile it
+with a C++ compiler. This was a trivial task and mostly involved adding a few more explicit casts.
+However, I have been slowly transitioning the code from idiomatic C++ as I analysed more parts of it
+and became confident those changes wouldn't affect the semantics of the program.
+
+** DONE Throughput vs latency
+   CLOSED: [2019-02-27 Wed 22:47]
+
+WHen optimising for performance in a programming language, we have to analyse the tradeoff between
+total thoughput and latency. Optimising for latency means minimising the duration of any individual
+task in the program, and increasing availability. Optimising for throughput involves minimising the
+total running time of the program. For example, a web server would benefit more from reducing latency
+of any individual request.
+
+In a CAS program the user is most likely to care about throughput, i.e. compute the output of large 
+problem sizes as quickly as possible. The program is single-user and has a simple interface. The only case
+for low latency is in the responsiveness of the graphical user interface. This is already provided by the 
+operating system so our main goal is directed towards minimising throughput in the application. This is particularly
+important when designing the garbage collector, described below.
+
+** TODO Memory allocation
+
+Memory allocation is made in large continuous blocks. The intrepreter allocates increasingly large
+blocks using ~malloc~ and manages them to provide a continuous memory model.
+Global heap pointer variables manage these blocks and generally handle Lisp allocations
+by designating enough space within these blocks and incrementing the
+heap pointer.
+** TODO Garbage collector
+
+An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer
+to design code without having to worry about the lifecycle of their data, the internal memory model and
+managing pointers. This makes Lisp code significantly easier to write, leaving the burden of providing safety and
+efficiency to the compiler.
+
+In effect, the garbage collector is an important component of the VSL interpreter and careful considerations
+have to be made when modifying it. First of all, any bugs in the garbage collector may leave the memory in 
+an invalid state, corrupting the state of the program and leading to undefined behaviour in C. Such errors 
+are also very difficult to spot and debug, as they can go undetected until the particular region of memory
+is accessed again.
+
+*** TODO Cheaney's algorithm
+
+The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
+Before the first garbage collection cycle, memory can simply be allocated in a continuous fashion, making it
+compact and fast. When the garbage collector finds unreachable objects and eliminates them, they will leave /gaps/ behind
+and causing /fragmentation/. Not dealing with fragmentation of memory leads to wasted memory. Keeping track of the gaps
+and filling them with objects of the right size involves extra book-keeping which can be quite expensive. Ultimately,
+it is impossible to guarantee the gaps are filled efficiently, because the garbage collector cannot predict future
+memory allocations, and thus heuristics have to be employed.
+
+VSL avoids this problem entirely by using a copying garbage collector. This means it compacts memory by moving 
+traceable objects to a new region. The unreachable objects are simply not moved and they will eventually be overwritten. 
+This method has the advantage that it fully compacts memory, fixing the issue of fragmentation in an efficient,
+straight-forward way. The main trade-off this approach has is the total memory usage. A region of memory at least
+as large as the one in use has to be used to copy the live objects into. In addition, when a very large amount 
+of memory is in use, the copying of all live memory might become more expensive than managing the free memory.
+The problem sizes in REDUCE are usually not bound by memory on modern computers, with none of the applications
+being known to use more than one gigabyte. This makes the copying approach suitable for the language. 
+
+Cheaney's algorithm is a method of stop-the-world copying garbage collection. The virtual /heap/ is divided into
+two halves, and only one half is in use for allocations. The other half is considered free and used during garbage
+collection. When the first half is full and garbage collection is triggered, all traceable objects are copied over
+to the second half. Then, the two halves are swapped.
+
+To start the tracing we need to consider a root set: a subset of object which are guaranteed to be accessible.
+One example of elements in the root set is the table of symbols; more precisely all symbols which are defined at the start
+of the garbage collection. The stack will also pointers to objects and must be scanned when computing the root set.
+While these are the main compontents of the root set, the interpreter may contain others depending on language features
+and implementation, all of which must be spotted and added.
+
+Once we have distinguished a root set, we can trace all references to build the reachable set. Objects may contain references
+to other objects, which are also considered reachable. For example, all elements of a list must be traced recursively. 
+The reachable set is the transitive closure of the reachability relation. All objects in the reachable set must be kept
+during collection, while eveything else may be safely collected.
+
+#+BEGIN_SRC C++
+uintptr_t heap1, fringe1, limit1; // allocations always happen 
+uintptr_t heap2, fringe2, limit2;
+
+uintptr_t allocate(size_t size) {
+  if (fringe1 + size > limit1) {
+    collect();
+  }
+
+  if (fringe1 + size > limit1) {
+     // We are out of memory.
+     // We either extend total memory or abort
+  }
+
+  uintptr_t result = fringe1;
+  fringe1 += size;
+  return result;
+}
+
+void collect() {
+  
+}
+
+#+END_SRC 
+
+*** TODO Conservative GC
+
+
+** TODO Saving state to disk
+
+* TODO Implementation
+
+
+** TODO Memory allocation
+
+
+All the memory is global and shared, and multiple-threads will often try
+to allocate concurently, causing contention. A naive solution to this problem
+would have been to use a mutex lock on allocations. While this approach would
+have been the simplest to implement it would also significantly slow down the language.
+Allocations are on the critical path of the runtime, and they are needed constantly.
+Serialising allocations is guaranteed to slow down the language enough to cancel 
+any advantage multi-threading brings to the language.
+
+Instead, the approach was to further split the memory into isolated regions.
+The term /segment/ will be used throughout to talk about a thread_local block 
+within memory. Just like before, memory is allocated to the segments in the continuous 
+fashion. A pointer indicates the start of the non-allocated part of the segment(the /fringe/.), 
+while another tells us the end of the segment. Now, contention is reduced to getting a new
+segment. Each thread only allocates within its own segment, so allocations do not require
+any synchronisation, and they still only require incrementing one variable in most
+cases.
+
+Global regions are are kept and handled in sorted order by their location in memory.
+
+Memory allocation are contained within a /segment/. When attempting to allocate for the first time,
+or after a garbage collection cycle, a thread will request a new segment. If there is not
+enough memory left to allocate a new segment, this will trigger a garbage collection cycle, and possibly
+extend total memory. Otherwise, TODO
+
+Each segment is defined by a /fringe/ and a /limit/. When a new object is allocated, the fringe is
+compared to the limit to test whether there is enough available space within the segment. If the segment
+cannot accommodate the requested allocation it is considered full and a new segment is requested.
+
+Sometimes, a new object might need to be allocated which is comparable or larger than the default segment size.
+
+
+The code was modified so that checks and operations on the global block "fringe"
+affect the thread-local segment fringe. The block fringe is only modified under a lock
+when a thread asks for a new segment. Segment sizes can be decided dinamically,
+but will generally be a minimum fixed size which has to be tuned for performance.
+The tradeoff here is performance vs memory. If the segments are too small then there
+will be contention as threads request new segments too often. When segments are larger than 
+needed, they hold chunks of memory from being used by other threads and can lead 
+to more garbage collection cycles. 
+
+** TODO Data races in the interpreter
+
+The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
+
+All named objects in the lifecycle of the program are /symbols/. All global and local variables, including
+special ones (like ~true~ or ~nil~) and function arguments are symbols. A global hash-table keeps track of
+all symbols. This means each names can only be in use in one place at once. 
+
+Lisp is a language with dynamic scope. 
+
+#+BEGIN_SRC ocaml
+let f x = x + y in
+let g () =
+  let y = 3 in
+  f 2
+in
+g ()
+#+END_SRC
+
+The above example will not compile in any static language such as OCaml or C++ 
+because the variable ~y~ is not defined in its scope.
+Most dynamic languages, even weakly typed ones, like Javascript or Python, will allow equivalent
+code as valid, but will encounter a runtime error because ~y~ is not defined.
+Lisp, and VSL in particular, has a mach looser concept of scope.
+In the example above, ~y~ is defined before the call of ~f~ and will remain defined until the
+call to ~g~ returns. 
+
+Shallow binding is the mechanism by which this is achieved. Each symbol is mapped to a single value.
+When a variable name is bound, e.g. as a function parameter name during a function call or through a
+~let~ statement, its old value is stored by the interpreter and replaced with the new value. At the end of the binding,
+the old value is restored. The main advantage of this method is performance. Old values can simply be saved
+on the stack:
+
+#+BEGIN_SRC ocaml
+let varName = expr1 in expr2
+#+END_SRC
+
+can be implemented as:
+
+#+BEGIN_SRC C++
+void implement_let(string varName, LispObject expr1, LispObject expr2) {
+  LispObject symbol = lookup_symbol(varName);
+  LispObject oldVal = value(symbol); // store the old value
+  value(symbol) = eval(expr1);       // replace with new value
+  eval(expr2);                       // evaluate the rest of the code
+  value(symbol) = oldVal;            // restore old value
+}
+#+END_SRC
+
+This mechanism was not designed with concurrency in mind, and is not thread-safe. 
+Many variable names are reused multiple times in a program, for example ~i, j, count~, etc.
+Multiple threads binding the same variable will cause override each other's values.
+
+I wanted to fix this while keeping the same dynamic scoping semantics for backward compatibility 
+and not affecting performance. To do this, I have allocated thread-local storage for symbols.
+Global symbols were unaffected, because rebinding them is illegal in the language. However,
+for non-globals I used a thread-local array to store the real value, and had the global storage
+location point to the array location. Each local symbol gets its own unique array index for the lifecycle
+of the program. Then, each thread will reserve that location within its local array for the symbol.
+Then, I created the function:
+
+#+BEGIN_SRC C++
+LispObject par_value(LispObject symbol) {
+  LispObject val = value(symbol);        // use the original value function here
+  if (is_global(symbol)) return val;     // global symbols remain unaffected  
+
+  // ASSERT: val is a Location otherwise
+  Location loc = value_to_location(val); // "extract" location, an integer type
+  return local_value(loc);               // get the thread_local value at that location               
+}
+#+END_SRC
+
+I carefully replaced all calls to ~value~ to ~par_value~. Now, multiple threads accessing the same symbol
+can do so safely, as they will each access their own versions. This eliminates data races entirely.
+
+*** TODO make diagram
+ 
+
+
+** TODO Shared memory and global variables
+
+VSL has dynamic scoping and exhibits shallow binding. This means there is a global
+storage mapping each symbol to exactly one value. A variable is defined as long 
+as the symbol is assigned a value. The user can explicitly mark a symbol as global
+or fluid. A global symbol only has a global value and cannot be locally bound.
+A fluid symbol can have both a global value and a locally bound value. The way this
+is accomplished is by saving the global value on every binding and then restoring it
+as soon as the binding is over. 
+
+This shallow binding approach is incompatible with a multi-threaded program: a symbol
+could be locally bound to different values on different threads. One approach to solving the
+issue is to use a deep-binding approach: passing around an associative list mapping the symbols
+to values. The approach would add a penalty to performance, however it should be investigated
+how significant the trade-off is. Instead, I have modified the code to try to keep the
+shallow-binding. Global values work just as before and no modification is needed. For local and
+fluids however, I added a thread-local storage array. The global storage now only
+holds a pointer to the array location where the actual value is stored. This way, each thread can
+hold its own version of the symbol and modify it safely. For fluids, there will still be a global
+shared value. Since I already used the global storage for the pointer, I added one more global
+array, where the pointer indicates the global value.
+
+** TODO Thread data and garbage collection
+
+The garbage collector is stop-the-world and work by tracing reachable memory locations
+starting from a root set. There are two types of roots: ambiguous and unambigous. Unambiguous
+roots are the ones explicitly managed by the compiler, e.g the symbol table of variables.
+Since the compiler is written in C and memory is not tagged, we can also get ambigous pointer:
+values on the C stack which might be just values but could also be pointers to program storage.
+
+The handling of both of these root sets has to account for multiple running threads. All the new
+thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
+own stack so all the stacks has to be accounted for as the ambiguous root set. The latter is more complicated.
+All threads have to be paused before garbage collection can begin so that they do not interfere
+with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
+However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
+thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
+changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
+to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
+can proceed with the thread. This is still a work in progress.
+
+** TODO Saving state to disk and reloading
+
+One important feature of the language is the ability to preserve the state of the world at any
+time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
+preserving when some of the threads are running a computation is tricky to define properly. To simplify
+matter, I have decided that all threads have to be joined before preserving. This way, the state of
+the world is consistent and relatively easy to restore. I have modified parts of the code to write
+all the thread-local data back into global storage and then restore it when reloading. This way the same
+file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
+
+** TODO Implementing threads
+
+Once all the modifications above were made, implementing the actual multi-threading mechanism was an easy
+task. I used the standard library to start and join threads and created a thread table so that data about
+all threads can be accessed globally. WHen a  new thread is created, it registers a pointer to its thread-local
+data in the table. Using this, I added code to the garbage collector to handle all existing threads and
+extract the roots, but also to manage their allocation segments, which have to be reset after collection.
+Finally, primitive functions for threading were added to the language. They simply mirror their C++ counterparts.
+ 
+** TODO Thread communication
+** TODO Lock-free symbol lookup
+** TODO Bugs in VSL
+*** The symbol `x`
+
+
+* TODO Evaluation
+
+** TODO Thread pool
+
+** Stress tests
+** TODO Parallel implementation of common algorithms
+*** FFT
+*** 
+** TODO Single-threaded building of Reduce
+*** Coverage
+** TODO Parallel building of Reduce
+** TODO baby groebner base package
+** TODO Thread-local performance on Windows
+
+#+OPTIONS: :export none
+#+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
+| OS     | non-thread-local | thread-local |
+|--------+------------------+--------------|
+| Cygwin |            1.985 |       51.234 |
+| Linux  |            1.635 |        1.655 |
+
+#+CAPTION: Thread-local performance
+#+NAME:   fig:tls-plot.png
+[[./tls-plot.png]]
+
+*** TODO look at other thread-supporting lisps systems
+Chez scheme?
+
+
+
+
+* TODO Conclusions
+
+
