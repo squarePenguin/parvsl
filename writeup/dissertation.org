@@ -79,7 +79,8 @@ with a C++ compiler. This was a trivial task and mostly involved adding a few mo
 However, I have been slowly transitioning the code from idiomatic C++ as I analysed more parts of it
 and became confident those changes wouldn't affect the semantics of the program.
 
-** TODO Throughput vs latency
+** DONE Throughput vs latency
+   CLOSED: [2019-02-27 Wed 22:47]
 
 WHen optimising for performance in a programming language, we have to analyse the tradeoff between
 total thoughput and latency. Optimising for latency means minimising the duration of any individual
@@ -132,13 +133,54 @@ of memory is in use, the copying of all live memory might become more expensive 
 The problem sizes in REDUCE are usually not bound by memory on modern computers, with none of the applications
 being known to use more than one gigabyte. This makes the copying approach suitable for the language. 
 
-*** TODO Conservative GC
+Cheaney's algorithm is a method of stop-the-world copying garbage collection. The virtual /heap/ is divided into
+two halves, and only one half is in use for allocations. The other half is considered free and used during garbage
+collection. When the first half is full and garbage collection is triggered, all traceable objects are copied over
+to the second half. Then, the two halves are swapped.
 
+To start the tracing we need to consider a root set: a subset of object which are guaranteed to be accessible.
+One example of elements in the root set is the table of symbols; more precisely all symbols which are defined at the start
+of the garbage collection. The stack will also pointers to objects and must be scanned when computing the root set.
+While these are the main compontents of the root set, the interpreter may contain others depending on language features
+and implementation, all of which must be spotted and added.
+
+Once we have distinguished a root set, we can trace all references to build the reachable set. Objects may contain references
+to other objects, which are also considered reachable. For example, all elements of a list must be traced recursively. 
+The reachable set is the transitive closure of the reachability relation. All objects in the reachable set must be kept
+during collection, while eveything else may be safely collected.
+
+#+BEGIN_SRC C++
+uintptr_t heap1, fringe1, limit1; // allocations always happen 
+uintptr_t heap2, fringe2, limit2;
+
+uintptr_t allocate(size_t size) {
+  if (fringe1 + size > limit1) {
+    collect();
+  }
+
+  if (fringe1 + size > limit1) {
+     // We are out of memory.
+     // We either extend total memory or abort
+  }
+
+  uintptr_t result = fringe1;
+  fringe1 += size;
+  return result;
+}
+
+void collect() {
+  
+}
+
+#+END_SRC 
+
+*** TODO Conservative GC
 
 
 ** TODO Saving state to disk
 
 * TODO Implementation
+
 
 ** TODO Memory allocation
 
@@ -160,6 +202,20 @@ segment. Each thread only allocates within its own segment, so allocations do no
 any synchronisation, and they still only require incrementing one variable in most
 cases.
 
+Global regions are are kept and handled in sorted order by their location in memory.
+
+Memory allocation are contained within a /segment/. When attempting to allocate for the first time,
+or after a garbage collection cycle, a thread will request a new segment. If there is not
+enough memory left to allocate a new segment, this will trigger a garbage collection cycle, and possibly
+extend total memory. Otherwise, TODO
+
+Each segment is defined by a /fringe/ and a /limit/. When a new object is allocated, the fringe is
+compared to the limit to test whether there is enough available space within the segment. If the segment
+cannot accommodate the requested allocation it is considered full and a new segment is requested.
+
+Sometimes, a new object might need to be allocated which is comparable or larger than the default segment size.
+
+
 The code was modified so that checks and operations on the global block "fringe"
 affect the thread-local segment fringe. The block fringe is only modified under a lock
 when a thread asks for a new segment. Segment sizes can be decided dinamically,
@@ -168,6 +224,85 @@ The tradeoff here is performance vs memory. If the segments are too small then t
 will be contention as threads request new segments too often. When segments are larger than 
 needed, they hold chunks of memory from being used by other threads and can lead 
 to more garbage collection cycles. 
+
+** TODO Data races in the interpreter
+
+The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
+
+All named objects in the lifecycle of the program are /symbols/. All global and local variables, including
+special ones (like ~true~ or ~nil~) and function arguments are symbols. A global hash-table keeps track of
+all symbols. This means each names can only be in use in one place at once. 
+
+Lisp is a language with dynamic scope. 
+
+#+BEGIN_SRC ocaml
+let f x = x + y in
+let g () =
+  let y = 3 in
+  f 2
+in
+g ()
+#+END_SRC
+
+The above example will not compile in any static language such as OCaml or C++ 
+because the variable ~y~ is not defined in its scope.
+Most dynamic languages, even weakly typed ones, like Javascript or Python, will allow equivalent
+code as valid, but will encounter a runtime error because ~y~ is not defined.
+Lisp, and VSL in particular, has a mach looser concept of scope.
+In the example above, ~y~ is defined before the call of ~f~ and will remain defined until the
+call to ~g~ returns. 
+
+Shallow binding is the mechanism by which this is achieved. Each symbol is mapped to a single value.
+When a variable name is bound, e.g. as a function parameter name during a function call or through a
+~let~ statement, its old value is stored by the interpreter and replaced with the new value. At the end of the binding,
+the old value is restored. The main advantage of this method is performance. Old values can simply be saved
+on the stack:
+
+#+BEGIN_SRC ocaml
+let varName = expr1 in expr2
+#+END_SRC
+
+can be implemented as:
+
+#+BEGIN_SRC C++
+void implement_let(string varName, LispObject expr1, LispObject expr2) {
+  LispObject symbol = lookup_symbol(varName);
+  LispObject oldVal = value(symbol); // store the old value
+  value(symbol) = eval(expr1);       // replace with new value
+  eval(expr2);                       // evaluate the rest of the code
+  value(symbol) = oldVal;            // restore old value
+}
+#+END_SRC
+
+This mechanism was not designed with concurrency in mind, and is not thread-safe. 
+Many variable names are reused multiple times in a program, for example ~i, j, count~, etc.
+Multiple threads binding the same variable will cause override each other's values.
+
+I wanted to fix this while keeping the same dynamic scoping semantics for backward compatibility 
+and not affecting performance. To do this, I have allocated thread-local storage for symbols.
+Global symbols were unaffected, because rebinding them is illegal in the language. However,
+for non-globals I used a thread-local array to store the real value, and had the global storage
+location point to the array location. Each local symbol gets its own unique array index for the lifecycle
+of the program. Then, each thread will reserve that location within its local array for the symbol.
+Then, I created the function:
+
+#+BEGIN_SRC C++
+LispObject par_value(LispObject symbol) {
+  LispObject val = value(symbol);        // use the original value function here
+  if (is_global(symbol)) return val;     // global symbols remain unaffected  
+
+  // ASSERT: val is a Location otherwise
+  Location loc = value_to_location(val); // "extract" location, an integer type
+  return local_value(loc);               // get the thread_local value at that location               
+}
+#+END_SRC
+
+I carefully replaced all calls to ~value~ to ~par_value~. Now, multiple threads accessing the same symbol
+can do so safely, as they will each access their own versions. This eliminates data races entirely.
+
+*** TODO make diagram
+ 
+
 
 ** TODO Shared memory and global variables
 
@@ -248,6 +383,17 @@ Finally, primitive functions for threading were added to the language. They simp
 ** TODO Parallel building of Reduce
 ** TODO baby groebner base package
 ** TODO Thread-local performance on Windows
+
+#+OPTIONS: :export none
+#+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
+| OS     | non-thread-local | thread-local |
+|--------+------------------+--------------|
+| Cygwin |            1.985 |       51.234 |
+| Linux  |            1.635 |        1.655 |
+
+#+CAPTION: Thread-local performance
+#+NAME:   fig:tls-plot.png
+[[./tls-plot.png]]
 
 *** TODO look at other thread-supporting lisps systems
 Chez scheme?
