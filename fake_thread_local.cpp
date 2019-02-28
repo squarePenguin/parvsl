@@ -1,6 +1,6 @@
-// otherstack.cpp                               Copyright (C) 2019 Codemist
+// fake_thread_local.cpp                        Copyright (C) 2019 Codemist
 
-// $Id: otherstack.cpp 4902 2019-02-17 10:11:08Z arthurcnorman $
+// $Id: fake_thread_local.cpp 4902 2019-02-17 10:11:08Z arthurcnorman $
 
 
 /**************************************************************************
@@ -266,4 +266,4 @@ int main(int argc, char *argv[])
 
 #endif // TEST
 
-// end of otherstack.cpp
+// end of fake_thread_local.cpp
