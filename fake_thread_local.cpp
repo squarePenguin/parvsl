@@ -178,14 +178,37 @@ INLINE_VAR constexpr int STACK_BITS = 20;
 // for its alignment, but a good compiler should elide pretty well all of this
 // into just one or two instructions.
 
-inline thread_locals *my_tl()
-{   double d;    // will be aligned on 8-byte boundary
-    uintptr_t i = (intptr_t)&d | ((1<<STACK_BITS) - 8);
-    size_t s = sizeof(thread_locals);
+// Well g++ under Cygwin does just that, but g++ on Ubuntu adds extra
+// instructions that look like checking for buffer overflow. I think I
+// suspect that it sees I am taking an address on the stack and using a
+// large offset from it (in a way that is clearly way beyond the guarantee
+// of any standard!) and so going into slightly defensive mode.
+
+thread_locals *my_tl()
+{   size_t s = sizeof(thread_locals);
     size_t a = alignof(thread_locals);
 // Force it to be at least 16-byte aligned.
     a = (a + 15) & (-(size_t)16);
     size_t w = (8 + s + a-1) & (-a);
+    uint64_t mask = (1<<STACK_BITS) - 8;
+    uint64_t i;
+// I can build this in just C++ but as mentioned above, that tends to cause
+// at least some versions of g++ to stick in extra instructions that I do
+// not want. So here I have a (default) option of using just a few lines
+// of assembly code. This results in a measurable speed-up in my naive test
+// on Ubuntu!
+#ifdef IN_CPLUS_PLUS
+    i = ((uint64_t)&i) | mask;
+#else
+    asm volatile
+    (   "movq %%rsp, %%rcx\n\t"  // Find top of the stack block
+        "orq %1, %%rcx\n\t"      // I will expect rsp to be 8-byte aligned.
+        "movq %%rcx, %0"
+        : "=r" (i)
+        : "ri" (mask)
+        :
+    );
+#endif
     return (thread_locals *)(i + 8 - w);
 }
 
@@ -202,13 +225,13 @@ void __attribute__ ((noinline)) *otherstack(
     void *old_stackloc = (void *)&new_stack[mask];
     size_t s = sizeof(thread_locals);
     size_t a = alignof(thread_locals);
+    a = (a + 15) & (-(size_t)16);
     size_t w = (8 + s + a-1) & (-a);
 // The new stack must be aligned on a 16-byte boundary, so I have left space
 // here for 8 bytes of old stack pointer, then an (aligned) instance of
-// thread_locals and then whatever gap is required to bump alignment up to
-// 16 bytes.
-    void *new_stacktop = (void *)
-        (((uintptr_t)old_stackloc + 8 - w) & (-(size_t)16));
+// thread_locals, but pretending that thread_locals must be at least 16-byte
+// aligned.
+    void *new_stacktop = (void *)((uintptr_t)old_stackloc + 8 - w);
     asm volatile
     (   "movq %%rsp, (%0)\n\t"   // Save old stack pointer at base of block.
         "movq %1, %%rsp"         // Set stack pointer near top of new block.
@@ -304,6 +327,10 @@ inline void *call_for_thread(function_to_call *f, void *arg)
 
 void incvar() __attribute__ ((noinline));
 void incvar()
+{   my_tl()->i++;
+}
+
+void incvar1()
 {   my_tl()->i++;
 }
 
