@@ -434,20 +434,20 @@ namespace arithlib
 #define STRINGIFY1(x) #x
 #define STRINGIFY(x) STRINGIFY1(x)
 
-static const char *_abort_location = "";
+INLINE_VAR const char *_abort_location = "";
 
 // abort() mainly exists so I can set a breakpoint on it! Setting one
 // on the system abort() function sometimes does not give me as much help
 // as I might have hoped on at least some platforms, while a break-point
 // on abort() does what I expect.
 
-static inline void abort1(const char *msg)
+inline void abort1(const char *msg)
 {   std::cout << "About to abort at " << _abort_location << ": "
               << msg << std::endl;
     std::abort();
 }
 
-static inline void abort1()
+inline void abort1()
 {   std::cout << "About to abort at " << _abort_location << std::endl;
     std::abort();
 }
@@ -460,13 +460,20 @@ static inline void abort1()
     }
 
 // The following variable (well constant) enabled "assert" checking. The
-// effect might be a (probably tarher modest) slowdown.
+// effect might be a (probably rather modest) slowdown. However the predefined
+// macro __OPTIMIZE__ will be set up if any g++ optimizations are in force, so
+// here I only activate assertions in the case of compilation subject to
+// "-O0" which will often be associated with "-g".
 
+#ifdef __OPTIMIZE__
+INLINE_VAR const bool debug_arith = false;
+#else  // __OPTIMIZE__
 INLINE_VAR const bool debug_arith = true;
+#endif // __OPTIMIZE__
 
 template <typename F>
-static inline void assert1(bool ok, const char *why,
-                           F&& action, const char *location)
+inline void assert1(bool ok, const char *why,
+                    F&& action, const char *location)
 {
 // Use this as in:
 //     assert(predicate, [&]{...});
@@ -480,7 +487,7 @@ static inline void assert1(bool ok, const char *why,
     }
 }
 
-static inline void assert1(bool ok, const char *why, const char *location)
+inline void assert1(bool ok, const char *why, const char *location)
 {
 // For simple use where a customised message is not required:
 //     assert(predicate);
@@ -507,7 +514,7 @@ INLINE_VAR FILE *logfile = NULL;
 // used. So even though this may somewhat waste space when it is used,
 // I like this option.
 
-static inline void logprintf(const char *fmt, ...)
+inline void logprintf(const char *fmt, ...)
 {
 // I use a fixed name for the log file. This is another respect in which
 // this has to be seen as code only suitable for temporary use.
@@ -530,7 +537,7 @@ static inline void logprintf(const char *fmt, ...)
 // the "obvious way" already, so the code here is something of an exercise
 // in pedantry.
 
-static inline int32_t ASR(int32_t a, int n)
+inline int32_t ASR(int32_t a, int n)
 {   if (n<0 || n>=8*(int)sizeof(int32_t)) n=0;
     uint32_t r = ((uint32_t)a) >> n;
     uint32_t signbit = ((uint32_t)a) >> (8*sizeof(uint32_t)-1);
@@ -538,7 +545,7 @@ static inline int32_t ASR(int32_t a, int n)
     return (int32_t)r;
 }
 
-static inline int64_t ASR(int64_t a, int n)
+inline int64_t ASR(int64_t a, int n)
 {   if (n<0 || n>=8*(int)sizeof(int64_t)) n=0;
     uint64_t r = ((uint64_t)a) >> n;
     uint64_t signbit = ((uint64_t)a) >> (8*sizeof(uint64_t)-1);
@@ -546,20 +553,23 @@ static inline int64_t ASR(int64_t a, int n)
     return (int64_t)r;
 }
 
-static inline uint64_t ASR(uint64_t a, int n)
+inline uint64_t ASR(uint64_t a, int n)
 {   return ASR((int64_t)a, n);
 }
 
 // The behaviour of left shifts on negative (signed) values seems to be
 // labelled as undefined in C/C++, so any time I am going to do a left shift
-// I need to work in an unsigned type.
+// I need to work in an unsigned type. Well at some stage in the future it
+// may be that C++ will insist that signed integers are handled in 2s
+// complement form and shifts on them behave "as naively expected" but at
+// present that can not be relied upon. 
 
-static inline int32_t ASL(int32_t a, int n)
+inline int32_t ASL(int32_t a, int n)
 {   if (n < 0 || n>=8*(int)sizeof(uint32_t)) n = 0;
     return (int32_t)(((uint32_t)a) << n);
 }
 
-static inline int64_t ASL(int64_t a, int n)
+inline int64_t ASL(int64_t a, int n)
 {   if (n < 0 || n>=8*(int)sizeof(uint64_t)) n = 0;
     return (int64_t)(((uint64_t)a) << n);
 }
@@ -772,7 +782,7 @@ inline uint64_t *vector_of_handle(intptr_t n)
 }
 
 inline size_t number_size(uint64_t *p)
-{   assert(p[-1]!=0 && p[-1]<1000000);
+{   assert(p[-1]!=0);
     return p[-1];
 }
 
@@ -981,7 +991,7 @@ inline uint64_t *vector_of_handle(intptr_t n)
 
 inline size_t number_size(uint64_t *p)
 {   size_t r = ((uint32_t *)(&p[-1]))[1];
-    assert(r>0 && r<1000000);
+    assert(r>0);
     return ((uint32_t *)(&p[-1]))[1];
 }
 
@@ -2124,7 +2134,7 @@ inline void display(const char *label, uint64_t *a, size_t lena)
         std::cout << " "
                   << std::hex << std::setfill('0')
                   << "0x" << std::setw(16) << a[lena-i-1]
-                  << std::dec << std::setw(0);
+                  << std::dec << std::setfill(' ');
     std::cout << std::endl;
 }
 
@@ -2144,7 +2154,7 @@ inline void display(const char *label, uint64_t *a, size_t lena, int shift)
                   << std::hex << std::setfill('0')
                   << "0x" << std::setw(16)
                   << shifted_digit(a, lena, shift, lena-i)
-                  << std::dec << std::setw(0);
+                  << std::dec << std::setfill(' ');
     std::cout << std::endl;
 }
 
@@ -2162,7 +2172,7 @@ inline void display(const char *label, intptr_t a)
         std::cout << " "
                   << std::hex << std::setfill('0')
                   << "0x" << std::setw(16) << d[len-i-1]
-                  << std::dec << std::setw(0);
+                  << std::dec << std::setfill(' ');
     std::cout << std::endl;
 }
 
@@ -2202,7 +2212,7 @@ typedef unsigned __int128 UINT128;
 inline std::ostream & operator << (std::ostream &out, UINT128 a)
 {   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
         << " "
-        << (uint64_t)a << std::dec << std::setw(0) << std::setfill(' '); 
+        << (uint64_t)a << std::dec << std::setfill(' '); 
     return out;
 }
 
@@ -2299,13 +2309,27 @@ inline uint64_t add_with_carry(uint64_t a1, uint64_t a2, uint64_t &r)
 {   return ((r = a1 + a2) < a1);
 }
 
-// Now the general version with a carry-in.
+// Now the general version with a carry-in. Note that in fact this version
+// will support any value in c_in, not merely a single bit. Thus the
+// carry_out can end up as 0, 1 or 2.
 
 inline uint64_t add_with_carry(uint64_t a1, uint64_t a2,
-                               uint64_t c_in, uint64_t &r)
+                               uint64_t a3, uint64_t &r)
 {   uint64_t w;
-    int c1 = add_with_carry(a1, c_in, w);
+    int c1 = add_with_carry(a1, a3, w);
     return c1 + add_with_carry(w, a2, r);
+}
+
+// In some places my code may be made nicer by having a version that
+// adds 4 values.
+
+inline uint64_t add_with_carry(uint64_t a1, uint64_t a2,
+                               uint64_t a3, uint64_t a4,
+                               uint64_t &r)
+{   uint64_t w1, w2;
+    int c1 = add_with_carry(a1, a2, w1);
+    int c2 = add_with_carry(a3, a4, w2);
+    return c1 + c2 + add_with_carry(w1, w2, r);
 }
 
 // subtract_with_borrow does
@@ -2530,6 +2554,15 @@ inline bool negative(uint64_t a)
 {   return ((int64_t)a) < 0;
 }
 
+// This next function might be naivly written as
+//    return ((a1==0 && positive(a2)) ||
+//            (a1==-1 && negative(a2)));
+// and it is to test if a bignum can have its top digit removed.
+
+inline bool shrinkable(uint64_t a1, uint64_t a2)
+{   return ((a1 + (a2>>63)) == 0);
+}
+
 inline void internal_copy(const uint64_t *a, size_t lena, uint64_t *b)
 {   memcpy(b, a, lena*sizeof(uint64_t));
 }
@@ -2729,7 +2762,7 @@ inline void uniform_positive(uint64_t *r, size_t &lenr, size_t bits)
         r[i] = mersenne_twister();
     if (bits%64 == 0) r[lenr-1] = 0;
     else r[lenr-1] &= UINT64_C(0xffffffffffffffff) >> (64-bits%64);
-    while (lenr!=1 && r[lenr-1] == 0 && positive(r[lenr-2])) lenr--;
+    while (lenr!=1 && shrinkable(r[lenr-1], r[lenr-2])) lenr--;
 }
 
 inline intptr_t uniform_positive(size_t n)
@@ -3054,7 +3087,7 @@ inline float Float::op(int64_t a)
     if (low > 0x8000000000000000U) top24++;
     else if (low == 0x8000000000000000U) top24 += (top24 & 1); // round to even
     assert(top24 >= ((int64_t)1)<<23 &&
-              top24 <= ((int64_t)1)<<24);
+           top24 <= ((int64_t)1)<<24);
 // The next line should never introduce any rounding at all.
     float d = (float)top24;
     assert(top24 == (uint64_t)d);
@@ -3125,7 +3158,7 @@ inline float Float::op(uint64_t *a)
         else top24 += (top24&1);
     }
     assert(top24 >= ((int64_t)1)<<23 &&
-              top24 <= ((int64_t)1)<<24);
+           top24 <= ((int64_t)1)<<24);
     double d = (float)top24;
     assert(top24 == (uint64_t)d);
     if (sign) d = -d;
@@ -3154,7 +3187,7 @@ inline double Frexp::op(int64_t a, int64_t &x)
     if (low > 0x8000000000000000U) top53++;
     else if (low == 0x8000000000000000U) top53 += (top53 & 1); // round to even
     assert(top53 >= ((int64_t)1)<<52 &&
-              top53 <= ((int64_t)1)<<53);
+           top53 <= ((int64_t)1)<<53);
 // The next line should never introduce any rounding at all.
     double d = (double)top53;
     assert(top53 == (uint64_t)d);
@@ -3235,7 +3268,7 @@ inline double Frexp::op(uint64_t *a, int64_t &x)
         else top53 += (top53&1);
     }
     assert(top53 >= ((int64_t)1)<<52 &&
-              top53 <= ((int64_t)1)<<53);
+           top53 <= ((int64_t)1)<<53);
     double d = (double)top53;
     assert(top53 == (uint64_t)d);
     if (sign) d = -d;
@@ -5443,7 +5476,7 @@ inline void classical_multiply(uint64_t *a, size_t lena,
 // (well their term is "limb") numbers. The value 16 seems reasonably
 // consistent to use as a single fixed value.
 
-static const size_t KARATSUBA_CUTOFF = 16;
+INLINE_VAR const size_t KARATSUBA_CUTOFF = 16;
 
 inline void kara2(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
@@ -6636,7 +6669,7 @@ intptr_t Remainder::op(int64_t a, int64_t b)
 
 }
 
-static inline LispObject cons(LispObject a, LispObject b);
+inline LispObject cons(LispObject a, LispObject b);
 
 namespace arithlib
 {

@@ -52,33 +52,7 @@
 
 using namespace arithlib;
 
-#ifdef LOOK_AT_CODE_FOR_BASIC_OPERATIONS
 
-// I want a version of add_with_carry() that leads to the generation of
-// good code, so I have these small and rather stupid functions here so that
-// I can compile this stuff into machine code and see what is generated.
-// Using g++ on x86_64 and -O3 the expansions of add_with_carry here end up
-// jump-free and at least close to as slick as I could manage in hand-crafted
-// assembly code. Whew!
-// I use volatile variables A, B etc to ensure that the compiler will actually
-// perform the operations shown, and to seprate compilation of the
-// add_with_carry from everything to do with argument passing.
-
-volatile uint64_t A=1, B=1, C_IN=1, C_OUT=0, R=0;
-
-void test_add_with_carry1()
-{   uint64_t r1;
-    C_OUT = add_with_carry(A, B, r1);
-    R = r1;
-}
-
-void test_add_with_carry2()
-{   uint64_t r1;
-    C_OUT = add_with_carry(A, B, C_IN, r1);
-    R = r1;
-}
-
-#endif
 
 #ifdef __cpp_inline_variables
 
@@ -100,6 +74,37 @@ void test_add_with_carry2()
 #define INLINE_VAR static
 #endif
 
+#ifdef LOOK_AT_CODE_FOR_BASIC_OPERATIONS
+
+// I want a version of add_with_carry() that leads to the generation of
+// good code, so I have these small and rather stupid functions here so that
+// I can compile this stuff into machine code and see what is generated.
+// Using g++ on x86_64 and -O3 the expansions of add_with_carry here end up
+// jump-free and at least close to as slick as I could manage in hand-crafted
+// assembly code. Whew!
+// I use volatile variables A, B etc to ensure that the compiler will actually
+// perform the operations shown, and to separate compilation of the
+// add_with_carry from everything to do with argument passing.
+
+INLINE_VAR volatile uint64_t A=1, B=1, C_IN=1, C_OUT=0, R=0;
+
+void test_add_with_carry1()
+{   uint64_t r1;
+// The upper case names here are so I can find them easily in generated
+// assembly code.
+    C_OUT = add_with_carry(A, B, r1);
+    R = r1;
+}
+
+void test_add_with_carry2()
+{   uint64_t r1;
+    C_OUT = add_with_carry(A, B, C_IN, r1);
+    R = r1;
+}
+
+#endif // LOOK_AT_CODE_FOR_BASIC_OPERATIONS
+
+
 
 //                       Karatsuba multiplication.
 //                       =========================
@@ -120,11 +125,14 @@ void test_add_with_carry2()
 // addition and subtraction code. 
 
 // I want:
-//    kadd(a, lena, r, lenr);          // r += a; and return a carry
-//    kadd(a, lena, b, lenb, r, lenr); // r := a + b; and return a carry
-// and correspondingly for subtraction. Note that these have lenr set on
+//    kadd(a, lena, r, lenc);          // c += a; and return a carry
+//    kadd(a, lena, b, lenb, c, lenc); // c := a + b; and return a carry
+// and correspondingly for subtraction. Note that these have lenc set on
 // input and will propagate carries or extend a result all the way up to
-// lenr words even if lena is a lot shorter.
+// lenc words even if lena is a lot shorter.
+// Sometimes these are used with lena=lenb=lenc and with carry very relevant.
+// On other occasions they are used with lena=lenb<lenc and carries can
+// propagate as far as lenc but any overflow beyond there is unimportant.
 
 uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 {   uint64_t carry = 0;
@@ -140,7 +148,8 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 
 // For the 2-input addition I want lena >= lenb.
 
-uint64_t kadd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
+uint64_t kadd(uint64_t *a, size_t lena,
+              uint64_t *b, size_t lenb,
               uint64_t *r, size_t lenr)
 {   uint64_t carry = 0;
     size_t i;
@@ -172,63 +181,160 @@ uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
     return borrow;
 }
 
-// c = a*b;
+// Now code that multiplies 2-digit numbers together.
+// One version treats them as unsigned, the second as signed.
 
-static int mulcounts[256] = {0};
-static int mc1=0, mc2=0, mc3=0, mc4=0;
+inline void mul2x2(uint64_t a1, uint64_t a0,
+                   uint64_t b1, uint64_t b0,
+                   uint64_t &r3, uint64_t &r2, uint64_t &r1, uint64_t &r0)
+{   uint64_t r1a, r1b, r2a, r2b, r3a;
+    multiply64(a0, b0, r1a, r0);
+    multiplyadd64(a0, b1, r1a, r2a, r1a);
+    multiplyadd64(a1, b0, r1a, r2b, r1);
+    multiplyadd64(a1, b1, r2a, r3a, r2a);
+    r3a += add_with_carry(r2a, r2b, r2);
+    r3 = r3a;
+}
+
+inline void mul2x2S(int64_t a1, uint64_t a0,
+                    int64_t b1, uint64_t b0,
+                    int64_t &r3, uint64_t &r2, uint64_t &r1, uint64_t &r0)
+{   uint64_t r1a;
+    multiply64(a0, b0, r1a, r0);
+    uint64_t r1b, r2a;
+    multiplyadd64(a0, (uint64_t)b1, r1a, r2a, r1a);
+    uint64_t r2b;
+    multiplyadd64((uint64_t)a1, b0, r1a, r2b, r1);
+    int64_t r3a;
+    signed_multiplyadd64(a1, b1, r2a, r3a, r2a);
+    r3a = (int64_t)((uint64_t)r3a + add_with_carry(r2a, r2b, r2a));
+// Do the arithmetic in unsigned mode in case of overflow problems.
+    if (a1 < 0) r3a = (int64_t)((uint64_t)r3a -
+                                subtract_with_borrow(r2a, b0, r2a));
+    if (b1 < 0) r3a = (int64_t)((uint64_t)r3a -
+                                subtract_with_borrow(r2a, a0, r2a));
+    r2 = r2a;
+    r3 = r3a;
+}
+
+inline void mul3x2(uint64_t a2, uint64_t a1, uint64_t a0,
+                   uint64_t b1, uint64_t b0,
+                   uint64_t &r4, uint64_t &r3, uint64_t &r2,
+                   uint64_t &r1, uint64_t &r0)
+{   uint64_t r4a, r3a;
+    mul2x2(a1, a0, b1, b0, r3, r2, r1, r0);
+    multiplyadd64(a2, b0, r2, r3a, r2);
+    uint64_t carry = add_with_carry(r3, r3a, r3);
+    multiplyadd64(a2, b1, r3, r4, r3);
+    r4 += carry;
+}
+
+inline void mul3x3(uint64_t a2, uint64_t a1, uint64_t a0,
+                   uint64_t b2, uint64_t b1, uint64_t b0,
+                   uint64_t &r5, uint64_t &r4, uint64_t &r3,
+                   uint64_t &r2, uint64_t &r1, uint64_t &r0)
+{   uint64_t r4a, r3a;
+    mul2x2(a1, a0, b1, b0, r3, r2, r1, r0);
+    multiplyadd64(a2, b0, r2, r3a, r2);
+    uint64_t carry = add_with_carry(r3, r3a, r3);
+    multiplyadd64(a0, b2, r2, r3a, r2);
+    carry += add_with_carry(r3, r3a, r3);
+    multiplyadd64(a2, b1, r3, r4, r3);
+    carry = add_with_carry(r4, carry, r4);
+    multiplyadd64(a1, b2, r3, r4a, r3);
+    carry = add_with_carry(r4, r4a, r4);
+    multiplyadd64((int64_t)a2, (int64_t)b2, r4, r5, r4);
+    r5 = (int64_t)((uint64_t)r5 + carry);
+}
+
+inline void mul3x3S(uint64_t a2, uint64_t a1, uint64_t a0,
+                    uint64_t b2, uint64_t b1, uint64_t b0,
+                    int64_t &r5, uint64_t &r4, uint64_t &r3,
+                    uint64_t &r2, uint64_t &r1, uint64_t &r0)
+{   uint64_t r4a, r3a;
+    mul2x2(a1, a0, b1, b0, r3, r2, r1, r0);
+    multiplyadd64(a2, b0, r2, r3a, r2);
+    uint64_t carry = add_with_carry(r3, r3a, r3);
+    multiplyadd64(a0, b2, r2, r3a, r2);
+    carry += add_with_carry(r3, r3a, r3);
+    multiplyadd64(a2, b1, r3, r4, r3);
+    carry = add_with_carry(r4, carry, r4);
+    multiplyadd64(a1, b2, r3, r4a, r3);
+    carry = add_with_carry(r4, r4a, r4);
+    signed_multiplyadd64((int64_t)a2, (int64_t)b2, r4, r5, r4);
+    r5 = (int64_t)((uint64_t)r5 + carry);
+    if (negative(b2))
+    {   uint64_t borrow = subtract_with_borrow(r3, a0, r3);
+        borrow = subtract_with_borrow(r4, a1, borrow, r4);
+        r5 = (int64_t)((uint64_t)r5 - borrow);
+    }
+    if (negative(a2))
+    {   uint64_t borrow = subtract_with_borrow(r3, b0, r3);
+        borrow = subtract_with_borrow(r4, b1, borrow, r4);
+        r5 = (int64_t)((uint64_t)r5 - borrow);
+    }
+}
+
+void mul4x4(uint64_t a3, uint64_t a2, uint64_t a1, uint64_t a0,
+            uint64_t b3, uint64_t b2, uint64_t b1, uint64_t b0,
+            uint64_t &c7, uint64_t &c6, uint64_t &c5, uint64_t &c4,
+            uint64_t &c3, uint64_t &c2, uint64_t &c1, uint64_t &c0)
+{   uint64_t w7, w6, w5a, w5b, w5c, w4a, w4b, w4c,
+             w3a, w3b, w3c, w2a, w2b, w2c;
+    mul2x2(a1, a0, b1, b0, w3a, w2a, c1, c0);
+    mul2x2(a1, a0, b3, b2, w5a, w4a, w3b, w2b);
+    mul2x2(a3, a2, b1, b0, w5b, w4b, w3c, w2c);
+    mul2x2(a3, a2, b3, b2, w7, w6, w5c, w4c);
+    uint64_t carry = add_with_carry(w2a, w2b, w2c, c2);
+    carry = add_with_carry(w3a, w3b, w3c, carry, c3);
+    carry = add_with_carry(w4a, w4b, w4c, carry, c4);
+    carry = add_with_carry(w5a, w5b, w5c, carry, c5);
+    carry = add_with_carry(w6, carry, c6);
+    c7 = w7 + carry; 
+}
+
+// c = a*b;
 
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
-                               uint64_t *r)
-{   mulcounts[(lena>=16 ? 0 : lena) + 16*(lenb>=16 ? 0 : lenb)]++;
-    mc1++;
-    if (lena == lenb) switch (lena)
-    {
-    case 5:
-    case 6:
-    case 7:
-    case 8:
-    case 9:
-    case 10:
-    case 11:
-    case 12:
-    case 13:
-    case 14:
-    default:
-        ;
-    }
-     
+                               uint64_t *c)
+{
+// Here I experimented with working with 2 or 3 digits at a time -
+// in effect unrolling the loops and rearranging the sequence of memory
+// accesses in case I could speed things up. With g++ on x86_64 the
+// changes hurt rather than benefitted me. So this has dropped back
+// to simple code. Note that this should work with lena==1 or lenb==1 so
+// I will not need top make those special cases.
     uint64_t hi=0, lo;
     for (size_t j=0; j<lenb; j++)
-        multiplyadd64(a[0], b[j], hi, hi, r[j]);
-    r[lenb] = hi;
+        multiplyadd64(a[0], b[j], hi, hi, c[j]);
+    c[lenb] = hi;
     for (size_t i=1; i<lena; i++)
     {   hi = 0;
         for (size_t j=0; j<lenb; j++)
         {   multiplyadd64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, r[i+j], r[i+j]);
+            hi += add_with_carry(lo, c[i+j], c[i+j]);
         }
-        r[i+lenb] = hi;
+        c[i+lenb] = hi;
     }
 }
 
-// c = c + a*b and return any carry.
+// c = c + a*b. Potentially carry all the way up to lenc.
 
-inline uint64_t classical_multiply_and_add(uint64_t *a, size_t lena,
-                                           uint64_t *b, size_t lenb,
-                                           uint64_t *r)
-{   mulcounts[(lena>=16 ? 0 : lena) + 16*(lenb>=16 ? 0 : lenb)]++;
-    mc2++;
-    uint64_t hi=0, lo, carry=0;
+inline void classical_multiply_and_add(uint64_t *a, size_t lena,
+                                       uint64_t *b, size_t lenb,
+                                       uint64_t *c, size_t lenc)
+{   uint64_t hi=0, lo, carry=0;
     for (size_t i=0; i<lena; i++)
     {   hi = 0;
         for (size_t j=0; j<lenb; j++)
         {   multiplyadd64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, r[i+j], r[i+j]);
+            hi += add_with_carry(lo, c[i+j], c[i+j]);
         }
-        carry = add_with_carry(hi, r[i+lenb], carry, r[i+lenb]);
+        carry = add_with_carry(hi, c[i+lenb], carry, c[i+lenb]);
     }
-    return carry;
+    for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
+        carry = add_with_carry(c[i], carry, c[i]);
 }
 
 // Now variants that use just a single digit first argument. These may be seen
@@ -237,9 +343,7 @@ inline uint64_t classical_multiply_and_add(uint64_t *a, size_t lena,
 inline void classical_multiply(uint64_t a,
                                uint64_t *b, size_t lenb,
                                uint64_t *r)
-{   mulcounts[1 + 16*(lenb>=16 ? 0 : lenb)]++;
-    mc3++;
-    uint64_t hi=0, lo;
+{   uint64_t hi=0, lo;
     for (size_t j=0; j<lenb; j++)
         multiplyadd64(a, b[j], hi, hi, r[j]);
     r[lenb] = hi;
@@ -249,15 +353,15 @@ inline void classical_multiply(uint64_t a,
 
 inline uint64_t classical_multiply_and_add(uint64_t a,
                                            uint64_t *b, size_t lenb,
-                                           uint64_t *r)
-{   mulcounts[1 + 16*(lenb>=16 ? 0 : lenb)]++;
-    mc4++;
-    uint64_t hi=0, lo, carry=0;
+                                           uint64_t *c, size_t lenc)
+{   uint64_t hi=0, lo, carry=0;
     for (size_t j=0; j<lenb; j++)
     {   multiplyadd64(a, b[j], hi, hi, lo);
-        hi += add_with_carry(lo, r[j], r[j]);
+        hi += add_with_carry(lo, c[j], c[j]);
     }
-    return add_with_carry(hi, r[lenb], carry, r[lenb]);
+    carry = add_with_carry(hi, c[lenb], carry, c[lenb]);
+    for (size_t i=lenb+1; carry!=0 && i<lenc; i++)
+        carry = add_with_carry(c[i], carry, c[i]);
 }
 
 // The cutoff here is potentially system-dependent, however the exact value
@@ -269,26 +373,30 @@ inline uint64_t classical_multiply_and_add(uint64_t a,
 // move to the more complicated method at somewhere between 10 and 35 word
 // (well their term is "limb") numbers.
 
-INLINE_VAR size_t KARATSUBA_CUTOFF = 10;
+#ifndef K
+// I provide a default here but can override it at compile time.
+#define K 18
+#endif
+
+INLINE_VAR size_t KARATSUBA_CUTOFF = K;
 
 inline void kara_and_add2(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
-                  uint64_t *c,
+                  uint64_t *c, size_t lenc,
                   uint64_t *w);
 
 inline void kara_and_add1(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
-                  uint64_t *c,
+                  uint64_t *c, size_t lenc,             
                   uint64_t *w)
 {   if (lena<KARATSUBA_CUTOFF)
-        classical_multiply_and_add(a, lena, b, lenb, c);
+        classical_multiply_and_add(a, lena, b, lenb, c, lenc);
     else
     {   if (lena>lenb && lenb%2==0)
-        {   kara_and_add2(a, lenb, b, lenb, c, w);
-            c[2*lenb] = 0;
-            classical_multiply_and_add(a[lena-1], b, lenb, c+lenb);
+        {   kara_and_add2(a, lenb, b, lenb, c, lenc, w);
+            classical_multiply_and_add(a[lena-1], b, lenb, c+lenb, lenc-lenb);
         }
-        else kara_and_add2(a, lena, b, lenb, c, w);
+        else kara_and_add2(a, lena, b, lenb, c, lenc, w);
     }
 }
 
@@ -298,7 +406,7 @@ inline void kara1(uint64_t *a, size_t lena,
 
 inline void kara_and_add2(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
-                  uint64_t *c,
+                  uint64_t *c, size_t lenc,
                   uint64_t *w)
 {
 // The all the cases that are supported here the next line sets n to a
@@ -306,8 +414,7 @@ inline void kara_and_add2(uint64_t *a, size_t lena,
     size_t n = (lena+1)/2;
     uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
     uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
-    kara_and_add1(w, n, w+n, n, c+n, w+2*n);         // (a0+a1)*(b0+b1)
-    size_t lenc = lena+lenb;
+    kara_and_add1(w, n, w+n, n, c+n, lenc-n, w+2*n); // (a0+a1)*(b0+b1)
     if (c1 != 0)
     {   kadd(w+n, n, c+2*n, lenc-2*n);               // fix for overflow
         if (c2 != 0)
@@ -317,12 +424,17 @@ inline void kara_and_add2(uint64_t *a, size_t lena,
         }
     }
     else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
-    for (size_t i=0; i<2*n; i++) w[i] = 0;
-    kara1(a, n, b, n, w, w+2*n);                // a0*b0
+    assert(c[lena+lenb] == 0x5555555555555555);
+    for (size_t i=0; i<2*n+1; i++) w[i] = 0x5555555555555555;
+    assert(w[lena+lenb] == 0x5555555555555555);
+    kara1(a, n, b, n, w, w+2*n+1);                // a0*b0
+    assert(w[lena+lenb] == 0x5555555555555555);
     kadd(w, 2*n, c, lenc);                           // add in at bottom..
     ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
-    for (size_t i=0; i<lena+lenb-2*n; i++) w[i] = 0;
-    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
+    for (size_t i=0; i<lena+lenb-2*n+1; i++) w[i] = 0x5555555555555555;
+    assert(w[lena+lenb-2*n] == 0x5555555555555555);
+    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n+1);
+    assert(w[lena+lenb-2*n] == 0x5555555555555555);
     kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
     ksub(w, lena+lenb-2*n, c+n, lenc-n);
 }
@@ -333,7 +445,7 @@ inline void kara_and_add2(uint64_t *a, size_t lena,
 
 inline void kara_and_add(uint64_t *a, size_t lena,
                  uint64_t *b, size_t lenb,
-                 uint64_t *c,
+                 uint64_t *c, size_t lenc,
                  uint64_t *w)
 {   if (lena < lenb)
     {   std::swap(a, b);
@@ -342,12 +454,12 @@ inline void kara_and_add(uint64_t *a, size_t lena,
 // Now b is the shorter operand. If it is not too big I can just do
 // simple classical long multiplication.
     if (lenb < KARATSUBA_CUTOFF)
-    {   classical_multiply_and_add(a, lena, b, lenb, c);
+    {   classical_multiply_and_add(a, lena, b, lenb, c, lenc);
         return;
     }
 // For equal lengths I can do just one call to Karatsuba.
     if (lena == lenb)
-    {   kara_and_add1(a, lena, b, lenb, c, w);
+    {   kara_and_add1(a, lena, b, lenb, c, lenc, w);
         return;
     }
 // If the two inputs are unbalanced in length I will perform multiple
@@ -355,13 +467,16 @@ inline void kara_and_add(uint64_t *a, size_t lena,
 // try to make each subsidiary multiplication as big as possible.
 // This will be lenb rounded up to an even number.
     size_t len = lenb + (lenb & 1);
+// Here I am always adding into the existing vector, so there is no
+// merit it getting clever with odd and even chunks.
     while (lena>=len)
-    {   kara_and_add1(a, len, b, lenb, c, w);
+    {   kara_and_add1(a, len, b, lenb, c, lenc, w);
         a += len;
         lena -= len;
         c += len;
+        lenc -= len;
     }
-    if (lena != 0) kara_and_add(b, lenb, a, lena, c, w);
+    if (lena != 0) kara_and_add(b, lenb, a, lena, c, lenc, w);
 }
 
 inline void kara2(uint64_t *a, size_t lena,
@@ -371,13 +486,15 @@ inline void kara2(uint64_t *a, size_t lena,
 inline void kara1(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, uint64_t *w)
-{   if (lena<KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, c);
+{   assert(c[lena+lenb] == 0x5555555555555555);
+    if (lena<KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, c);
     else if (lena>lenb && lenb%2==0)
     {
 // In the case that the product is (2n+1)*(2n) I will not want to round up to
 // a (2n+1)*(2n+1) Karatsuba because then the numbers do not split neatly, and
 // I could end up padding to (2n+2)*(2n+2). So I do a (2n)*(2n) fast multiply
 // and then deal with the "+1" classically.
+        assert(c[lena+lenb] == 0x5555555555555555);
         kara2(a, lena-1, b, lenb, c, w);
 // I write the classical multiplication by a single digit out by hand
 // here: it adds its product into the result I have got already, except that
@@ -409,10 +526,12 @@ inline void kara2(uint64_t *a, size_t lena,
 {
 // The all the cases that are supported here the next line sets n to a
 // suitably rounded up half length.
+    assert(c[lena+lenb] == 0x5555555555555555);
     size_t n = (lena+1)/2;
     uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
     uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
     kara1(w, n, w+n, n, c+n, w+2*n);                 // (a0+a1)*(b0+b1)
+    assert(c[lena+lenb] == 0x5555555555555555);
 // I have now multiplied (a0+a1) truncated to n words by (b0+b1) similarly
 // truncated. However when I added a0 to a1 I might have had a carry into
 // the next word up. That means that the full product intrudes into just
@@ -424,25 +543,32 @@ inline void kara2(uint64_t *a, size_t lena,
         if (c2 != 0) c[3*n] += kadd(w, n, c+2*n, n) + 1;
     }
     else if (c2 != 0) c[3*n] = kadd(w, n, c+2*n, n);
+    assert(c[lena+lenb] == 0x5555555555555555);
 // Now form the product of the high halves of a and b. This can be shorter
 // than 2*n.
     kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
+    assert(c[lena+lenb] == 0x5555555555555555);
 // The top half of the product (less just one word!) can be copied into
 // previously unused space in c...
     for (size_t i=n+1; i<lena+lenb-2*n; i++) c[2*n+i] = w[i];
+    assert(c[lena+lenb] == 0x5555555555555555);
 // Next I subtract the high product off. This is not liable to underflow
 // (and in doing so call for a long chain of borrows) because it is basically
 // subtracting a value from 2^64 times the same value.
     ksub(w, lena+lenb-2*n, c+n, lenc-n);
+    assert(c[lena+lenb] == 0x5555555555555555);
 // Now add in the bottom part.
     kadd(w, n+1, c+2*n, lenc-2*n);
 // I now need to do something similar with the product of the low parts of
 // a and b.
     kara1(a, n, b, n, w, w+2*n);                     // a0*b0
+    assert(c[lena+lenb] == 0x5555555555555555);
 // I can just copy the low n words across.
     for (size_t i=0; i<n; i++) c[i] = w[i];
+    assert(c[lena+lenb] == 0x5555555555555555);
     kadd(w+n, n, c+n, lenc-n);                       // add in at bottom..
     ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
+    assert(c[lena+lenb] == 0x5555555555555555);
 }
 
 
@@ -453,12 +579,17 @@ inline void kara(uint64_t *a, size_t lena,
                  uint64_t *b, size_t lenb,
                  uint64_t *c, uint64_t *w)
 {   if (lena < KARATSUBA_CUTOFF || lenb < KARATSUBA_CUTOFF)
-    {   classical_multiply(a, lena, b, lenb, c);
+    {   //if (lena==1) classical_multiply(a[0], b, lenb, c);
+        //else if (lenb==1) classical_multiply(b[0], a, lena, c);
+        //else
+        classical_multiply(a, lena, b, lenb, c);
         return;
     }
 // For equal lengths I can do just one call to Karatsuba.
+    assert(c[lena+lenb] == 0x5555555555555555);
     if (lena == lenb)
     {   kara2(a, lena, b, lenb, c, w);
+        assert(c[lena+lenb] == 0x5555555555555555);
         return;
     }
     if (lena < lenb)
@@ -469,7 +600,9 @@ inline void kara(uint64_t *a, size_t lena,
 // using Karatsuba merely by treating the smaller number as if padded with
 // a leading zero.
     if (lena == lenb+1 && lena%2==0)
-    {   kara2(a, lena, b, lenb, c, w);
+    {   assert(c[lena+lenb] == 0x5555555555555555);
+        kara2(a, lena, b, lenb, c, w);
+        assert(c[lena+lenb] == 0x5555555555555555);
         return;
     }
 // If the two inputs are unbalanced in length I will perform multiple
@@ -483,20 +616,72 @@ inline void kara(uint64_t *a, size_t lena,
     size_t len = lenb + (lenb & 1);
     uint64_t *a1 = a, *c1 = c;
     size_t lena1 = lena;
+// Multiply-and-add will be (slightly) more expensive than just Multiply,
+// so I do a sequence of multiplications where their outputs will not overlap
+// first.
     for (;;)
-    {   kara1(a1, len, b, lenb, c1, w);
+    {
+        assert(c[lena+lenb] == 0x5555555555555555);
+        kara1(a1, len, b, lenb, c1, w);
+        assert(c[lena+lenb] == 0x5555555555555555);
         c1 += 2*len;
-        if (lenb < len) c1[-1] = 0; // pad because b was short
-        if (lena1 <= 3*len) break;
+// I will keep going provided the next multiplication I will do will fully fit.
+        if (lena1 < 3*len) break;
+// I may have rounded the size of b up by 1, and if I have I would generate
+// 2*len-1 digits not 2*len and hence risk leaving a 1-word gap between filled
+// in data. I zero that here to avoid trouble. However I must not do this
+// if lenb was not rounded up because that could corrupt memory beyond the
+// length of the full result! I also only do this if I am about to do another
+// multiplication in this loop, so I do not pad anything at the very end of the
+// result. The subscript "-1" here obviously looks a bit odd!
+        if (len!=lenb) c1[-1] = 0;
+        assert(c[lena+lenb] == 0x5555555555555555);
         a1 += 2*len;
         lena1 -= 2*len;
     }
-    while (lena>=len)
-    {   kara1(a, len, b, lenb, c, w);
-        a += len; lena -= len;
-        c += len;
+    if (lena1 > 2*len)
+    {   a1 += 2*len;
+        lena1 -= 2*len;
+// Do a shorter nice Multiply (without Add) to reach the end of input a.
+        assert(c[lena+lenb] == 0x5555555555555555);
+        kara(a1, lena1, b, lenb, c1, w);
+        assert(c[lena+lenb] == 0x5555555555555555);
     }
-    if (lena != 0) kara(b, lenb, a, lena, c, w);
+    else if (lena1!=len)
+    {
+// I may need to pad with zeros when the top digit to be generated will be
+// put there using MultiplyAndAdd.
+        assert(c[lena+lenb] == 0x5555555555555555);
+        for (size_t i=c1-c; i<lena+lenb; i++) c[i] = 0;
+        assert(c[lena+lenb] == 0x5555555555555555);
+    }
+    assert(c[lena+lenb] == 0x5555555555555555);
+// Now I need to do much the same for the odd numbered digits of a, but
+// adding the products in rather than writing them into place.
+    a1 = a + len;
+    c1 = c + len;
+    size_t lenc1 = lena+lenb-len;
+// I know that I had lena>lenb at the start. This means I have at
+// least a part block to process here, but there is no guarantee that
+// I have a whole one.
+    lena1 = lena - len;
+    for (;;)
+    {   if (lena1 < len) break;
+        assert(c[lena+lenb] == 0x5555555555555555);
+        kara_and_add1(a1, len, b, lenb, c1, lenc1, w);
+        assert(c[lena+lenb] == 0x5555555555555555);
+        if (lena1 <= 2*len)
+        {   lena1 = 0;
+            break;
+        }
+        c1 += 2*len;
+        lenc1 -= 2*len;
+        a1 += 2*len;
+        lena1 -= 2*len;
+    }
+    assert(c[lena+lenb] == 0x5555555555555555);
+    if (lena1!=0) kara_and_add(a1, lena1, b, lenb, c1, lenc1, w);
+    assert(c[lena+lenb] == 0x5555555555555555);
 }
 
 // Finally I can provide the top-level entrypoint that accepts signed
@@ -506,48 +691,13 @@ INLINE_VAR const size_t KARA_FIXED_WORKSPACE_SIZE = 200;
 INLINE_VAR const size_t KARA_WORKSPACE_SIZE = 408;
 INLINE_VAR uint64_t kara_workspace[KARA_WORKSPACE_SIZE];
 
-// First some written out code that multiplies 2-digit numbers together.
-// One version treats them as unsigned, the second as signed.
-
-inline void mul2x2(uint64_t ahi, uint64_t alo,
-                   uint64_t bhi, uint64_t blo,
-                   uint64_t &r3, uint64_t &r2, uint64_t &r1, uint64_t &r0)
-{   uint64_t r1a;
-    multiply64(alo, blo, r1a, r0);
-    uint64_t r1b, r2a;
-    multiplyadd64(alo, bhi, r1a, r2a, r1a);
-    uint64_t r2b;
-    multiplyadd64(ahi, blo, r1a, r2b, r1);
-    uint64_t r3a;
-    multiplyadd64(ahi, bhi, r2a, r3a, r2a);
-    r3a += add_with_carry(r2a, r2b, r2);
-    r3 = r3a;
-}
-
-inline void mul2x2S(int64_t ahi, uint64_t alo,
-                    int64_t bhi, uint64_t blo,
-                    int64_t &r3, uint64_t &r2, uint64_t &r1, uint64_t &r0)
-{   uint64_t r1a;
-    multiply64(alo, blo, r1a, r0);
-    uint64_t r1b, r2a;
-    multiplyadd64(alo, (uint64_t)bhi, r1a, r2a, r1a);
-    uint64_t r2b;
-    multiplyadd64((uint64_t)ahi, blo, r1a, r2b, r1);
-    int64_t r3a;
-    signed_multiplyadd64(ahi, bhi, r2a, r3a, r2a);
-    r3a = (int64_t)((uint64_t)r3a + add_with_carry(r2a, r2b, r2a));
-// Do the arithmetic in unsigned mode in case of overflow problems.
-    if (ahi < 0) r3a = (int64_t)((uint64_t)r3a -
-                                 subtract_with_borrow(r2a, blo, r2a));
-    if (bhi < 0) r3a = (int64_t)((uint64_t)r3a -
-                                 subtract_with_borrow(r2a, alo, r2a));
-    r2 = r2a;
-    r3 = r3a;
+inline constexpr int BY(int m, int n)
+{   return m + 4*n;
 }
 
 inline void kmultiply(uint64_t *a, size_t lena,
                       uint64_t *b, size_t lenb,
-                      uint64_t *r, size_t &lenr)
+                      uint64_t *c, size_t &lenc)
 {
 // If a and/or be are negative then I can treat their true values as
 //    a = sa + va      b = sb + vb
@@ -565,195 +715,228 @@ inline void kmultiply(uint64_t *a, size_t lena,
 // If both arguments are tiny I write out the code in-line. The timings I
 // have taken suggest that this makes a significant difference to costs, and
 // I view it as plausible that "rather small" cases will often dominate.
+    assert(c[lena+lenb] == 0x5555555555555555);
     if (lena <=4 && lenb <= 4) switch (lena + 4*lenb)
     {
 // Length 2 result
-    case 1+4*1:
+    case BY(1, 1):
         {   int64_t r1;
             uint64_t r0;
             signed_multiply64(a[0], b[0], r1, r0);
-            r[0] = r0;
-            if ((r1==0 && positive(r0)) ||
-                (r1==-1 && negative(r0))) lenr = 1;
+            c[0] = r0;
+            if (shrinkable(r1, r0)) lenc = 1;
             else
-            {   r[1] = (uint64_t)r1;
-                lenr = 2;
+            {   c[1] = (uint64_t)r1;
+                lenc = 2;
             }
             return;
         }
 
 // Length 3 result
-    case 1+4*2:
+    case BY(1, 2):
         std::swap(a, b);
         // drop through.
-    case 2+4*1:
-        {   int64_t r2;
-            uint64_t r1;
-            multiply64(b[0], a[0], r1, r[0]);
+    case BY(2, 1):
+        {   if (b[0]==0)
+            {   c[0] = 0;
+                lenc = 1;
+                return;
+            }
+            int64_t r2;
+            uint64_t r1, r0;
+            multiply64(b[0], a[0], r1, r0);
+            c[0] = r0;
             signed_multiplyadd64(b[0], a[1], r1, r2, r1);
             if (negative(b[0]))
                 r2 = (int64_t)((uint64_t)r2 -
                                 subtract_with_borrow(r1, a[0], r1));
-            r[1] = r1;
-            if ((r2==0 && positive(r1)) ||
-                (r2==-1 && negative(r1))) lenr = 2;
+            c[1] = r1;
+// If you have an input like 2^63 it will be represented as a 2-word
+// bignum {0,2^63} so that the most significant bit of the most significant
+// digits is 0 to show that it is positive. If you multiply two such numbers
+// the direct result you get is {0, 0, 2^62, 0} and the top non-zero digit
+// now does not have its top bit set. So TWO words can be trimmed from the
+// top. This issue may not arise in the length-1 by length-2 case here, but
+// I leave the test in to feel safe and tidy.
+            if (shrinkable(r2, r1))
+            {   if (shrinkable(r1, r0)) lenc = 1;
+                else lenc = 2;
+            }
             else
-            {   r[2] = (uint64_t)r2;
-                lenr = 3;
+            {   c[2] = (uint64_t)r2;
+                lenc = 3;
             }
             return;
         }
 
 // Length 4 result
-      case 2+4*2:
-          {   int64_t r3;
-              uint64_t r2;
-              mul2x2S((int64_t)a[1], a[0],
-                      (int64_t)b[1], b[0],
-                      r3, r2, r[1], r[0]);
-              r[2] = r2;
-              if ((r3==0 && positive(r2)) ||
-                  (r3==-1 && negative(r2))) lenr = 3;
-              else
-              {   r[3] = (uint64_t)r3;
-                  lenr = 4;
-              }
-          }
+    case BY(2, 2):
+        {   int64_t r3;
+            uint64_t r2, r1;
+            mul2x2S((int64_t)a[1], a[0],
+                    (int64_t)b[1], b[0],
+                    r3, r2, r1, c[0]);
+            c[1] = r1;
+            c[2] = r2;
+            if (shrinkable(r3, r2))
+            {   if (shrinkable(r2, r1)) lenc = 2;
+                else lenc = 3;
+            }
+            else
+            {   c[3] = (uint64_t)r3;
+                lenc = 4;
+            }
+            return;
+        }
 
-    case 1+4*3:
+    case BY(1, 3):
         std::swap(a, b);
         // drop through.
-    case 3+4*1:
-        {   int64_t hi2;
-            uint64_t lo2, hi1, lo1, hi0;
-            multiply64(b[0], a[0], hi0, r[0]);
-            multiplyadd64(b[0], a[1], hi0, hi1, lo1);
-            signed_multiplyadd64(b[0], a[2], hi1, hi2, lo2);
-            if (negative(b[0]))
-            {   uint64_t borrow = subtract_with_borrow(lo1, a[0], lo1);
-                borrow = subtract_with_borrow(lo2, a[1], borrow, lo2);
-                hi2 = (int64_t)((uint64_t)hi2 - borrow);
+    case BY(3, 1):
+        {   if (b[0]==0)
+            {   c[0] = 0;
+                lenc = 1;
+                return;
             }
-            r[1] = lo1;
-            r[2] = lo2;
-            r[3] = hi2;
-            lenr = 4;
+            int64_t r3;
+            uint64_t r2, r1;
+            multiply64(b[0], a[0], r1, c[0]);
+            multiplyadd64(b[0], a[1], r1, r2, r1);
+            signed_multiplyadd64(b[0], a[2], r2, r3, r2);
+            if (negative(b[0]))
+            {   uint64_t borrow = subtract_with_borrow(r1, a[0], r1);
+                borrow = subtract_with_borrow(r2, a[1], borrow, r2);
+                r3 = (int64_t)((uint64_t)r3 - borrow);
+            }
+            c[1] = r1;
+            c[2] = r2;
+            if (shrinkable(r3, r2))
+            {   if (shrinkable(r2, r1)) lenc = 2;
+                else lenc = 3;
+            }
+            else
+            {   c[3] = (uint64_t)r3;
+                lenc = 4;
+            }
             return;
         }
 
 // Length 5 result
-    case 1+4*4:
+    case BY(1, 4):
         std::swap(a, b);
-    case 4+4*1:
-        {   int64_t hi3;
-            uint64_t lo3, hi2, lo2, hi1, lo1, hi0;
-            multiply64(b[0], a[0], hi0, r[0]);
-            multiplyadd64(b[0], a[1], hi0, hi1, lo1);
-            multiplyadd64(b[0], a[2], hi1, hi2, lo2);
-            signed_multiplyadd64(b[0], a[3], hi2, hi3, lo3);
-// Now the top 3 chunks of the (unsigned) result are in {hi3, lo3, lo2, lo1}.
-            if (negative(b[0]))
-            {   uint64_t borrow = subtract_with_borrow(lo1, a[0], lo1);
-                borrow = subtract_with_borrow(lo2, a[1], borrow, lo2);
-                borrow = subtract_with_borrow(lo3, a[2], borrow, lo3);
-                hi3 = (int64_t)((uint64_t)hi3 - borrow);
+    case BY(4, 1):
+        {   if (b[0]==0)
+            {   c[0] = 0;
+                lenc = 1;
+                return;
             }
-            r[1] = lo1;
-            r[2] = lo2;
-            r[3] = lo3;
-            r[4] = hi3;
-            lenr = 5;
+            int64_t r4;
+            uint64_t r3, r2, r1;
+            multiply64(b[0], a[0], r1, c[0]);
+            multiplyadd64(b[0], a[1], r1, r2, r1);
+            multiplyadd64(b[0], a[2], r2, r3, r2);
+            signed_multiplyadd64(b[0], a[3], r3, r4, r3);
+            if (negative(b[0]))
+            {   uint64_t borrow = subtract_with_borrow(r1, a[0], r1);
+                borrow = subtract_with_borrow(r2, a[1], borrow, r2);
+                borrow = subtract_with_borrow(r3, a[2], borrow, r3);
+                r4 = (int64_t)((uint64_t)r4 - borrow);
+            }
+            c[1] = r1;
+            c[2] = r2;
+            c[3] = r3;
+            if (shrinkable(r4, r3))
+            {   if (shrinkable(r3, r2)) lenc = 3;
+                else lenc = 4;
+            }
+            else
+            {   c[4] = (uint64_t)r4;
+                lenc = 5;
+            }
             return;
         }
 
-    case 2+4*3:
+    case BY(2, 3):
         std::swap(a, b);
-    case 3+4*2:
-        {   int64_t hi3;
-            uint64_t lo3, hi1, hi1a, lo1;
+    case BY(3, 2):
+        {   int64_t r4;
+            uint64_t r3, r3a, r2;
             mul2x2(a[1], a[0], b[1], b[0],
-                   hi1, lo1, r[1], r[0]);
-            multiplyadd64(a[2], b[0], lo1, hi1a, lo1);
-            uint64_t carry = add_with_carry(hi1, hi1a, hi1);
-            signed_multiplyadd64((int64_t)a[2], (int64_t)b[1], hi1, hi3, lo3);
-            hi3 = (int64_t)((uint64_t)hi3 + carry);
+                   r3, r2, c[1], c[0]);
+            multiplyadd64(a[2], b[0], r2, r3a, r2);
+            uint64_t carry = add_with_carry(r3, r3a, r3);
+            signed_multiplyadd64((int64_t)a[2], (int64_t)b[1], r3, r4, r3);
+            r4 = (int64_t)((uint64_t)r4 + carry);
             if (negative(b[1]))
-            {   uint64_t borrow = subtract_with_borrow(lo1, a[0], lo1);
-                borrow = subtract_with_borrow(lo3, a[1], borrow, lo3);
-                hi3 = (int64_t)((uint64_t)hi3 - borrow);
+            {   uint64_t borrow = subtract_with_borrow(r2, a[0], r2);
+                borrow = subtract_with_borrow(r3, a[1], borrow, r3);
+                r4 = (int64_t)((uint64_t)r4 - borrow);
             }
             if (negative(a[2]))
-            {   uint64_t borrow = subtract_with_borrow(lo3, b[0], lo3);
-                hi3 = (int64_t)((uint64_t)hi3 - borrow);
+            {   uint64_t borrow = subtract_with_borrow(r3, b[0], r3);
+                r4 = (int64_t)((uint64_t)r4 - borrow);
             }
-            r[2] = lo1;
-            r[3] = lo3;
-            r[4] = hi3;
-            lenr = 5;
+            c[2] = r2;
+            c[3] = r3;
+            if (shrinkable(r4, r3))
+            {   if (shrinkable(r3, r2)) lenc = 3;
+                else lenc = 4;
+            }
+            else
+            {   c[4] = (uint64_t)r4;
+                lenc = 5;
+            }
             return;
         }
 
 // Length 6 results
-    case 2+4*4:
-    case 4+4*2:
+    case BY(2, 4):
+    case BY(4, 2):
 // I do not have to implement all the cases here - any that I either choose
 // not to or have not got around to can merely go "break;" and join in the
 // generic path.
         break;
 
-    case 3+4*3:
-        {   int64_t hi3;
-            uint64_t hi2, hi2a, hi1, hi1a, lo1;
-            mul2x2(a[1], a[0], b[1], b[0],
-                   hi1, lo1, r[1], r[0]);
-            multiplyadd64(a[2], b[0], lo1, hi1a, lo1);
-            uint64_t carry = add_with_carry(hi1, hi1a, hi1);
-            multiplyadd64(a[0], b[2], lo1, hi1a, lo1);
-            carry += add_with_carry(hi1, hi1a, hi1);
-
-            multiplyadd64(a[2], b[1], hi1, hi2, hi1);
-            carry = add_with_carry(hi2, carry, hi2);
-            multiplyadd64(a[1], b[2], hi1, hi2a, hi1);
-            carry = add_with_carry(hi2, hi2a, hi2);
-            signed_multiplyadd64((int64_t)a[2], (int64_t)b[2], hi2, hi3, hi2);
-            hi3 = (int64_t)((uint64_t)hi3 + carry);
-            if (negative(b[2]))
-            {   uint64_t borrow = subtract_with_borrow(hi1, a[0], hi1);
-                borrow = subtract_with_borrow(hi2, a[1], borrow, hi2);
-                hi3 = (int64_t)((uint64_t)hi3 - borrow);
+    case BY(3, 3):
+        {   int64_t r5;
+            uint64_t r4, r3, r2, r1;
+            mul3x3S(a[2], a[1], a[0], b[2], b[1], b[0],
+                    r5, r4, r3, r2, r1, c[0]);
+            c[1] = r1;
+            c[2] = r2;
+            c[3] = r3;
+            c[4] = r4;
+            if (shrinkable(r5, r4))
+            {   if (shrinkable(r4, r3)) lenc = 4;
+                else lenc = 5;
             }
-            if (negative(a[2]))
-            {   uint64_t borrow = subtract_with_borrow(hi1, b[0], hi1);
-                borrow = subtract_with_borrow(hi2, b[1], borrow, hi2);
-                hi3 = (int64_t)((uint64_t)hi3 - borrow);
+            else
+            {   c[5] = (uint64_t)r5;
+                lenc = 6;
             }
-            r[2] = lo1;
-            r[3] = hi1;
-            r[4] = hi2;
-            r[5] = hi3;
-            lenr = 6;
             return;
         }
 
 // Length 7 results
-    case 3+4*4:
-    case 4+4*3:
+    case BY(3, 4):
+    case BY(4, 3):
 // As above, cases that have not been coded here do not cause failure.
         break;
 
 
 // Length 8 result
-    case 4+4*4:
+    case BY(4, 4):
+#ifdef OLD
         {   int64_t r7;
             uint64_t r6, r5, r5a, r4, r4a, r3, r3a, r2, r2a;
-            mul2x2(a[1], a[0], b[1], b[0], r3, r2, r[1], r[0]);
+            mul2x2(a[1], a[0], b[1], b[0], r3, r2, c[1], c[0]);
             mul2x2(a[3], a[2], b[1], b[0], r5, r4, r3a, r2a);
             uint64_t carry =
                 add_with_carry(r3, r3a, add_with_carry(r2, r2a, r2), r3);
             mul2x2(a[1], a[0], b[3], b[2], r5a, r4a, r3a, r2a);
             carry += add_with_carry(r3, r3a, add_with_carry(r2, r2a, r2), r3);
-            r[2] = r2;
-            r[3] = r3;
+            c[2] = r2;
+            c[3] = r3;
             uint64_t carry1 =
                 add_with_carry(r5, r5a, add_with_carry(r4, r4a, r4), r5);
             carry1 += add_with_carry(r5, add_with_carry(r4, carry, r4), r5);
@@ -762,6 +945,13 @@ inline void kmultiply(uint64_t *a, size_t lena,
             carry1 +=
                 add_with_carry(r5, r5a, add_with_carry(r4, r4a, r4), r5);
             r7 = (int64_t)((uint64_t)r7 +  add_with_carry(r6, carry1, r6));
+#else
+        {   int64_t r7;
+            uint64_t r6, r5, r4, r3, r2;
+            mul4x4(a[3], a[2], a[1], a[0],
+                   b[3], b[2], b[1], b[0],
+                   r7, r6, r5, r4, c[3], c[2], c[1], c[0]);
+#endif
             if (negative(a[3]))
             {   uint64_t borrow = subtract_with_borrow(r4, b[0], r4);
                 borrow = subtract_with_borrow(r5, b[1], borrow, r5);
@@ -774,11 +964,17 @@ inline void kmultiply(uint64_t *a, size_t lena,
                 borrow = subtract_with_borrow(r6, borrow, r6);
                 r7 = (int64_t)((uint64_t)r7 - borrow);
             }
-            r[4] = r4;
-            r[5] = r5;
-            r[6] = r6;
-            r[7] = (uint64_t)r7;
-            lenr = 8;
+            c[4] = r4;
+            c[5] = r5;
+            c[6] = r6;
+            if (shrinkable(r7, r6))
+            {   if (shrinkable(r6, r5)) lenc = 6;
+                else lenc = 7;
+            }
+            else
+            {   c[7] = (uint64_t)r7;
+                lenc = 8;
+            }
             return;
         }
 
@@ -789,15 +985,38 @@ inline void kmultiply(uint64_t *a, size_t lena,
 
 // If the smaller input is reasonably small I will merely use classical
 // multiplication.
-    if (lenb < KARATSUBA_CUTOFF ||
-        lenb < KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, r);
+    if (lena < KARATSUBA_CUTOFF ||
+        lenb < KARATSUBA_CUTOFF)
+    {
+// I have to make lena==1 and lenb==1 special cases because a special
+// situation within those case is multiplication by zero.
+        if (lena==1)
+        {   if (a[0]==0)
+            {   c[0] = 0;
+                lenc = 1;
+                return;
+            }
+            else classical_multiply(a[0], b, lenb, c);
+        }
+        else if (lenb==1)
+        {   if (b[0]==0)
+            {   c[0] = 0;
+                lenc = 1;
+                return;
+            }
+            else classical_multiply(b[0], a, lena, c);
+        }
+        else classical_multiply(a, lena, b, lenb, c);
+    }
     else
     {
 // For many smaller cases I will just use some static pre-allocated workspace
 // and hence avoid potential storage management overheads.
         if (lena <= KARA_FIXED_WORKSPACE_SIZE ||
             lenb <= KARA_FIXED_WORKSPACE_SIZE)
-            kara(a, lena, b, lenb, r, kara_workspace);
+        {   assert(c[lena+lenb] == 0x5555555555555555);
+            kara(a, lena, b, lenb, c, kara_workspace);
+        }
         else
         {   push(a); push(b);
             size_t lenw;
@@ -806,7 +1025,8 @@ inline void kmultiply(uint64_t *a, size_t lena,
             for (size_t i=lenw; i>8; i=i/2) lenw++;
             uint64_t *w = reserve(2*lenw);
             pop(b); pop(a);
-            kara(a, lena, b, lenb, r, w);
+            assert(c[lena+lenb] == 0x5555555555555555);
+            kara(a, lena, b, lenb, c, w);
             abandon(w);
         }
     }
@@ -815,23 +1035,23 @@ inline void kmultiply(uint64_t *a, size_t lena,
     if (negative(a[lena-1]))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lenb; i++)
-            carry = add_with_carry(r[i+lena], ~b[i], carry, r[i+lena]);
+            carry = add_with_carry(c[i+lena], ~b[i], carry, c[i+lena]);
     }
     if (negative(b[lenb-1]))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lena; i++)
-            carry = add_with_carry(r[i+lenb], ~a[i], carry, r[i+lenb]);
+            carry = add_with_carry(c[i+lenb], ~a[i], carry, c[i+lenb]);
     }
-// The actual value may be 1 word shorter than this. So test the top
-// digit of r and if necessary reduce lenr. But note that I can only
-// ever need to shrink the result by 1 word. Also note that the pending
-// result is at least of length 2 here.
-    lenr = lena + lenb;
-    if (r[lenr-1] == 0)
-    {   if (positive(r[lenr-2])) lenr--;
-    }
-    else if (r[lenr-1] == -(uint64_t)1)
-    {   if (negative(r[lenr-2])) lenr--;
+// The actual value may be 1 or 2 words shorter than this. So test the top
+// digit of c and if necessary reduce lenc.
+// Also note that the pending  result is at least of length 2 here because
+// various small cases had been processed in-line earlier.
+// eg {0, 0x8000000000000000} times itself is {0, 0, 0x4000000000000000, 0}
+// and both leading zeros can be trimmed.
+    lenc = lena + lenb;
+    if (shrinkable(c[lenc-1], c[lenc-2]))
+    {   lenc--;
+        if (shrinkable(c[lenc-1], c[lenc-2])) lenc--;
     }
 }
 
@@ -851,12 +1071,13 @@ inline void kmultiply(uint64_t *a, size_t lena,
 
 // This is extracted from a slightly old arithlib.hpp and is a direct
 // classical implementation of multiplication that I have tested reasonably
-// thoroughly.
+// thoroughly. It is used so that its results can be compared against the
+// ones that my more complicated code produce.
 
 inline void referencemultiply(const uint64_t *a, size_t lena,
                              const uint64_t *b, size_t lenb,
-                             uint64_t *r, size_t &lenr)
-{   for (size_t i=0; i<lena+lenb; i++) r[i] = 0;
+                             uint64_t *c, size_t &lenc)
+{   for (size_t i=0; i<lena+lenb; i++) c[i] = 0;
 // If a and/or be are negative then I can treat their true values as
 //    a = sa + va      b = sb + vb
 // where sa and sb and the signs - represented here as 0 for a positive
@@ -880,48 +1101,80 @@ inline void referencemultiply(const uint64_t *a, size_t lena,
 // up LESS than the maximum, and so adding one to it can happen without
 // overflow.
             multiplyadd64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, r[i+j], r[i+j]);
+            hi += add_with_carry(lo, c[i+j], c[i+j]);
         }
-        r[i+lenb] = hi;
+        c[i+lenb] = hi;
     }
     if (negative(a[lena-1]))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lenb; i++)
-            carry = add_with_carry(r[i+lena], ~b[i], carry, r[i+lena]);
+            carry = add_with_carry(c[i+lena], ~b[i], carry, c[i+lena]);
     }
     if (negative(b[lenb-1]))
     {   uint64_t carry = 1;
         for (size_t i=0; i<lena; i++)
-            carry = add_with_carry(r[i+lenb], ~a[i], carry, r[i+lenb]);
+            carry = add_with_carry(c[i+lenb], ~a[i], carry, c[i+lenb]);
     }
-    lenr = lena + lenb;
-// The actual value may be 1 word shorter than this.
-//  test top digit or r and if necessary reduce lenr.
-    truncate_positive(r, lenr);
-    truncate_negative(r, lenr);
+    lenc = lena + lenb;
+// The actual value may be shorter than this.
+//  test top digit or c and if necessary reduce lenc.
+    truncate_positive(c, lenc);
+    truncate_negative(c, lenc);
 }
 
 
 
-static const size_t MAX = 3000;
+INLINE_VAR const size_t MAX = 3000;
 
-uint64_t a[MAX];
-uint64_t b[MAX];
-uint64_t c[2*MAX];
-uint64_t c1[2*MAX];
-uint64_t w[3*MAX];
+INLINE_VAR uint64_t a[MAX];
+INLINE_VAR uint64_t b[MAX];
+INLINE_VAR uint64_t c[2*MAX];
+INLINE_VAR uint64_t c1[2*MAX];
+INLINE_VAR uint64_t w[3*MAX];
 
-size_t lena, lenb, lenc, lenc1, lenw;
+INLINE_VAR size_t lena, lenb, lenc, lenc1, lenw;
 
-static uint64_t MULT = 6364136223846793005U;
-static uint64_t ADD  = 1442695040888963407U;
+// The following are parameters for a plausible linear congruential generator.
+INLINE_VAR const uint64_t MULT = 6364136223846793005U;
+INLINE_VAR const uint64_t ADD  = 1442695040888963407U;
+
+// This program is invoked as
+//   ./kara2   -k=N   M
+// where N is the transition level between classical and Karatsuba
+// multiplication and M is a seed for the random number generator.
 
 int main(int argc, char *argv[])
-{   uint64_t seed;
-    if (argc > 1) seed = atoi(argv[1]);
-    else seed = mersenne_twister() & 0xffff;
-    std::cout << "Karatsuba tests " << seed << std::endl;
+{   uint64_t seed = 0;
+    int LEN = 500;
+    int N = 30;
+    std::cout << argv[0] << ": [options]" << std::endl;
+    std::cout << "   -k={N:" << K << "}    Transition to use Karatsuba" << std::endl;
+    std::cout << "   -l={N:500}   For gmp comparison test up to N (64-bit word) case" << std::endl;
+    std::cout << "   -n={N:30}    For gmp comparison controls the number of tests per run" << std::endl;
+    std::cout << "   {N:<random>} Initial seed for random number generator" << std::endl;
+    std::cout << std::endl;
+    for (int i=1; i<argc; i++)
+    {   char *a = argv[i];
+        if (std::strncmp(a, "-k=", 3) == 0)      KARATSUBA_CUTOFF=std::atoi(a+3);
+        else if (std::strncmp(a, "-k", 2) == 0)  KARATSUBA_CUTOFF=std::atoi(a+2);
+        else if (std::strncmp(a, "-l=", 3) == 0) LEN=std::atoi(a+3);
+        else if (std::strncmp(a, "-l", 2) == 0)  LEN=std::atoi(a+2);
+        else if (std::strncmp(a, "-n=", 3) == 0) N=std::atoi(a+3);
+        else if (std::strncmp(a, "-n", 2) == 0)  N=std::atoi(a+2);
+        else                                     seed=std::atoi(a);
+    }
+// Impose limits on the various input parameters.
+    if (KARATSUBA_CUTOFF < 4) KARATSUBA_CUTOFF = 4;
+    if (LEN < 20) LEN = 20;
+    else if (LEN > 10000) LEN = 10000;
+    if (N < 5) N = 5;
+    else if (N > 1000) N = 1000;
+    if (seed == 0) seed = mersenne_twister() & 0xfffff;
     reseed(seed);
+    std::cout << "Karatsuba tests "
+              << " cutoff=" << KARATSUBA_CUTOFF
+              << "  LEN = " << LEN << "  N = " << N
+              << " seed = " << seed << std::endl;
 
 #ifndef NO_CORRECTNESS
 
@@ -929,23 +1182,18 @@ int main(int argc, char *argv[])
 // to multiply each m*n prefix of it. It compares the results from the
 // new code here against those from  "referencemultiply".
 
-    for (int run=0; run<40; run++)
+    std::cout << "Correctness test" << std::endl;
+    for (int run=0; run<100; run++)
     {   for (size_t i=0; i<MAX; i++)
         {   a[i] = mersenne_twister();
             b[i] = mersenne_twister();
         }
         uint64_t toplen = mersenne_twister();
         int count = 0;
-        int maxlen = 10; // 20;
+        int maxlen = 64;
         for (lena=1; lena<maxlen; lena++)
         {   for (lenb=1; lenb<maxlen; lenb++)
-            {   std::cout << " " << lena
-                          << "*" << lenb
-                          << " ";
-                if (++count == 8)
-                {   std::cout << std::endl;
-                    count = 0;
-                }
+            {
 // I will fudge the lengths of the top words of the two numbers. This is so
 // that my correctness test gets both +ve and -ve numbers and ones with
 // from 1 to 63 bits in use in the top word of the bignum, and hence it
@@ -954,15 +1202,33 @@ int main(int argc, char *argv[])
                 int s1 = toplen%64;
                 int s2 = (toplen>>6)%64;
                 uint64_t savea = a[lena-1], saveb = b[lenb-1];
+// Here I am IMPROPERLY assuming that right shifts on signed values are
+// arithmetic and hence they propagate the sign bit down.
                 a[lena-1] = ((int64_t)a[lena-1])>>s1;
                 b[lenb-1] = ((int64_t)b[lenb-1])>>s2;
+                if (lena > 1)
+                {   if (a[lena-1] == 0)  a[lena-2] |= 0x8000000000000000;
+                    if (a[lena-1] == -1) a[lena-2] &= 0x7fffffffffffffff;
+                }
+                if (lenb > 1)
+                {   if (b[lenb-1] == 0)  b[lenb-2] |= 0x8000000000000000;
+                    if (b[lenb-1] == -1) b[lenb-2] &= 0x7fffffffffffffff;
+                }
+                for (size_t i=0; i<lena+lenb+1; i++)
+                    c[i] = c1[i] = 0x5555555555555555;
                 referencemultiply(a, lena, b, lenb, c, lenc);
                 kmultiply(a, lena, b, lenb, c1, lenc1);
-                bool ok=(lenc == lenc1);
+                bool ok=(lenc == lenc1 &&
+                         c[lena+lenb] == 0x5555555555555555 &&
+                         c1[lena+lenb] == 0x5555555555555555);
                 for (size_t i=0; ok && i<lenc; i++)
                     if (c[i] != c1[i]) ok = false;
                 if (!ok)
                 {   std::cout << std::endl;
+                    std::cout << "Failed at "
+                              << lena << "*" << lenb << std::endl;
+                    std::cout << std::hex << "c-end = " << c[lena+lenb] << std::endl;
+                    std::cout << std::hex << "c1-end = " << c1[lena+lenb] << std::endl;
                     display("a", a, lena);
                     display("b", b, lenb);
                     display("c ", c,  lenc);
@@ -974,7 +1240,6 @@ int main(int argc, char *argv[])
                 b[lenb-1] = saveb;
             }
         }
-        std::cout << std::endl;
     }
 
 #endif // NO_CORRECTNESS
@@ -1004,6 +1269,7 @@ int main(int argc, char *argv[])
 // a negative value.
                 a[lena-1] &= 0x7fffffffffffffff;
                 b[lenb-1] &= 0x7fffffffffffffff;
+                for (size_t i=0; i<lena+lenb+1; i++) c1[i] = 0x5555555555555555;
                 for (size_t m=0; m<500; m++)
                     kmultiply(a, lena, b, lenb, c1, lenc1);
                 for (size_t i=0; i<lena; i++)
@@ -1037,6 +1303,7 @@ int main(int argc, char *argv[])
         for (size_t n = 0; n<100000/(4+lena*lena); n++)
         {   a[lena-1] &= 0x7fffffffffffffff;
             b[lenb-1] &= 0x7fffffffffffffff;
+            for (size_t i=0; i<lena+lenb+1; i++) c1[i] = 0x5555555555555555;
             for (size_t m=0; m<1000; m++)
                 kmultiply(a, lena, b, lenb, c1, lenc1);
             for (size_t i=0; i<lena; i++)
@@ -1064,20 +1331,16 @@ int main(int argc, char *argv[])
     uint64_t my_check = 1;
     uint64_t gmp_check = 1;
 
-    KARATSUBA_CUTOFF = 16;   // Use (at least close to) optimal value.
+    KARATSUBA_CUTOFF = 14;   // Use (at least close to) optimal value.
 
-    const size_t N = 10000; // 100000; @@@
     size_t tests;
 
     reseed(seed);
     lena = 1;
     for (size_t trial=0; trial<table_size; trial++)
-    {   lena = (9*lena+7)/8;
-// This arranges to run tests using a sequence of number-lengths
-// from 2 to 1000 such that each case is around 20% longer than the
-// previous one. This turns out to give about 30 samples.
+    {   lena = (21*lena+19)/20;
         size[trial] = 0;
-        if (lena >= 2000) break;
+        if (lena >= LEN) break;
         lenb = lena;
 // I start by filling my input vectors with random data. I set the same
 // seed before trying my code and before trying gmp so that each get the
@@ -1092,7 +1355,7 @@ int main(int argc, char *argv[])
 // grow as n^1.585, and so to arrange that I tke roughly the same
 // absolute time on each number-length I perform my tests a number of
 // times scaled inversely by that.
-        size_t tests = 2+N/(int)std::pow((double)lena, 1.585);
+        size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
         for (size_t n = 0; n<tests; n++)
         {
 // The gpm function mpn_mul multiplies unsigned integers, while my
@@ -1106,8 +1369,9 @@ int main(int argc, char *argv[])
             a[lena-1] &= 0x7fffffffffffffffU;
             b[lena-1] &= 0x7fffffffffffffffU;
 // So that all the administration here does not corrupt my measurement
-// I do the actual multiplication of each test case 5000 times.
-            for (size_t m=0; m<5000; m++)
+// I do the actual multiplication of each test case 500 times.
+            for (size_t i=0; i<lena+lenb+1; i++) c1[i] = 0x5555555555555555;
+            for (size_t m=0; m<500; m++)
                 kmultiply(a, lena, b, lenb, c1, lenc1);
 // By accumulating a sort of checksum on all the products that I compute
 // I will be able to reassure myself that the output from gmp and from my
@@ -1127,7 +1391,7 @@ int main(int argc, char *argv[])
         double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
 // I store details of this test run in an array for display later on.
         size[trial] = lena;
-        testcount[trial] = 5000*tests;
+        testcount[trial] = 500*tests;
         mine[trial] = t;
         std::cout << ".";
         std::cout.flush();
@@ -1138,8 +1402,8 @@ int main(int argc, char *argv[])
     reseed(seed);
     lena = 1;
     for (size_t trial=0; trial<table_size; trial++)
-    {   lena = (9*lena+7)/8;
-        if (lena >= 2000) break;
+    {   lena = (21*lena+19)/20;
+        if (lena >= LEN) break;
         lenb = lena;
         for (size_t i=0; i<lena; i++)
         {   a[i] = mersenne_twister();
@@ -1149,11 +1413,11 @@ int main(int argc, char *argv[])
 // somewhere around lena=1400 the fraction on the next line reduces
 // to zero. So for the last few cases I will take distinctly longer
 // than for each of the rest.
-        size_t tests = 2+N/(int)std::pow((double)lena, 1.585);
+        size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
         for (size_t n = 0; n<tests; n++)
         {   a[lena-1] &= 0x7fffffffffffffffU;
             b[lena-1] &= 0x7fffffffffffffffU;
-            for (size_t m=0; m<5000; m++)
+            for (size_t m=0; m<500; m++)
                 mpn_mul((mp_ptr)c, (mp_srcptr)a, lena, (mp_srcptr)b, lenb);
             for (size_t i=0; i<lena+lenb; i++)
                 gmp_check = gmp_check*MULT + c[i];
@@ -1171,7 +1435,7 @@ int main(int argc, char *argv[])
 
 // Display the checksum output. Note that this also ensures that the
 // result of the multiplication (well more pedantically the result of
-// the last of 5000 multiplications!) is used so clever optimizing
+// the last of 500 multiplications!) is used so clever optimizing
 // compilers are not allowed to avoid computing it!
     std::cout << std::endl;
     std::cout << (my_check == gmp_check ? "checksums match" :
@@ -1201,84 +1465,7 @@ int main(int argc, char *argv[])
 
 #endif // NO_GMP
 
-
-#ifdef OLD_CODE
-    std::cout << "The timing columns are the times in seconds for 500M/n^2" << std::endl;
-    std::cout << "unsigned multiplications, where n is the number of words" << std::endl;
-    std::cout << "in each of the two numbers being multiplied." << std::endl;
-    std::cout << std::setw(10) << std::fixed << " "
-                      << "    " << "Classical"
-                      << "    " << "Karatsuba"
-                      << "    " << "Classic/Kara"
-                      << std::endl;
-    for (lena=1; lena<table_size; lena++)
-    {   lenb = lena;
-        uint64_t s = mersenne_twister();
-        reseed(s);
-        (void)mersenne_twister();
-        clock_t cl0 = clock();
-        for (int pass=0; pass<100; pass++)
-        {   for (size_t i=0; i<lena; i++)
-            {   a[i] = mersenne_twister();
-                b[i] = mersenne_twister();
-            }
-            for (size_t i=0; i<5000000/(lena*lena); i++)
-                classical_multiply(a, lena, b, lenb, c);
-        }
-        clock_t cl1 = clock();
-        reseed(s);
-        (void)mersenne_twister();
-        clock_t cl1a = clock();
-        for (int pass=0; pass<100; pass++)
-        {   for (size_t i=0; i<lena; i++)
-            {   a[i] = mersenne_twister();
-                b[i] = mersenne_twister();
-            }
-            for (size_t i=0; i<5000000/(lena*lena); i++)
-                kara(a, lena, b, lenb, c1, kara_workspace);
-        }
-        clock_t cl2 = clock();
-        double t1 = cl1-cl0;
-        double t2 = cl2-cl1a;
-        std::cout << std::setw(10) << std::fixed << lena
-                          << "    " << (t1/(double)CLOCKS_PER_SEC)
-                          << "    " << (t2/(double)CLOCKS_PER_SEC)
-                          << "    " << (t1/t2)
-                          << std::endl;
-        reseed(s);
-        (void)mersenne_twister();
-        bool ok = true;
-        for (int pass=0; pass<100; pass++)
-        {   for (size_t i=0; i<lena; i++)
-            {   a[i] = mersenne_twister();
-                b[i] = mersenne_twister();
-            }
-            classical_multiply(a, lena, b, lenb, c);
-            kara(a, lena, b, lenb, c1, kara_workspace);
-            ok=true;
-            for (size_t i=0; ok && i<lena+lenb; i++)
-                if (c[i] != c1[i]) ok = false;
-            if (!ok) break;
-        }
-        if (!ok)
-        {   display("a", a, lena);
-            display("b", b, lenb);
-            display("c ", c,  lenc);
-            display("c1", c1, lenc1);
-            return 1;
-        }
-    }
-#endif // OLD_CODE
-
     std::cout << "Finished" << std::endl;
-    std::cout << "mc1=" << mc1 << " mc2=" << mc2
-              << " mc3=" << mc3 << " mc4=" << mc4 << std::endl;
-    for (int i=0; i<16; i++)
-    {   std::cout << std::setw(3) << i << " ";
-        for (int j=0; j<16; j++)
-            std::cout << std::setw(10) << mulcounts[i+16*j] << " ";
-        std::cout << std::endl;
-    }
     return 0;
 }
 

@@ -36,6 +36,9 @@
 // Windows with only modest overhead.
 
 
+#include <cstdint>
+#include <cstdlib>
+
 // I will call a function of the form "void *f(void *a)" on a different
 // stack. I am viewing "void *" as a generic type for an argument or a
 // result so that any interesting values can be passed across ising it.
@@ -49,43 +52,183 @@ typedef void *function_to_call(void *);
 // a low segment of it can be used as thread-local storage. This is
 // achieved by defining a structure to contain thread-local values, as in
 //
-//   typedef struct __my_thread_locals
-//   {   void *__reserved_for_old_stack_pointer__;
+//   typedef struct __thread_locals
+//   {
+//   public:
 //       int a;
 //       double d;
 //       char c[10];
-//   } my_thread_locals;
+//   } thread_locals;
+//
 // and then writing
-//   {   int localvar;
-//       my_thread_locals *p =
-//           (my_thread_locals *)((uintptr_t)&localvar & ~0xfffff);
-//       ... p.a ... p.d ... p.c[2] ...
-//   }
+//   my_tl()->a     my_tl()->d     my_tl()->c
+// to access them.
+//
 
+#ifdef TEST
+
+class thread_locals
+{
+public:
+    int i;
+};
+
+#endif // TEST
+
+// When this is compiled one (but not both!) of USE_NATIVE_THREAD_LOCAL
+// or USE_FAKE_THREAD_LOCAL can be defined to control how this works. If
+// you are building on Windows the FAKE option is the default. On all other
+// systems the NATIVE one is the default.
+
+#ifdef USE_NATIVE_THREAD_LOCAL
+#ifdef USE_FAKE_THREAD_LOCAL
+// It is an error to have both options selected.
+#error You have selected both NATIVE and FAKE options
+#endif
+#else // USE_NATIVE_THREAD_LOCAL
+#ifndef USE_FAKE_THREAD_LOCAL
+// If neither option was explicit I use a platform-specific default.
+#ifdef __WIN32__
+#define USE_FAKE_THREAD_LOCAL 1
+#else
+#define USE_NATIVE_THREAD_LOCAL 1 
+#endif // __WIN32
+#endif // USE_FAKE_THREAD_LOCALS
+#endif // USE_NATIVE_THREAD_LOCALS
+
+#ifdef USE_NATIVE_THREAD_LOCAL
+
+// This case is really easy. By using an inline function I expect that
+// my_tl()->a will compile into code that is the same as that for just
+// my_thread_locals.a and any overhead will be just in the system support
+// for thread_local access, which on many systems is rather low.
+
+thread_local thread_locals my_thread_locals;
+
+inline thread_locals *my_tl()
+{   return &my_thread_locals;
+}
+
+inline void *call_for_thread(function_to_call *f, void *arg)
+{   return f(arg);
+}
+
+#endif
+
+
+#ifdef USE_FAKE_THREAD_LOCAL
+
+#ifdef __cpp_inline_variables
+#define INLINE_VAR inline
+#else
+#define INLINE_VAR static
+#endif
+
+#ifndef STACK_BITS
+INLINE_VAR constexpr int STACK_BITS = 20;
+#endif
+
+// The idea here will be that my stack is smaller than (1<<STACK_BITS) and
+// lives in a block of memory that was allocated aligned that way (eg
+// typically a 1Mbyte stack allocated at an address that is a multiple of
+// 1Mbyte). If I take the address of an 8-byte aligned local variable and
+// OR in a bunch of low bits I can get the address of the top 8-byte
+// item in the stack segment. In this code that word will be used to
+// hold a previous stack pointer. Below this top word is an instance of
+// a thread_locals object, and I need to mess around somewhat here to allow
+// for its alignment, but a good compiler should elide pretty well all of this
+// into just one or two instructions.
+
+inline thread_locals *my_tl()
+{   double d;    // will be aligned on 8-byte boundary
+    uintptr_t i = (intptr_t)&d | (1<<STACK_BITS - 8);
+    size_t s = sizeof(thread_locals);
+    size_t a = alignof(thread_locals);
+    size_t w = (8 + s + a-1) & (-a);
+    return (thread_locals *)(i + 8 - w);
+}
+
+// The key trick here is the following function, which is to be called
+// as about the first thing that any thread does. It moved machine registers
+// around so that the call to the target function f is executed in the
+// stack segment that it is given.
 
 void __attribute__ ((noinline)) *otherstack(
     function_to_call *f,
     void *arg,
     char *new_stack)
-{   void *stacktop = (void *)&new_stack[0xffff0];
+{   uintptr_t mask = 1<<STACK_BITS - 8;
+    void *old_stackloc = (void *)&new_stack[mask];
+    size_t s = sizeof(thread_locals);
+    size_t a = alignof(thread_locals);
+    size_t w = (8 + s + a-1) & (-a);
+// The new stack must be aligned on a 16-byte boundary, so I have left space
+// here for 8 bytes of old stack pointer, then an (aligned) instance of
+// thread_locals and then whatever gap is required to bump alignment up to
+// 16 bytes.
+    void *new_stacktop = (void *)
+        (((uintptr_t)old_stackloc + 8 - w) & -(size_t)16);
     asm
     (   "movq %%rsp, (%0)\n\t"   // Save old stack pointer at base of block.
         "movq %1, %%rsp"         // Set stack pointer near top of new block.
         :
-        : "r" (new_stack), "r" (stacktop)
+        : "r" (old_stackloc), "r" (new_stacktop)
         :
     );
     void *ret = (*f)(arg);
     asm
-    (   "movq %%rsp, %%rcx\n\t"  // Find base of the block by masking rsp down.
-        "andq $0xfffffffffff00000, %%rcx\n\t"
+    (   "movq %%rsp, %%rcx\n\t"  // Find top of the stack block
+        "orq %0, %%rcx\n\t"      // I will expect rsp to be 8-byte aligned.
         "movq (%%rcx), %%rsp"    // Recover previous stack pointer.
         :
-        :
+        : "rmi" (mask)
         :
     );
     return ret;
 }
+
+inline void *call_for_thread(function_to_call *f, void *arg)
+{
+    size_t constexpr alignment = (size_t)(1<<STACK_BITS);
+#ifdef __cpp_aligned_new
+    class alignas(alignment) stack_block {};
+    void *p = (void *)new stack_block;
+#else // __cpp_aligned_new
+    size_t space = 2*alignment;
+    void *p = (void *)new char[space];
+    if (p == NULL) return NULL;
+#ifdef ONE_DAY
+// C++11 provides std::align but versions of g++ up to 5.x do not, even
+// though in general their support for C++11 is robust. So I will provide
+// my own cruder version!
+    if (std::align(alignment, alignment, p, space) == NULL)
+    {   delete (char *)p;
+        return NULL;
+    }
+#else // ONE _DAY
+    p = (void *)(((uintptr_t)p + alignment - 1) & (-alignment));
+#endif // ONE_DAY
+#endif // __cpp_aligned_new
+    return otherstack(f, arg, (char *)p);
+}
+
+// Note somewhat horribly well that on Windows the main thread can not
+// use this until it has gone through call_for_thread() to transition itself
+// into a new stack. Well that means that to use all of this that main()
+// should do that almost as soon as it can, and then each created thread
+// must also do it.
+
+// This WASTES the space that had been allocated by default for the main
+// program and for each thread, and certainly unless you have C++17 and
+// support for over-aligned "new" (and possibly even then!) it may waste a
+// megabyte (or however much STACK_BITS indicates) per thread arranging
+// to keep things aligned as needed. But on a 64-bit machine that is not
+// really liable to feel like a problem if you are using say up to a dozen
+// threads. This is perhaps not really suitable for cases where you may use
+// hundreds of threads.
+
+
+#endif // FAKE_THREAD_LOCAL
 
 #ifdef TEST
 
@@ -93,30 +236,19 @@ void __attribute__ ((noinline)) *otherstack(
 #include <cstdint>
 
 void *testfunction(void *arg)
-{   std::cout << "Argument received as " << std::dec
+{   std::cout << "Argument received as " << std::hex
               << (intptr_t)arg << std::endl;
     std::cout << "Using other stack " << std::hex
               << ((intptr_t)&arg) << std::endl;
-// Now the previous sp should be something I can find.
-    uint64_t *base = (uint64_t *)((intptr_t)(&arg) & ~0xfffff);
-    std::cout << "base = " << std::hex << (intptr_t)base << std::endl;
-    std::cout.flush();
-    std::cout << "base[0] = " << std::hex << base[0] << std::endl;
-    std::cout.flush();
-    return (void *)67890;
+    std::cout << "Address of thread_local i = " << &(my_tl()->i) << std::endl;
+    return (void *)0x6789a;
 }
 
 int main(int argc, char *argv[])
 {   std::cout << "My stack starts off at " << std::hex
               << ((intptr_t)&argc) << std::endl;
-    char *newstack = new char[0x200000];
-    std::cout << "Raw new memory at " << std::hex
-              << ((intptr_t)newstack) << std::endl;
-    char *aligned = (char *)((intptr_t)(newstack+0xfffff) & ~0xfffff);
-    std::cout << "Aligned memory at " << std::hex
-              << ((intptr_t)aligned) << std::endl;
-    void *result = otherstack(testfunction, (void *)12345, aligned);
-    std::cout << "Result = " << std::dec << ((intptr_t)result) << std::endl;
+    void *result = call_for_thread(testfunction, (void *)0x12345);
+    std::cout << "Result = " << std::hex << ((intptr_t)result) << std::endl;
     return 0;
 }
 
