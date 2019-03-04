@@ -2131,10 +2131,12 @@ inline double float128_bignum(const Bignum &x)
 inline void display(const char *label, uint64_t *a, size_t lena)
 {   std::cout << label << " [" << (int)lena << "]";
     for (size_t i=0; i<lena; i++)
+    {   if (i!=0 && i%3==0) std::cout << std::endl << "     ";
         std::cout << " "
                   << std::hex << std::setfill('0')
                   << "0x" << std::setw(16) << a[lena-i-1]
                   << std::dec << std::setfill(' ');
+    }
     std::cout << std::endl;
 }
 
@@ -2150,11 +2152,13 @@ inline uint64_t shifted_digit(uint64_t *b, size_t lenb, int shift, size_t n)
 inline void display(const char *label, uint64_t *a, size_t lena, int shift)
 {   std::cout << label << " [" << (int)lena << "]";
     for (size_t i=0; i<=lena; i++)
+    {   if (i!=0 && i%3==0) std::cout << std::endl << "     ";
         std::cout << " "
                   << std::hex << std::setfill('0')
                   << "0x" << std::setw(16)
                   << shifted_digit(a, lena, shift, lena-i)
                   << std::dec << std::setfill(' ');
+    }
     std::cout << std::endl;
 }
 

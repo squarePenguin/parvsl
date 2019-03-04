@@ -374,7 +374,9 @@ inline uint64_t classical_multiply_and_add(uint64_t a,
 // (well their term is "limb") numbers.
 
 #ifndef K
-// I provide a default here but can override it at compile time.
+// I provide a default here but can override it at compile time. The value
+// set here is at least close to the best on my x86_64 test machine.
+
 #define K 18
 #endif
 
@@ -424,17 +426,10 @@ inline void kara_and_add2(uint64_t *a, size_t lena,
         }
     }
     else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
-    assert(c[lena+lenb] == 0x5555555555555555);
-    for (size_t i=0; i<2*n+1; i++) w[i] = 0x5555555555555555;
-    assert(w[lena+lenb] == 0x5555555555555555);
-    kara1(a, n, b, n, w, w+2*n+1);                // a0*b0
-    assert(w[lena+lenb] == 0x5555555555555555);
+    kara1(a, n, b, n, w, w+2*n);                     // a0*b0
     kadd(w, 2*n, c, lenc);                           // add in at bottom..
     ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
-    for (size_t i=0; i<lena+lenb-2*n+1; i++) w[i] = 0x5555555555555555;
-    assert(w[lena+lenb-2*n] == 0x5555555555555555);
-    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n+1);
-    assert(w[lena+lenb-2*n] == 0x5555555555555555);
+    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
     kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
     ksub(w, lena+lenb-2*n, c+n, lenc-n);
 }
@@ -486,15 +481,13 @@ inline void kara2(uint64_t *a, size_t lena,
 inline void kara1(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, uint64_t *w)
-{   assert(c[lena+lenb] == 0x5555555555555555);
-    if (lena<KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, c);
+{   if (lena<KARATSUBA_CUTOFF) classical_multiply(a, lena, b, lenb, c);
     else if (lena>lenb && lenb%2==0)
     {
 // In the case that the product is (2n+1)*(2n) I will not want to round up to
 // a (2n+1)*(2n+1) Karatsuba because then the numbers do not split neatly, and
 // I could end up padding to (2n+2)*(2n+2). So I do a (2n)*(2n) fast multiply
 // and then deal with the "+1" classically.
-        assert(c[lena+lenb] == 0x5555555555555555);
         kara2(a, lena-1, b, lenb, c, w);
 // I write the classical multiplication by a single digit out by hand
 // here: it adds its product into the result I have got already, except that
@@ -526,12 +519,10 @@ inline void kara2(uint64_t *a, size_t lena,
 {
 // The all the cases that are supported here the next line sets n to a
 // suitably rounded up half length.
-    assert(c[lena+lenb] == 0x5555555555555555);
     size_t n = (lena+1)/2;
     uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
     uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
     kara1(w, n, w+n, n, c+n, w+2*n);                 // (a0+a1)*(b0+b1)
-    assert(c[lena+lenb] == 0x5555555555555555);
 // I have now multiplied (a0+a1) truncated to n words by (b0+b1) similarly
 // truncated. However when I added a0 to a1 I might have had a carry into
 // the next word up. That means that the full product intrudes into just
@@ -543,53 +534,52 @@ inline void kara2(uint64_t *a, size_t lena,
         if (c2 != 0) c[3*n] += kadd(w, n, c+2*n, n) + 1;
     }
     else if (c2 != 0) c[3*n] = kadd(w, n, c+2*n, n);
-    assert(c[lena+lenb] == 0x5555555555555555);
 // Now form the product of the high halves of a and b. This can be shorter
 // than 2*n.
     kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
-    assert(c[lena+lenb] == 0x5555555555555555);
 // The top half of the product (less just one word!) can be copied into
 // previously unused space in c...
     for (size_t i=n+1; i<lena+lenb-2*n; i++) c[2*n+i] = w[i];
-    assert(c[lena+lenb] == 0x5555555555555555);
 // Next I subtract the high product off. This is not liable to underflow
 // (and in doing so call for a long chain of borrows) because it is basically
 // subtracting a value from 2^64 times the same value.
     ksub(w, lena+lenb-2*n, c+n, lenc-n);
-    assert(c[lena+lenb] == 0x5555555555555555);
 // Now add in the bottom part.
     kadd(w, n+1, c+2*n, lenc-2*n);
 // I now need to do something similar with the product of the low parts of
 // a and b.
     kara1(a, n, b, n, w, w+2*n);                     // a0*b0
-    assert(c[lena+lenb] == 0x5555555555555555);
 // I can just copy the low n words across.
     for (size_t i=0; i<n; i++) c[i] = w[i];
-    assert(c[lena+lenb] == 0x5555555555555555);
     kadd(w+n, n, c+n, lenc-n);                       // add in at bottom..
     ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
-    assert(c[lena+lenb] == 0x5555555555555555);
 }
 
 
 // This code is where the main recursion happens. The main complication
 // within it is dealing with unbalanced length operands.
 
+inline void karabig(uint64_t *a, size_t lena,
+                    uint64_t *b, size_t lenb,
+                    uint64_t *c, uint64_t *w);
+
+
+// I am going to hope that the compiler turns this into a tail-call to
+// either karabig or classical_multiply with very little overhead.
+
 inline void kara(uint64_t *a, size_t lena,
                  uint64_t *b, size_t lenb,
                  uint64_t *c, uint64_t *w)
 {   if (lena < KARATSUBA_CUTOFF || lenb < KARATSUBA_CUTOFF)
-    {   //if (lena==1) classical_multiply(a[0], b, lenb, c);
-        //else if (lenb==1) classical_multiply(b[0], a, lena, c);
-        //else
         classical_multiply(a, lena, b, lenb, c);
-        return;
-    }
-// For equal lengths I can do just one call to Karatsuba.
-    assert(c[lena+lenb] == 0x5555555555555555);
-    if (lena == lenb)
+    else karabig(a, lena, b, lenb, c, w);
+}
+
+inline void karabig(uint64_t *a, size_t lena,
+                    uint64_t *b, size_t lenb,
+                    uint64_t *c, uint64_t *w)
+{   if (lena == lenb)
     {   kara2(a, lena, b, lenb, c, w);
-        assert(c[lena+lenb] == 0x5555555555555555);
         return;
     }
     if (lena < lenb)
@@ -600,9 +590,7 @@ inline void kara(uint64_t *a, size_t lena,
 // using Karatsuba merely by treating the smaller number as if padded with
 // a leading zero.
     if (lena == lenb+1 && lena%2==0)
-    {   assert(c[lena+lenb] == 0x5555555555555555);
-        kara2(a, lena, b, lenb, c, w);
-        assert(c[lena+lenb] == 0x5555555555555555);
+    {   kara2(a, lena, b, lenb, c, w);
         return;
     }
 // If the two inputs are unbalanced in length I will perform multiple
@@ -621,21 +609,17 @@ inline void kara(uint64_t *a, size_t lena,
 // first.
     for (;;)
     {
-        assert(c[lena+lenb] == 0x5555555555555555);
-        kara1(a1, len, b, lenb, c1, w);
-        assert(c[lena+lenb] == 0x5555555555555555);
-        c1 += 2*len;
-// I will keep going provided the next multiplication I will do will fully fit.
-        if (lena1 < 3*len) break;
 // I may have rounded the size of b up by 1, and if I have I would generate
 // 2*len-1 digits not 2*len and hence risk leaving a 1-word gap between filled
 // in data. I zero that here to avoid trouble. However I must not do this
-// if lenb was not rounded up because that could corrupt memory beyond the
-// length of the full result! I also only do this if I am about to do another
-// multiplication in this loop, so I do not pad anything at the very end of the
-// result. The subscript "-1" here obviously looks a bit odd!
-        if (len!=lenb) c1[-1] = 0;
-        assert(c[lena+lenb] == 0x5555555555555555);
+// for if the multiplication I am about to do will write in the very top
+// digits of the final answer, because if I did that would be a sort of
+// buffer overrun.
+        if (len < lena1) c1[2*len-1] = 0;
+        kara1(a1, len, b, lenb, c1, w);
+        c1 += 2*len;
+// I will keep going provided the next multiplication I will do will fully fit.
+        if (lena1 < 3*len) break;
         a1 += 2*len;
         lena1 -= 2*len;
     }
@@ -643,19 +627,14 @@ inline void kara(uint64_t *a, size_t lena,
     {   a1 += 2*len;
         lena1 -= 2*len;
 // Do a shorter nice Multiply (without Add) to reach the end of input a.
-        assert(c[lena+lenb] == 0x5555555555555555);
         kara(a1, lena1, b, lenb, c1, w);
-        assert(c[lena+lenb] == 0x5555555555555555);
     }
     else if (lena1!=len)
     {
 // I may need to pad with zeros when the top digit to be generated will be
 // put there using MultiplyAndAdd.
-        assert(c[lena+lenb] == 0x5555555555555555);
         for (size_t i=c1-c; i<lena+lenb; i++) c[i] = 0;
-        assert(c[lena+lenb] == 0x5555555555555555);
     }
-    assert(c[lena+lenb] == 0x5555555555555555);
 // Now I need to do much the same for the odd numbered digits of a, but
 // adding the products in rather than writing them into place.
     a1 = a + len;
@@ -667,9 +646,7 @@ inline void kara(uint64_t *a, size_t lena,
     lena1 = lena - len;
     for (;;)
     {   if (lena1 < len) break;
-        assert(c[lena+lenb] == 0x5555555555555555);
         kara_and_add1(a1, len, b, lenb, c1, lenc1, w);
-        assert(c[lena+lenb] == 0x5555555555555555);
         if (lena1 <= 2*len)
         {   lena1 = 0;
             break;
@@ -679,9 +656,7 @@ inline void kara(uint64_t *a, size_t lena,
         a1 += 2*len;
         lena1 -= 2*len;
     }
-    assert(c[lena+lenb] == 0x5555555555555555);
     if (lena1!=0) kara_and_add(a1, lena1, b, lenb, c1, lenc1, w);
-    assert(c[lena+lenb] == 0x5555555555555555);
 }
 
 // Finally I can provide the top-level entrypoint that accepts signed
@@ -715,7 +690,6 @@ inline void kmultiply(uint64_t *a, size_t lena,
 // If both arguments are tiny I write out the code in-line. The timings I
 // have taken suggest that this makes a significant difference to costs, and
 // I view it as plausible that "rather small" cases will often dominate.
-    assert(c[lena+lenb] == 0x5555555555555555);
     if (lena <=4 && lenb <= 4) switch (lena + 4*lenb)
     {
 // Length 2 result
@@ -1014,9 +988,7 @@ inline void kmultiply(uint64_t *a, size_t lena,
 // and hence avoid potential storage management overheads.
         if (lena <= KARA_FIXED_WORKSPACE_SIZE ||
             lenb <= KARA_FIXED_WORKSPACE_SIZE)
-        {   assert(c[lena+lenb] == 0x5555555555555555);
-            kara(a, lena, b, lenb, c, kara_workspace);
-        }
+            karabig(a, lena, b, lenb, c, kara_workspace);
         else
         {   push(a); push(b);
             size_t lenw;
@@ -1025,8 +997,7 @@ inline void kmultiply(uint64_t *a, size_t lena,
             for (size_t i=lenw; i>8; i=i/2) lenw++;
             uint64_t *w = reserve(2*lenw);
             pop(b); pop(a);
-            assert(c[lena+lenb] == 0x5555555555555555);
-            kara(a, lena, b, lenb, c, w);
+            karabig(a, lena, b, lenb, c, w);
             abandon(w);
         }
     }
@@ -1178,6 +1149,23 @@ int main(int argc, char *argv[])
 
 #ifndef NO_CORRECTNESS
 
+    for (int i=0; i<10; i++)
+    {   a[i] = ((uint64_t)1) << (6*i);
+        b[i] = ((uint64_t)1) << (63-6*i);
+    }
+    for (int i=0; i<2*MAX; i++)
+        c[i] = c1[i] = 0x5555555555555555;
+    lena = 5;
+    lenb = 7;
+    referencemultiply(a, lena, b, lenb, c, lenc);
+    kmultiply(a, lena, b, lenb, c1, lenc1);
+    display("a ", a, lena);
+    display("b ", b, lenb);
+    display("c ", c, lenc);
+    display("c1", c1, lenc1);
+    if (lenc != lenc1 ||
+        c[lenc-1] != c1[lenc-1]) abort();
+
 // This generates some random data and then calls the multiplication code
 // to multiply each m*n prefix of it. It compares the results from the
 // new code here against those from  "referencemultiply".
@@ -1214,13 +1202,9 @@ int main(int argc, char *argv[])
                 {   if (b[lenb-1] == 0)  b[lenb-2] |= 0x8000000000000000;
                     if (b[lenb-1] == -1) b[lenb-2] &= 0x7fffffffffffffff;
                 }
-                for (size_t i=0; i<lena+lenb+1; i++)
-                    c[i] = c1[i] = 0x5555555555555555;
                 referencemultiply(a, lena, b, lenb, c, lenc);
                 kmultiply(a, lena, b, lenb, c1, lenc1);
-                bool ok=(lenc == lenc1 &&
-                         c[lena+lenb] == 0x5555555555555555 &&
-                         c1[lena+lenb] == 0x5555555555555555);
+                bool ok=(lenc == lenc1);
                 for (size_t i=0; ok && i<lenc; i++)
                     if (c[i] != c1[i]) ok = false;
                 if (!ok)
@@ -1269,7 +1253,6 @@ int main(int argc, char *argv[])
 // a negative value.
                 a[lena-1] &= 0x7fffffffffffffff;
                 b[lenb-1] &= 0x7fffffffffffffff;
-                for (size_t i=0; i<lena+lenb+1; i++) c1[i] = 0x5555555555555555;
                 for (size_t m=0; m<500; m++)
                     kmultiply(a, lena, b, lenb, c1, lenc1);
                 for (size_t i=0; i<lena; i++)
@@ -1303,7 +1286,6 @@ int main(int argc, char *argv[])
         for (size_t n = 0; n<100000/(4+lena*lena); n++)
         {   a[lena-1] &= 0x7fffffffffffffff;
             b[lenb-1] &= 0x7fffffffffffffff;
-            for (size_t i=0; i<lena+lenb+1; i++) c1[i] = 0x5555555555555555;
             for (size_t m=0; m<1000; m++)
                 kmultiply(a, lena, b, lenb, c1, lenc1);
             for (size_t i=0; i<lena; i++)
@@ -1321,7 +1303,7 @@ int main(int argc, char *argv[])
 
 
 #ifndef NO_GMP
-    const size_t table_size = 100;
+    const size_t table_size = 300;
 
     size_t size[table_size];
     size_t testcount[table_size];
@@ -1370,7 +1352,6 @@ int main(int argc, char *argv[])
             b[lena-1] &= 0x7fffffffffffffffU;
 // So that all the administration here does not corrupt my measurement
 // I do the actual multiplication of each test case 500 times.
-            for (size_t i=0; i<lena+lenb+1; i++) c1[i] = 0x5555555555555555;
             for (size_t m=0; m<500; m++)
                 kmultiply(a, lena, b, lenb, c1, lenc1);
 // By accumulating a sort of checksum on all the products that I compute
