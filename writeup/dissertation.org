@@ -1,5 +1,5 @@
 #+TITLE: Implementing parallelism in Lisp for REDUCE
-#+SUBTITLE: Progress report
+#+SUBTITLE: Computer Science Part II Project
 #+AUTHOR: Andrei Vlad Badelita
 #+EMAIL: avb40@cam.ac.uk
 
@@ -26,7 +26,7 @@ own design and set of capabilities.
 
 Over the years, there have been multiple implementations of the Lisp compiler REDUCE is using, with
 different goals: PSL, CSL and VSL. VSL is an interpreted language written in the programming
-language C. It is fully capable of building the entirety of REDUCE, supports all the major 
+language ~C~. It is fully capable of building the entirety of REDUCE, supports all the major 
 platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
 of being interpreted.
 
@@ -40,7 +40,7 @@ explain there was
 *** TODO talk about planning
 *** TODO describe how I could have debugged it well
 
-** TODO Argue for the benefits of multithreading
+** Benefits of multithreading
 
 The idea of using parallel computing to speed up computer algebra computing has come
 up in research papers for many years ~TODO reference it~, but much of the activity now
@@ -51,13 +51,33 @@ area of imrpovement in these new CPUs is their core count and number of hardware
 Binding the performance of Reduce to single-threaded performance is likely to lead to
 a limitation in speed gains from new hardware.
 
+** Code examples
+
+To help explain the concepts I introduce, I will use code fragments showing the algorithms.
+These fragments will be a simplification of the original code, in order to remove the need
+for context within the rest of the codebase. I will use two programming languages in this review:
+C++ and OCaml. C++ code will be used where the original code is on the Lisp interpreter.
+
+For concepts related to the target language, I will be using OCaml instead of Lisp for readability.
+Just like the original Lisp was only intended as an intermediate representation, Lisp is not used
+in REDUCE directly. An additional language called ~RLISP~ is used instead. RLISP is simply aiming
+to provide a more readable syntax, however this syntax is ALGOL inspired and unfamiliar to most
+programmers nowadays. I have decided to use an ML style syntax in this writeup, which should aid
+with brevity and readability.
 
 * TODO Preparation
 
-** TODO ParVSL
+** DONE ParVSL
+   CLOSED: [2019-03-07 Thu 18:09]
 
 I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
 ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
+
+VSL was a good candidate for this project because it featured a complete, working Lisp implementation while being
+small enough to be a managable project. The entire VSL codebase consists of around 10000 lines of code, all of which
+was originally contained within a single file. Before making changes in critical areas, I spent some time familiarising
+myself with the code. This included spliting the project in more more files, fixing a few obvious bugs, and porting
+to C++.
 
 ** From C to C++
 
@@ -82,7 +102,7 @@ and became confident those changes wouldn't affect the semantics of the program.
 ** DONE Throughput vs latency
    CLOSED: [2019-02-27 Wed 22:47]
 
-WHen optimising for performance in a programming language, we have to analyse the tradeoff between
+When optimising for performance in a programming language, we have to analyse the tradeoff between
 total thoughput and latency. Optimising for latency means minimising the duration of any individual
 task in the program, and increasing availability. Optimising for throughput involves minimising the
 total running time of the program. For example, a web server would benefit more from reducing latency
@@ -101,7 +121,8 @@ blocks using ~malloc~ and manages them to provide a continuous memory model.
 Global heap pointer variables manage these blocks and generally handle Lisp allocations
 by designating enough space within these blocks and incrementing the
 heap pointer.
-** TODO Garbage collector
+** DONE Garbage collector
+   CLOSED: [2019-03-07 Thu 18:08]
 
 An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer
 to design code without having to worry about the lifecycle of their data, the internal memory model and
@@ -114,7 +135,8 @@ an invalid state, corrupting the state of the program and leading to undefined b
 are also very difficult to spot and debug, as they can go undetected until the particular region of memory
 is accessed again.
 
-*** TODO Cheaney's algorithm
+*** DONE Cheaney's algorithm
+    CLOSED: [2019-03-07 Thu 18:08]
 
 The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
 Before the first garbage collection cycle, memory can simply be allocated in a continuous fashion, making it
@@ -149,18 +171,24 @@ to other objects, which are also considered reachable. For example, all elements
 The reachable set is the transitive closure of the reachability relation. All objects in the reachable set must be kept
 during collection, while eveything else may be safely collected.
 
-#+BEGIN_SRC C++
-uintptr_t heap1, fringe1, limit1; // allocations always happen 
-uintptr_t heap2, fringe2, limit2;
+**** TODO reference cheney
 
-uintptr_t allocate(size_t size) {
+#+BEGIN_SRC C++
+// LispObject is just a pointer type
+typedef uintptr_t LispObject;
+
+// LispObject is a pointer type
+uintptr_t fringe1, limit1; // heap1, where all allocations happen 
+uintptr_t fringe2, limit2; // heap2 used for copying GC
+
+LispObject allocate(size_t size) {
   if (fringe1 + size > limit1) {
     collect();
   }
 
   if (fringe1 + size > limit1) {
-     // We are out of memory.
-     // We either extend total memory or abort
+     // We are out of memory. Try to increase memory
+     // ...
   }
 
   uintptr_t result = fringe1;
@@ -168,24 +196,122 @@ uintptr_t allocate(size_t size) {
   return result;
 }
 
+// Two helper functions are needed
+LispObject copy(LispObject obj) {
+  size_t len = size(obj);
+
+  LispObject new_obj = static_cast<LispObject>(fringe2);
+  fringe2 += len;
+  return new_obj;
+}
+
+uintptr_t copycontent(LispObject obj) {
+  for (auto ref&: forward_references(obj)) {
+    ref = copy(ref);
+  }
+
+  return static_cast<uintptr_t>(obj) + size(obj);
+}
+
 void collect() {
-  
+  // First we copy over the root set, which includes symbols.
+  for (LispObject& symbol: symbols_table) {
+    symbol = copy(symbol);
+  }
+
+  uintptr_t s = heap2;
+  while (fringe2 < fringe2) {
+    s = copycontent(static_cast<LispObject>(s));
+  }
+
+  swap(fringe1, fringe2);
+  swap(limit1, limit2);
 }
 
 #+END_SRC 
 
-*** TODO Conservative GC
+The algorithm presented above is a heavility simplified abstraction. The root set includes other
+locations apart from the symbol table, and all of them have to be handled carefully. This was an area
+of particular importance when adding multi-threading.
 
+The ~copy~ and ~copycontent~ procedures have to read the heap to determine the type, size and fields of
+the ~LispObject~, and act accordingly. This approach of storing all the information inside the virtual heap
+and manually accessing it as need has significant performance benefits. ~LispObject~ becomes a simple aliasing
+for a pointer type, it allows many different types of objects (integers, floats, strings, lists) to be accessed
+in a unified way, while staying compact in memory. The disadvantage is that it is is difficult to track memory
+corruption, making debugging very difficult. This will become a problem if any bug in the code produces a data-race.
 
-** TODO Saving state to disk
+*** DONE Conservative GC
+    CLOSED: [2019-03-07 Thu 18:08]
+
+One important design aspect of calculating the root set is how to handle references on the stack. Garbage collection
+may start in the middle of a large computation and the reference on the stack cannot be discarded. One safe, but slow
+approach of dealing with this is to keep a virtual stack. Such a stack could be well typed and easily scanned to find
+references. However, it would be much slower by adding a level of indirection to each expression, and it would also make
+the code more difficult to manage.
+
+Another approach is to tag words in memory. This approach is used, for instance, by the OCaml compiler, where the least
+significant bit is a tag bit, indicating whether that word is a pointer reference or just data. This approach is better
+than the virtual stack, but has the drawback of limiting the integer types (e.g 63bit vs 64), and requiring additional
+instructions (i.e shifts) to do arithmetic.
+
+The approach VSL uses is to be conservative. It treats all values as potential references, called /ambiguous/ roots.
+The means we are overestimating the set of roots. Unlike /unambiguous/ roots (like the symbol table above), we
+have to be careful when handling these values, and cannot manipulate them as ~LispObject~. This rules out calling
+~copy~ or ~copycontent~ above on them, but they still need to be kept during garbage collection. The solution was
+to /pin/ them. Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
+Additionally, the ~allocate~ function will have to check for pinned items on the heap and skip over them. This
+additional book-keeping is managable, When building the entirety of REDUCE, the number of pinned items is never
+larger than 300. Considering memory used is in the order of megabytes, these pinned locations cause negligible
+fragmentation.
+
+** Variable lifetime
+
+As the original language is decades old, its mechanism for variable lifecycle is not in line with that of modern languages.
+This mechanism was counter-intuitive at first, and is lacking in providing safety to the user of the language.
+
+There are two lifetime specifiers for symbols: /global/ and /fluid/. It is important to note that they
+do not refer semantically to variables but only to symbol *names*.
+
+A /global/ symbols has only a single globally visible value. That means you cannot bind the name to any local
+variable. For instance if ~x~ is declared global, it then cannot be used as a function parameter name, or in a
+let binding.
+
+A /fluid/ variable has a global value, but can also be locally bound. Fluids behave more like globals do
+in other languages, allowing the name to be reused.
+
+~Let~ bindings and function parameters introduce /local/ symbols. If the symbol name is already declared global,
+it will result in an error. If it is a fluid and has a global value, that value will be shadowed for the lifetime
+of the binding.
+
+To make it easier to use it as a scripting language, REDUCE's Lisp allows using symbols that aren't global, fluid,
+or locally bound. These will act like local variables, except their lifetime will be defined for the duration of the
+program. For single-threaded programs, this distinction is not important: these variable would act like fluids. However,
+when implementing multithreading, fluids have a global value visible to all threads, while these symbols are only
+visible on their local thread. I will call these symbols /unbound locals/.
+
+** DONE Saving state to disk
+   CLOSED: [2019-03-07 Thu 20:08]
+
+REDUCE has an important feature which allows the user to preserve the state to disk. A ~preserve~ instruction can be
+used to do so, and the user is able to specify a function to run on restart. Preserve saves the entire state of the
+program, including memory and symbols. The feature involves careful manipulation of the world state and it can maintaining
+it unaffected when enabling multi-threaded programs is complicated. I ran into a few challanges when implementing ParVSL,
+which I will discuss in the implementation chapter.
 
 * TODO Implementation
 
 
 ** TODO Memory allocation
 
+Memory is managed by the interpreter. It allocates a large block of memory at the beginning,
+which it then manages as a contiguous array. When running out of memory, an extra block of the
+same size as current available memory is malloced, doubling the amount available. These blocks are
+never freed until the end of the program. These blocks are sorted by their pointer locations,
+and carefully /joined/ together to maintain the abstract model of continguous memory. Binary search
+is used to identify the block containing a location.
 
-All the memory is global and shared, and multiple-threads will often try
+All the memory is global and shared, and multiple threads will often try
 to allocate concurently, causing contention. A naive solution to this problem
 would have been to use a mutex lock on allocations. While this approach would
 have been the simplest to implement it would also significantly slow down the language.
@@ -366,9 +492,9 @@ Finally, primitive functions for threading were added to the language. They simp
  
 ** TODO Thread communication
 ** TODO Lock-free symbol lookup
-** TODO Bugs in VSL
+** TODO Bugs in REDUCE
 *** The symbol `x`
-
+** TODO Computing Groebner basis in parallel
 
 * TODO Evaluation
 
