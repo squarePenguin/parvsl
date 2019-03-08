@@ -7021,7 +7021,6 @@ LispObject Lrdf(LispObject lits, LispObject x)
 
 LispObject Lload_module(LispObject lits, LispObject x)
 {   int f, f1;
-    printf("+++ loading a module\n");
     f1 = Lopen_module(nil, x, input);
     if (unwindflag != unwindNONE)
     {   printf("+++ Module could not be opened\n");
