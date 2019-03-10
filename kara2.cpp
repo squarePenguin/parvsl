@@ -134,7 +134,7 @@ void test_add_with_carry2()
 // On other occasions they are used with lena=lenb<lenc and carries can
 // propagate as far as lenc but any overflow beyond there is unimportant.
 
-uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
+inline uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 {   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lena; i++)
@@ -148,9 +148,9 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 
 // For the 2-input addition I want lena >= lenb.
 
-uint64_t kadd(uint64_t *a, size_t lena,
-              uint64_t *b, size_t lenb,
-              uint64_t *r, size_t lenr)
+inline uint64_t kadd(uint64_t *a, size_t lena,
+                     uint64_t *b, size_t lenb,
+                     uint64_t *r, size_t lenr)
 {   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lenb; i++)
@@ -167,9 +167,32 @@ uint64_t kadd(uint64_t *a, size_t lena,
     return carry;
 }
 
+// r = a - b (with input borrow optionally provided). In the use I make of
+// this I may need to allow for either a or b to be longer than the other.
+
+inline uint64_t ksub(uint64_t *a, size_t lena,
+                     uint64_t *b, size_t lenb,
+                     uint64_t *r, size_t lenr,
+                     uint64_t borrow = 0)
+{   size_h shorter = lena < lenb ? lena : lenb;
+    size_t i;
+    for (i=0; i<shorter; i++)
+        carry = subtract_with_borrow(a[i], b[i], borrow, r[i]);
+    while (i<lena)
+    {   borrow = subtract_with_borrow(a[i], carry, r[i]);
+        i++;
+    }
+    while (i<lenb)
+    {   borrow = subtract_with_borrow(0, a[i], carry, r[i]);
+        i++;
+    }
+    while (i < lenr) r[i++] = -borrow;
+    return borrow;
+}
+
 // r = r - a;
 
-uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
+inline uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 {   uint64_t borrow = 0;
     size_t i;
     for (i=0; i<lena; i++)
@@ -406,35 +429,6 @@ inline void kara1(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, uint64_t *w);
 
-inline void kara_and_add2(uint64_t *a, size_t lena,
-                  uint64_t *b, size_t lenb,
-                  uint64_t *c, size_t lenc,
-                  uint64_t *w)
-{
-// The all the cases that are supported here the next line sets n to a
-// suitably rounded up half length.
-    size_t n = (lena+1)/2;
-    uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
-    uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
-    kara_and_add1(w, n, w+n, n, c+n, lenc-n, w+2*n); // (a0+a1)*(b0+b1)
-    if (c1 != 0)
-    {   kadd(w+n, n, c+2*n, lenc-2*n);               // fix for overflow
-        if (c2 != 0)
-        {   kadd(w, n, c+2*n, lenc-2*n);             // fix for overflow
-            for (size_t i=3*n; c2!=0 && i<lenc; i++)
-                c2 = add_with_carry(c[i], c2, c[i]);
-        }
-    }
-    else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
-    kara1(a, n, b, n, w, w+2*n);                     // a0*b0
-    kadd(w, 2*n, c, lenc);                           // add in at bottom..
-    ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
-    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
-    kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
-    ksub(w, lena+lenb-2*n, c+n, lenc-n);
-}
-
-
 // This code is where the main recursion happens. The main complication
 // within it is dealing with unbalanced length operands.
 
@@ -513,6 +507,134 @@ inline void kara1(uint64_t *a, size_t lena,
 // Observe that if the two numbers have different lengths then the longer
 // one is an even length, so the case (eg) 2n+1,2n will not arise.
 
+// When one multiplies {a1,a0}*{b1,b0} the three sub-multiplications to
+// be performed are either
+//       a1*b1, a0*b8, (a0+a1)*(b0+b1)
+// OR    a1*b1, a0*b0, |a0-a1|*|b0-b1|
+// where in the first case it is necessary to allow for the possibility that
+// a0+a1 and/or b0+b1 overflow by 1 bit, while in the second allowance has
+// to be made for the signs of the two differences. It is not a priori clear
+// which will end up giving lower overhead, so here I implement both so I
+// can measure.
+
+#ifdef SUBTRACTING
+
+inline void kara2(uint64_t *a, size_t lena,
+                  uint64_t *b, size_t lenb,
+                  uint64_t *c, uint64_t *w)
+{   size_t n = (lena+1)/2;
+// I will do a cheap comparison of a1 and a0. If a had an add number of
+// digits it got split into unequal chunks with a0 shorter. In that case
+// I will provisionally guess that a1<=a0. This may not be the case if it
+// happens that the low half of a (ie a0) has many leading zeros. If a
+// splits into two equal chunks I will compare their top digits and use that
+// as a prediction as to which is larger. Of course the two leading digits
+// might have the same value and lower digits could drive the comparison
+// either way, but for uniformly distributed inputs I have a really good
+// chance of being right. If I am wrong I will notice that when I do the
+// subtraction - I will end up with a borrow. In that case I will repeat
+// the subtraction but the other way round. I keep track of whether either
+// or both the differences were negative.
+    bool neg;
+    if ((lena&1)==1 ||
+        a[lena-1]<=a[len-1])
+    {   neg=false;
+        if (ksub(a, n, a+n, lena-n, w, n) != 0)
+            ksub(a+n, lena-n, a, n, w, n), neg=true;
+    }
+    else
+    {   neg=true;
+        if (ksub(a+n, lena-n, a, n, w, n) != 0)
+            ksub(a, n, a+n, lena-n, w, n), neg=false;
+    }
+    if ((lenb&1)==1 ||
+        b[lenb-1]<=b[len-1])
+    {   if (ksub(b, n, b+n, lenb-n, w+n, n) != 0)
+            ksub(b+n, lenb-n, b, n, w+n, n), neg=!neg;
+    }
+    else
+    {   if (ksub(b+n, lenb-n, b, n, w+n, n) == 0) neg = !neg;
+        else ksub(b, n, b+n, lenb-n, w+n, n);
+    }
+    kara1(w, n, w+n, n, c+n, w+2*n);                 // |a0-a1|*|b0-b1|
+    size_t lenc = lena + lenb;
+    if (neg)
+    {
+// Form the product a0*b0 (the low parts of the inputs)
+        kara1(a, n, b, n, w, w+2*n);                     // a0*b0
+// The low n digits just copy into place
+        for (size_t i=0; i<n; i++) c[i] = w[i];
+// Then the next need to be added in. Beware that there can be a carry.
+        uint64_t c1 = kadd(w+n, n, c+n, n);
+// Reverse subtract, ie c<mid> = a*b0 - c<mid>
+        uint64_t b1 = ksub(w, 2*n, c+n, lenc-n, c+n, n);                       // and subtract 1 digit up
+// form a1*b1 (the high parts of the inputs)
+        kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);       // a1*b1
+
+        for (size_t i=n+1; i<lena+lenb-2*n; i++) c[2*n+i] = w[i];
+        ksub(w, lena+lenb-2*n, c+n, lenc-n);
+        kadd(w, n+1, c+2*n, lenc-2*n);
+
+    }
+    else
+    {
+    }
+
+
+
+    c[3*n] = 0;
+    else if (c2 != 0) c[3*n] = kadd(w, n, c+2*n, n);
+      kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
+      for (size_t i=n+1; i<lena+lenb-2*n; i++) c[2*n+i] = w[i];
+      ksub(w, lena+lenb-2*n, c+n, lenc-n);
+      kadd(w, n+1, c+2*n, lenc-2*n);
+    kara1(a, n, b, n, w, w+2*n);                     // a0*b0
+    for (size_t i=0; i<n; i++) c[i] = w[i];
+    kadd(w+n, n, c+n, lenc-n);                       // add in at bottom..
+    ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
+}
+
+// If I am to implement this I fear I might also need a "kara_and_subtract"
+// family of functions, or perhaps I could just use more workspace. That
+// is because I need to have
+//       a1*b1*B^2 + (a1*b1 + a0*b0 - (a0-a1)*(b0-b1))*B + a0*b0
+// OR    a1*b1*B^2 + ((a0-a1)*(b1-b0) - a1*b1 - a0*b0)*B + a0*b0
+// and in the first case there the product (a0-a1)*(b0-b1) must be subtracted
+// from whatever is already present in the result vector.
+
+// So at least for now I will just implement this using the addition case
+// always! 
+
+inline void kara_and_add2(uint64_t *a, size_t lena,
+                  uint64_t *b, size_t lenb,
+                  uint64_t *c, size_t lenc,
+                  uint64_t *w)
+{
+// The all the cases that are supported here the next line sets n to a
+// suitably rounded up half length.
+    size_t n = (lena+1)/2;
+    uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
+    uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
+    kara_and_add1(w, n, w+n, n, c+n, lenc-n, w+2*n); // (a0+a1)*(b0+b1)
+    if (c1 != 0)
+    {   kadd(w+n, n, c+2*n, lenc-2*n);               // fix for overflow
+        if (c2 != 0)
+        {   kadd(w, n, c+2*n, lenc-2*n);             // fix for overflow
+            for (size_t i=3*n; c2!=0 && i<lenc; i++)
+                c2 = add_with_carry(c[i], c2, c[i]);
+        }
+    }
+    else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
+    kara1(a, n, b, n, w, w+2*n);                     // a0*b0
+    kadd(w, 2*n, c, lenc);                           // add in at bottom..
+    ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
+    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
+    kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
+    ksub(w, lena+lenb-2*n, c+n, lenc-n);
+}
+
+#else // SUBTRACTING
+
 inline void kara2(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, uint64_t *w)
@@ -555,6 +677,35 @@ inline void kara2(uint64_t *a, size_t lena,
     ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
 }
 
+inline void kara_and_add2(uint64_t *a, size_t lena,
+                  uint64_t *b, size_t lenb,
+                  uint64_t *c, size_t lenc,
+                  uint64_t *w)
+{
+// The all the cases that are supported here the next line sets n to a
+// suitably rounded up half length.
+    size_t n = (lena+1)/2;
+    uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
+    uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
+    kara_and_add1(w, n, w+n, n, c+n, lenc-n, w+2*n); // (a0+a1)*(b0+b1)
+    if (c1 != 0)
+    {   kadd(w+n, n, c+2*n, lenc-2*n);               // fix for overflow
+        if (c2 != 0)
+        {   kadd(w, n, c+2*n, lenc-2*n);             // fix for overflow
+            for (size_t i=3*n; c2!=0 && i<lenc; i++)
+                c2 = add_with_carry(c[i], c2, c[i]);
+        }
+    }
+    else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
+    kara1(a, n, b, n, w, w+2*n);                     // a0*b0
+    kadd(w, 2*n, c, lenc);                           // add in at bottom..
+    ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
+    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
+    kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
+    ksub(w, lena+lenb-2*n, c+n, lenc-n);
+}
+
+#endif // SUBTRACTING
 
 // This code is where the main recursion happens. The main complication
 // within it is dealing with unbalanced length operands.

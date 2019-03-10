@@ -2193,37 +2193,6 @@ inline void display(const char *label, Bignum &a)
 //=========================================================================
 //=========================================================================
 
-#ifdef __SIZEOF_INT128__
-
-// Well it seems that g++ and clang have different views about how to
-// ask for unsigned 128-bit integers! So I abstract that away via a typedef
-// called UNIT128.
-
-#ifdef __CLANG__
-typedef __int128  INT128;
-typedef __uint128 UINT128;
-#else // __CLANG__
-typedef __int128  INT128;
-typedef unsigned __int128 UINT128;
-#endif // __CLANG__
-
-// At least for debugging I may wish to display 128-bit integers. Here I
-// only do hex printing. I could do decimal and octal if I really wanted
-// but just for debugging that does not seem vital. If some C++ compiler
-// already supported printing of 128-bit ints this definition might clash
-// and would need commenting out.
-
-inline std::ostream & operator << (std::ostream &out, UINT128 a)
-{   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
-        << " "
-        << (uint64_t)a << std::dec << std::setfill(' '); 
-    return out;
-}
-
-inline UINT128 pack128(uint64_t hi, uint64_t lo)
-{   return (((UINT128)hi)<<64) | lo;
-}
-
 #ifdef __GNUC__
 
 // Note that __GNUC__ also gets defined by clang on the Macintosh, so
@@ -2232,7 +2201,7 @@ inline UINT128 pack128(uint64_t hi, uint64_t lo)
 
 // Count the leading zeros in a 64-bit word.
 
-inline int nlz(uint64_t x)
+static int nlz(uint64_t x)
 {   return __builtin_clzll(x);  // Must use the 64-bit version of clz.
 }
 
@@ -2360,6 +2329,39 @@ inline uint64_t subtract_with_borrow(uint64_t a1, uint64_t a2,
 // the result. At least I can keep the code portable, even if I can then
 // worry about performance a bit.
 
+
+
+
+#ifdef __SIZEOF_INT128__
+
+// Well it seems that g++ and clang have different views about how to
+// ask for unsigned 128-bit integers! So I abstract that away via a typedef
+// called UNIT128.
+
+#ifdef __CLANG__
+typedef __int128  INT128;
+typedef __uint128 UINT128;
+#else // __CLANG__
+typedef __int128  INT128;
+typedef unsigned __int128 UINT128;
+#endif // __CLANG__
+
+// At least for debugging I may wish to display 128-bit integers. Here I
+// only do hex printing. I could do decimal and octal if I really wanted
+// but just for debugging that does not seem vital. If some C++ compiler
+// already supported printing of 128-bit ints this definition might clash
+// and would need commenting out.
+
+inline std::ostream & operator << (std::ostream &out, UINT128 a)
+{   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
+        << " "
+        << (uint64_t)a << std::dec << std::setfill(' '); 
+    return out;
+}
+
+inline UINT128 pack128(uint64_t hi, uint64_t lo)
+{   return (((UINT128)hi)<<64) | lo;
+}
 
 inline void multiply64(uint64_t a, uint64_t b,
                        uint64_t &hi, uint64_t &lo)
@@ -5405,7 +5407,7 @@ inline void bigmultiply(const uint64_t *a, size_t lena,
 // input and will propagate carries or extend a result all the way up to
 // lenr words even if lena is a lot shorter.
 
-uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
+inline uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 {   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lena; i++)
@@ -5419,8 +5421,8 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 
 // For the 2-input addition I want lena >= lenb.
 
-uint64_t kadd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
-              uint64_t *r, size_t lenr)
+inline uint64_t kadd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
+                     uint64_t *r, size_t lenr)
 {   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lenb; i++)
@@ -5439,7 +5441,7 @@ uint64_t kadd(uint64_t *a, size_t lena, uint64_t *b, size_t lenb,
 
 // r = r - a;
 
-uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
+inline uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 {   uint64_t borrow = 0;
     size_t i;
     for (i=0; i<lena; i++)
