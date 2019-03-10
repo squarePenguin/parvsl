@@ -1,5 +1,13 @@
 % A first sketch of a minamalist Groebner Base package
 
+
+% At present this generates a GRoebner base using monic polynomials
+% (which therefore have rational number coefficients). It uses just
+% lexographic order using some variables whose names are in the list
+% varnames).
+%
+% It has not worried too much about sophistication or speed anywhere!
+
 symbolic;
 on echo, backtrace, comp;
 
@@ -240,9 +248,9 @@ symbolic procedure dfprin1 u;
     dfprin1 dfred u >>;
 
 symbolic procedure dfprin u;
-  << terpri(); dfprin1 u >>;
+  << if null u then print 0 else dfprin1 u >>;
 
-dfprin prefix_to_df '(expt (plus x y 1) 3);
+<< terpri(); dfprin prefix_to_df '(expt (plus x y 1) 3) >>;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -285,6 +293,28 @@ symbolic procedure dfremainder(u, v);
     return u   
   end;
 
+symbolic procedure reduce_by(S, L);
+  begin
+    scalar done := nil, s1;
+    while not done do <<
+      done := t;
+      for each p in L do <<
+        princ "Reduce "; dfprin s; princ " using "; dfprin p;
+        s1 := dfremainder(s, p);
+        princ " => "; dfprin s; terpri();
+% test if this made progress but did not reduce the polynoial all the way
+% down to nil, set the "done" flag to nil so that we will try everything
+% again.
+        if s1 neq s then <<
+          if s1 neq nil then done := nil;
+          s := s1 >>  >> >>;
+    return s
+  end;
+
+symbolic procedure delete_pairlist(p, L);
+  if null L then nil
+  else if p = caar L or p = cdar L then delete_pairlist(p, cdr L)
+  else car L . delete_pairlist(p, cdr L);
 
 symbolic procedure babygroe L;
   begin
@@ -292,24 +322,32 @@ symbolic procedure babygroe L;
       for each q in cdr p collect (car p . q);
     terpri();
     printc "Babygroe input:";
-    for each p in L do << dfprin1 p; terpri() >>;
+    for each p in L do << dfprin p; terpri() >>;
     while pairs do begin
       scalar s := s_poly(caar pairs, cdar pairs);
-      princ "Raw s-poly = "; dfprin1 s; terpri();
+      princ "Raw s-poly = "; dfprin s; terpri();
       pairs := cdr pairs;
-% The following loop does not fully Reduce s using all the existing
-% polynomails in L. One needs to keep tring each potential reduction until
-% no more are available.
-      for each p in L do <<
-        princ "Reduce "; dfprin1 s; princ " using "; dfprin1 p;
-        s := dfremainder(s, p);
-        princ " => "; dfprin1 s; terpri() >>;
-      princ "Reduced s-poly = "; dfprin1 s; terpri();
-      if not null s then <<
-         for each p in L do pairs := (s . p) . pairs;
-         princ "Add new poly into the base: "; dfprin1 s; terpri();
-         L := s . L >>
+      s := reduce_by(s, L);
+      princ "Reduced s-poly = "; dfprin s; terpri();
+      if not null s then begin
+        scalar L1 := L;  % because I will update L as I scan it.
+% Now if any polynomial in the existing base would be divisible by the new
+% element I should remove it and all pending pairs using it. Doing this
+% should let me end up with a miminal basis.
+        for each p in L1 do
+          if not xless(dfx p, dfx s) then <<
+            princ "I can now discard "; dfprin p;
+            L := delete(p, L);
+            pairs := delete_pairlist(p, pairs) >>;
+        for each p in L do pairs := (s . p) . pairs;
+        princ "Add new poly into the base: "; dfprin s; terpri();
+        L := s . L end
     end;
+    terpri();
+    printc "The base is:";
+    for each p in L do <<
+      dfprin p;
+      terpri() >>;
     return L
   end;
 
@@ -330,7 +368,7 @@ babygroe input;
 input := list(prefix_to_df '(difference (expt x 3) (times 2 x y)),
               prefix_to_df '(plus (difference (times (expt x 2) y)
                                                 (times 2 (expt y 2)))
-                                    x);
+                                    x));
 
 babygroe input;
 
