@@ -3,6 +3,8 @@
 symbolic;
 on echo, backtrace, comp;
 
+if getd 'spool then spool "babygroe.log";
+
 % First I will want support for distributed polynomials.
 
 global '(varnames);
@@ -13,7 +15,7 @@ global '(varnames);
 % as a list. The names of the variables are not mentioned in this list,
 % but are kept in varnames.
 
-
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Start with rational number arithmetic
 
 % Create a rational number if values are known to be co-prime.
@@ -91,7 +93,7 @@ symbolic procedure qrecip u;
   if minusp qnum u then q(-qden u, -qnum u)
   else q(qden u, qnum u);
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 varnames := '(x y z);
 
@@ -112,6 +114,9 @@ symbolic procedure xgreaterp(L1, L2);
 symbolic inline procedure dflt u;
   car u;
 
+symbolic procedure negterm w;
+  (qneg car w) . cdr w;
+
 symbolic inline procedure dflc u;
   caar u;
 
@@ -120,6 +125,10 @@ symbolic inline procedure dfx  u;
 
 symbolic inline procedure dfred u;
   cdr u;
+
+symbolic procedure dfneg u;
+  if null u then nil
+  else (qneg dflc u . dfx u) . dfneg dfred u;
 
 % add two distributed forms
 
@@ -133,6 +142,17 @@ symbolic procedure dfadd(u, v);
     end
   else if xgreaterp(dfx u, dfx v) then dflt u . dfadd(dfred u, v)
   else dflt v . dfadd(u, dfred v);
+
+symbolic procedure dfsub(u, v);
+  if null u then dfneg v
+  else if null v then u
+  else if dfx u = dfx v then begin
+    scalar c := qsub(dflc u, dflc v); % subtract leading coeffs
+    if qzerop c then return dfsub(dfred u, dfred v)
+    else return (c . dfx u) . dfsub(dfred u, dfred v)
+    end
+  else if xgreaterp(dfx u, dfx v) then dflt u . dfsub(dfred u, v)
+  else (negterm dflt v) . dfsub(u, dfred v);
 
 symbolic procedure addxvec(L1, L2);
   if null L1 then nil
@@ -184,7 +204,7 @@ symbolic procedure prefix_to_df w;
     dfexpt(prefix_to_df cadr w, caddr w)
   else error(1, list("Invalid input", w));
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 symbolic procedure xallzero v;
   if null v then t
@@ -208,6 +228,10 @@ symbolic procedure dfprin1 u;
        princ " + ";
        if xallzero dfx u then princ "1"
        else prinxvec(dfx u, varnames) >>
+    else if dflc u = '(-1 . 1) then <<
+       princ " - ";
+       if xallzero dfx u then princ "1"
+       else prinxvec(dfx u, varnames) >>
     else <<
        if qnum dflc u > 0 then princ " + " else princ " - ";
        princ abs qnum dflc u;
@@ -220,7 +244,7 @@ symbolic procedure dfprin u;
 
 dfprin prefix_to_df '(expt (plus x y 1) 3);
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % This finds the extra exponents needed to make L1 at least as large
 % as L2.
@@ -239,6 +263,75 @@ symbolic procedure s_poly(u, v);
     u := dfmulterm(qrecip dflc u, u1, u);
     v := dfmulterm(qrecip dflc v, v1, v);
 % Leading terms should now cancel when I subtract.
-    return dfmake_monic dfsub(u, v);
+    return dfmake_monic dfsub(u, v)
+  end;
+
+% If any value in L1 is less then the one in L2 return true
+symbolic procedure xless(L1, L2);
+  if null L1 then nil
+  else if car L1 < car L2 then t
+  else xless(cdr L1, cdr L2);
+
+symbolic procedure xdiff(L1, L2);
+  if null L1 then nil
+  else (car L1 - car L2) . xdiff(cdr L1, cdr L2);
+
+symbolic procedure dfremainder(u, v);
+  begin
+    while not null u and
+          not xless(dfx u, dfx v) do <<
+      u := dfmake_monic dfsub(u,
+                              dfmulterm(1 . 1, xdiff(dfx u, dfx v), v)) >>;
+    return u   
+  end;
+
+
+symbolic procedure babygroe L;
+  begin
+    scalar pairs := for each p on L conc
+      for each q in cdr p collect (car p . q);
+    terpri();
+    printc "Babygroe input:";
+    for each p in L do << dfprin1 p; terpri() >>;
+    while pairs do begin
+      scalar s := s_poly(caar pairs, cdar pairs);
+      princ "Raw s-poly = "; dfprin1 s; terpri();
+      pairs := cdr pairs;
+% The following loop does not fully Reduce s using all the existing
+% polynomails in L. One needs to keep tring each potential reduction until
+% no more are available.
+      for each p in L do <<
+        princ "Reduce "; dfprin1 s; princ " using "; dfprin1 p;
+        s := dfremainder(s, p);
+        princ " => "; dfprin1 s; terpri() >>;
+      princ "Reduced s-poly = "; dfprin1 s; terpri();
+      if not null s then <<
+         for each p in L do pairs := (s . p) . pairs;
+         princ "Add new poly into the base: "; dfprin1 s; terpri();
+         L := s . L >>
+    end;
+    return L
+  end;
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Examples
+
+input := list(prefix_to_df '(difference (times x y) x),
+              prefix_to_df '(difference (expt x 2) y));
+
+% First S-poly should start off as -x^2+y^2 and that reduces to y^2-y
+% When we have added that to the set all the rest of the S-polys we compute
+% reduce to 0, so we are finished.
+
+babygroe input;
+
+input := list(prefix_to_df '(difference (expt x 3) (times 2 x y)),
+              prefix_to_df '(plus (difference (times (expt x 2) y)
+                                                (times 2 (expt y 2)))
+                                    x);
+
+babygroe input;
 
 end;
