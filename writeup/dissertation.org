@@ -304,6 +304,34 @@ which I will discuss in the implementation chapter.
 
 * TODO Implementation
 
+** RAII classes
+
+The RAII (Resource Allocation Is Initialisation) is very popular in C++. It is a programming tehnique
+which binds the lifetime of resources to an object's lifetime. Normally,
+C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
+This makes it easy to introduce bugs when there is an attempted access to an unallocated resource,
+or leaks when a resource is not released after use. C++ classes offer a solution to this problem.
+Classes have both constructors and destructors, and these are automatically called when the object
+is created and when it becomes unavailable, respectivelly.
+
+#+BEGIN_SRC C++
+{
+  Foo obj1; // obj1 is constructed here, unlike Java, where it would be a null reference 
+  Bar obj2;
+} // End of scope, obj2 is destructed,
+Foo *obj3 = new Foo(); // Foo constructor called here
+delete obj3; // Foo destructor is called here on obj3 
+#+END_SRC
+
+We can use this mechanism to implement automatic resource management, or RAII. We simply make sure
+the underlying resource is allocated in the constructor and deallocated in the destructor.
+Smart pointers like ~std::unique_ptr~ are a good showcase of the power of RAII. As soon as the
+smart pointer objects become inaccessible (i.e by going out of scope), the underlying pointer
+is safely deleted, providing a primitive (but very effective) form of automatic reference counting.
+
+When chaning the codebase to use C++ features I found various opportunities to apply the RAII pattern,
+and I will document some of the uses in this chapter.
+
 
 ** TODO Memory allocation
 
@@ -362,6 +390,13 @@ The tradeoff here is performance vs memory. If the segments are too small then t
 will be contention as threads request new segments too often. When segments are larger than 
 needed, they hold chunks of memory from being used by other threads and can lead 
 to more garbage collection cycles. 
+
+** Garbage collection
+*** TODO Garbage collection locks and safety
+The garbage collector is /stop-the-world/. All running threads have to be paused before it can
+initiate. Similarly, all threads must constantly check whether a garbage collection cycle was
+initiated and act accordingly. T
+
 
 ** DONE Data races in the interpreter
    CLOSED: [2019-03-07 Thu 20:51]
@@ -466,46 +501,7 @@ hold its own version of the symbol and modify it safely. For fluids, there will 
 shared value. Since I already used the global storage for the pointer, I added one more global
 array, where the pointer indicates the global value.
 
-** TODO Thread data and garbage collection
-
-The garbage collector is stop-the-world and work by tracing reachable memory locations
-starting from a root set. There are two types of roots: ambiguous and unambigous. Unambiguous
-roots are the ones explicitly managed by the compiler, e.g the symbol table of variables.
-Since the compiler is written in C and memory is not tagged, we can also get ambigous pointer:
-values on the C stack which might be just values but could also be pointers to program storage.
-
-The handling of both of these root sets has to account for multiple running threads. All the new
-thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
-own stack so all the stacks has to be accounted for as the ambiguous root set. The latter is more complicated.
-All threads have to be paused before garbage collection can begin so that they do not interfere
-with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
-However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
-thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
-changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
-to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
-can proceed with the thread. This is still a work in progress.
-
-** TODO Saving state to disk and reloading
-
-One important feature of the language is the ability to preserve the state of the world at any
-time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
-preserving when some of the threads are running a computation is tricky to define properly. To simplify
-matter, I have decided that all threads have to be joined before preserving. This way, the state of
-the world is consistent and relatively easy to restore. I have modified parts of the code to write
-all the thread-local data back into global storage and then restore it when reloading. This way the same
-file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
-
-** TODO Implementing threads
-
-Once all the modifications above were made, implementing the actual multi-threading mechanism was an easy
-task. I used the standard library to start and join threads and created a thread table so that data about
-all threads can be accessed globally. WHen a  new thread is created, it registers a pointer to its thread-local
-data in the table. Using this, I added code to the garbage collector to handle all existing threads and
-extract the roots, but also to manage their allocation segments, which have to be reset after collection.
-Finally, primitive functions for threading were added to the language. They simply mirror their C++ counterparts.
- 
-** TODO Thread communication
-** TODO Lock-free symbol lookup
+** TODO Lock-free hashtable
 
 Just like allocations are a critical region of code in VSL, so are symbol lookups.
 Every occurence of a symbol must be looked upin the symbol table. If the symbol does
@@ -603,6 +599,92 @@ LispObject lookup(std::string name) {
   return s;
 }
 #+END_SRC
+** TODO Thread data and garbage collection
+
+The garbage collector is stop-the-world and work by tracing reachable memory locations
+starting from a root set. There are two types of roots: ambiguous and unambigous. Unambiguous
+roots are the ones explicitly managed by the compiler, e.g the symbol table of variables.
+Since the compiler is written in C and memory is not tagged, we can also get ambigous pointer:
+values on the C stack which might be just values but could also be pointers to program storage.
+
+The handling of both of these root sets has to account for multiple running threads. All the new
+thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
+own stack so all the stacks has to be accounted for as the ambiguous root set. The latter is more complicated.
+All threads have to be paused before garbage collection can begin so that they do not interfere
+with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
+However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
+thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
+changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
+to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
+can proceed with the thread. This is still a work in progress.
+
+** TODO Saving state to disk and reloading
+
+One important feature of the language is the ability to preserve the state of the world at any
+time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
+preserving when some of the threads are running a computation is tricky to define properly. To simplify
+matter, I have decided that all threads have to be joined before preserving. This way, the state of
+the world is consistent and relatively easy to restore. I have modified parts of the code to write
+all the thread-local data back into global storage and then restore it when reloading. This way the same
+file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
+
+** TODO Implementing threads
+
+I designed ParVSL to mirror the core of the C++11 multi-threading features. The mechanisms for spawining
+threads, mutual exclusion, and condition variables could be integrated by implementing a set of interface
+functions. I added the necessary book-keeping to keep track of these objects in the runtime.
+
+** Threads
+
+To start a thread, you need to provide the code to run on that individual thread. To start a thread, the user
+simply needs to call the ~thread~ function. This function takes as arguments a function name and the argument list
+and a unique thread id is returned. The function is applied to the arguments in a new thread. The return value
+is stored until the user call ~thread_join~ on the thread id, when they can access the respective value. 
+
+#+BEGIN_SRC ocaml
+let add x y = x + y in 
+let tid = thread add (2, 3) in
+let result = thread_join tid in
+print result
+#+END_SRC 
+#+RESULTS:
+: 5
+
+This allows for simple inter-thread communication, through function parameters and returns. Any function can
+be run in parallel by simply applying thread on it. This task based approach makes it easy to modify
+single-threaded algorithms to run in parallel.
+
+My implementation minimises overhead. The list of arguments is managed on the heap which is visible by all
+threads, so a simple pointer is enough to pass them. For returning values, I must keep track of all
+unjoined threads and their return values. I do this with a simple hashtable, mapping thread ids to their
+return values. When a thread returns from its function, I update the hashtable with the returned value.
+When the user joins a thread, I look up the value in the table, return it, then erase the mapping. All threads
+have unique ids for the lifetime of the program, so there will never be conflicts in the hashtable.
+This hashtable has to be thread-safe, and I have implemented it as described in [[Lock-free hashtable]].
+
+I must also be careful to prevent the garbage collector from collecting these parameters and return values.
+Starting a thread is GC-safe: garbage collection will not begin while a new thread is starting up. This ensures
+that threads are always in a safe state and registered in the thread-table correctly during garbage collection.
+At that point, function parameters are tracked just like regular variables so they will be safe from GC.
+However, return values are stored past the lifetime of their respective threads. To deal with them, I add them
+to the root set at the beginning of garbage collection. 
+
+** TODO talk about undefined behaviour in C++?
+
+I must be careful to not collect the data during garbage
+ collection, and I cover that in the [[Garbage collection]] section.
+
+** Mutexes and condition variables
+
+
+Once all the modifications above were made, implementing the actual multi-threading mechanism was an easy
+task. I used the standard library to start and join threads and created a thread table so that data about
+all threads can be accessed globally. WHen a  new thread is created, it registers a pointer to its thread-local
+data in the table. Using this, I added code to the garbage collector to handle all existing threads and
+extract the roots, but also to manage their allocation segments, which have to be reset after collection.
+Finally, primitive functions for threading were added to the language. They simply mirror their C++ counterparts.
+ 
+** TODO Thread communication
 
 ** TODO Bugs in REDUCE
 
