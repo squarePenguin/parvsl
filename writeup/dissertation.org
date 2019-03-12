@@ -584,8 +584,20 @@ LispObject lookup(std::string name) {
 
   LispObject new_bucket = cons(s, bucket);
 
-  if (!symbols[loc].compare_exchange_strong(bucket, new_bucket, std::memory_order_release)) {
+  while (!symbols[loc].compare_exchange_strong(bucket, new_bucket, std::memory_order_release)) {
     // search for stored value
+    LispObject old_bucket = bucket;   
+    bucket = symbols[loc].load(std::memory_order_acquire);
+
+    for (LispObject s; s != old_bucket; s = tail(s)) {
+      if (symbol_name(s) == name) {
+        // Another name created the symbol. Use that.
+        return s;
+      }
+    }
+
+    // Make sure we don't discard new symbols inserted by other threads.
+    new_bucket = cons(s, bucket);
   }
 
   return s;
