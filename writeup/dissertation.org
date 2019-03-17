@@ -4,10 +4,9 @@
 #+EMAIL: avb40@cam.ac.uk
 
 * Introduction
-
 The motivation of this project is to explore the implementation of multi-threading
 capabilities within a working compiler and assess the benefits and tradeoffs it brings
-to an established, real-world application with a large, actively-developed body of code. 
+to a real-world application with a large, actively-developed body of code. 
 
 ** REDUCE
 
@@ -30,20 +29,10 @@ language ~C~. It is fully capable of building the entirety of REDUCE, supports a
 platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
 of being interpreted.
 
-*** TODO medium sized program. say no of lines
-*** TODO Concurrency stuff
-explain there was 
-*** TODO have a hard part
-
-*** TODO Talk about bugs in VSL
-*** TODO enough of the system has to work just to evalute RLISP
-*** TODO talk about planning
-*** TODO describe how I could have debugged it well
-
 ** Benefits of multithreading
 
 The idea of using parallel computing to speed up computer algebra computing has come
-up in research papers for many years ~TODO reference it~, but much of the activity now
+up in research papers for many years ~[TODO reference it]~, but much of the activity now
 predates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
 they now provide. Moreover, advancements in single-core CPU performance has slowed down
 significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
@@ -65,12 +54,8 @@ to provide a more readable syntax, however this syntax is ALGOL inspired and unf
 programmers nowadays. I have decided to use an ML style syntax in this writeup, which should aid
 with brevity and readability.
 
-* DONE Preparation
-  CLOSED: [2019-03-07 Thu 20:10]
-
-** DONE ParVSL
-   CLOSED: [2019-03-07 Thu 18:09]
-
+* Preparation
+** ParVSL
 I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
 ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
 
@@ -84,7 +69,7 @@ to C++.
 
 The VSL language was written in the programming language C. C is a language with no standardised
 multi-threaded model and no native support for multi-core programming. Furthermore, it has no well-defined
-memory model, and no ordering of memory accesses. Multi-threaded programming
+memory model, and no defined ordering of memory accesses. Multi-threaded programming
 is only possible in C through a third-party library, such as ~Windows threads~ or the 
 the ~POSIX threads~ library on UNIX systems. Support further has to be guaranteed by individual compilers
 and operating systems and can break between versions.
@@ -93,16 +78,16 @@ C++ is a superset of C and can compile existing, standard C code easily. The C++
 above omissions, making C++ a multi-threaded language. While in some cases the implementation uses the same
 libraries as the C equivalend (e.g POSIX), we do not have to think about these details and the code
 we write is fully portable. The only requirement is that a C++11 compliant compiler is used to compile the
-code and then which platforms these compilers can target.
+code and then which platforms these compilers can target. As of today, the C++11 standard has matured enough
+that all the large compiler vendors (i.e GCC, Clang, Visual C++, Mingw, etc.) fully support it on the
+major platforms (e.g x86, ARM and SPARC). 
 
 The first change I have made to the implementation is to clear it of any incompatible code and compile it
 with a C++ compiler. This was a trivial task and mostly involved adding a few more explicit casts.
 However, I have been slowly transitioning the code from idiomatic C++ as I analysed more parts of it
 and became confident those changes wouldn't affect the semantics of the program.
 
-** DONE Throughput vs latency
-   CLOSED: [2019-02-27 Wed 22:47]
-
+** Throughput vs latency
 When optimising for performance in a programming language, we have to analyse the tradeoff between
 total thoughput and latency. Optimising for latency means minimising the duration of any individual
 task in the program, and increasing availability. Optimising for throughput involves minimising the
@@ -112,21 +97,18 @@ of any individual request.
 In a CAS program the user is most likely to care about throughput, i.e. compute the output of large 
 problem sizes as quickly as possible. The program is single-user and has a simple interface. The only case
 for low latency is in the responsiveness of the graphical user interface. This is already provided by the 
-operating system so our main goal is directed towards minimising throughput in the application. This is particularly
-important when designing the garbage collector, described below.
+operating system so our main goal is directed towards minimising throughput in the application. 
+This is particularly important when designing the [[Garbage collection]].
 
-** TODO Memory allocation
-
+** Memory allocation
 Memory is managed by the interpreter. It allocates a large block of memory at the beginning,
 which it then manages as a contiguous array. When running out of memory, an extra block of the
 same size as current available memory is malloced, doubling the amount available. These blocks are
-never freed until the end of the program. These blocks are sorted by their pointer locations,
+never freed until the end of the program. They are sorted by their pointer locations,
 and carefully /joined/ together to maintain the abstract model of continguous memory. Binary search
 is used to identify the block containing a location.
 
-** DONE Garbage collector
-   CLOSED: [2019-03-07 Thu 18:08]
-
+** Garbage collector
 An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer
 to design code without having to worry about the lifecycle of their data, the internal memory model and
 managing pointers. This makes Lisp code significantly easier to write, leaving the burden of providing safety and
@@ -138,13 +120,11 @@ an invalid state, corrupting the state of the program and leading to undefined b
 are also very difficult to spot and debug, as they can go undetected until the particular region of memory
 is accessed again.
 
-*** DONE Cheaney's algorithm
-    CLOSED: [2019-03-07 Thu 18:08]
-
+*** Cheaney's algorithm
 The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
 Before the first garbage collection cycle, memory can simply be allocated in a continuous fashion, making it
 compact and fast. When the garbage collector finds unreachable objects and eliminates them, they will leave /gaps/ behind
-and causing /fragmentation/. Not dealing with fragmentation of memory leads to wasted memory. Keeping track of the gaps
+and cause /fragmentation/. Not dealing with fragmentation leads to wasted memory. Keeping track of the gaps
 and filling them with objects of the right size involves extra book-keeping which can be quite expensive. Ultimately,
 it is impossible to guarantee the gaps are filled efficiently, because the garbage collector cannot predict future
 memory allocations, and thus heuristics have to be employed.
@@ -157,6 +137,7 @@ as large as the one in use has to be used to copy the live objects into. In addi
 of memory is in use, the copying of all live memory might become more expensive than managing the free memory.
 Finally, this approach is not incremental. The entire heap is scanned and cleaned every run. Other ways might
 reduce latency by collecting only partially in more, but shorter cycles. 
+
 The problem sizes in REDUCE are usually not bound by memory on modern computers, with none of the applications
 being known to use more than one gigabyte. Its application is also not latency-sensitive. It is used for
 solving large problems as fast as possible. A large compaction stage is more efficient as it reduces time 
@@ -168,18 +149,19 @@ two halves, and only one half is in use for allocations. The other half is consi
 collection. When the first half is full and garbage collection is triggered, all traceable objects are copied over
 to the second half. Then, the two halves are swapped.
 
-To start the tracing we need to consider a root set: a subset of object which are guaranteed to be accessible.
-One example of elements in the root set is the table of symbols; more precisely all symbols which are defined at the start
-of the garbage collection. The stack will also pointers to objects and must be scanned when computing the root set.
+To start the tracing we need to consider a root set: a subset of object which are known to be accessible.
+One example of elements in the root set is the table of symbols which are defined at the start
+of the garbage collection. The stack will also contain pointers to objects and must be scanned when computing the root set.
 While these are the main compontents of the root set, the interpreter may contain others depending on language features
-and implementation, all of which must be spotted and added.
+and implementation, all of which must be spotted and added. The root set must be conservative as missing any object which
+should be in the root set will result in collection of live objects, invalidating the program. It is always
+preferable to overapproximate the root set.
 
 Once we have distinguished a root set, we can trace all references to build the reachable set. Objects may contain references
 to other objects, which are also considered reachable. For example, all elements of a list must be traced recursively. 
 The reachable set is the transitive closure of the reachability relation. All objects in the reachable set must be kept
 during collection, while eveything else may be safely collected.
 
-**** TODO reference cheney
 
 #+BEGIN_SRC C++
 // LispObject is just a pointer type
@@ -238,22 +220,21 @@ void collect() {
 
 #+END_SRC 
 
-The algorithm presented above is a heavility simplified abstraction. The root set includes other
+The algorithm presented above is a heavily simplified abstraction. The root set includes other
 locations apart from the symbol table, and all of them have to be handled carefully. This was an area
 of particular importance when adding multi-threading.
 
 The ~copy~ and ~copycontent~ procedures have to read the heap to determine the type, size and fields of
 the ~LispObject~, and act accordingly. This approach of storing all the information inside the virtual heap
-and manually accessing it as need has significant performance benefits. ~LispObject~ becomes a simple aliasing
+and manually accessing it as needed has significant performance benefits. ~LispObject~ becomes a simple aliasing
 for a pointer type, it allows many different types of objects (integers, floats, strings, lists) to be accessed
 in a unified way, while staying compact in memory. The disadvantage is that it is is difficult to track memory
-corruption, making debugging very difficult. This will become a problem if any bug in the code produces a data-race.
+corruption, making debugging more difficult. This will become a problem if any bug in the code produces a data-race.
 
-*** DONE Conservative GC
-    CLOSED: [2019-03-07 Thu 18:08]
-
+**** TODO reference cheney
+*** Conservative GC
 One important design aspect of calculating the root set is how to handle references on the stack. Garbage collection
-may start in the middle of a large computation and the reference on the stack cannot be discarded. One safe, but slow
+may start in the middle of a large computation and the references on the stack cannot be discarded. One safe, but slow
 approach of dealing with this is to keep a virtual stack. Such a stack could be well typed and easily scanned to find
 references. However, it would be much slower by adding a level of indirection to each expression, and it would also make
 the code more difficult to manage.
@@ -263,8 +244,8 @@ significant bit is a tag bit, indicating whether that word is a pointer referenc
 than the virtual stack, but has the drawback of limiting the integer types (e.g 63bit vs 64), and requiring additional
 instructions (i.e shifts) to do arithmetic.
 
-The approach VSL uses is to be conservative. It treats all values as potential references, called /ambiguous/ roots.
-The means we are overestimating the set of roots. Unlike /unambiguous/ roots (like the symbol table above), we
+The approach VSL uses is to be conservative. It treats all values on the stack as potential references, called /ambiguous/ roots.
+This means we are overestimating the set of roots. Unlike /unambiguous/ roots (like the symbol table above), we
 have to be careful when handling these values, and cannot manipulate them as ~LispObject~. This rules out calling
 ~copy~ or ~copycontent~ above on them, but they still need to be kept during garbage collection. The solution was
 to /pin/ them. Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
@@ -274,12 +255,11 @@ larger than 300. Considering memory used is in the order of megabytes, these pin
 fragmentation.
 
 ** Variable lifetime
-
 As the original language is decades old, its mechanism for variable lifecycle is not in line with that of modern languages.
 This mechanism was counter-intuitive at first, and is lacking in providing safety to the user of the language.
 
 There are two lifetime specifiers for symbols: /global/ and /fluid/. It is important to note that they
-do not refer semantically to variables but only to symbol *names*.
+do not refer semantically to variables but only to *symbol names*.
 
 A /global/ symbols has only a single globally visible value. That means you cannot bind the name to any local
 variable. For instance if ~x~ is declared global, it then cannot be used as a function parameter name, or in a
@@ -294,23 +274,19 @@ of the binding.
 
 To make it easier to use it as a scripting language, REDUCE's Lisp allows using symbols that aren't global, fluid,
 or locally bound. These will act like local variables, except their lifetime will be defined for the duration of the
-program. For single-threaded programs, this distinction is not important: these variable would act like fluids. However,
+program. For single-threaded programs, this distinction is not important: these variables would act like fluids. However,
 when implementing multithreading, fluids have a global value visible to all threads, while these symbols are only
 visible on their local thread. I will call these symbols /unbound locals/.
 
-** DONE Saving state to disk
-   CLOSED: [2019-03-07 Thu 20:08]
-
+** Saving state to disk
 REDUCE has an important feature which allows the user to preserve the state to disk. A ~preserve~ instruction can be
 used to do so, and the user is able to specify a function to run on restart. Preserve saves the entire state of the
 program, including memory and symbols. The feature involves careful manipulation of the world state and it can maintaining
 it unaffected when enabling multi-threaded programs is complicated. I ran into a few challanges when implementing ParVSL,
 which I will discuss in the implementation chapter.
 
-* TODO Implementation
-
+* Implementation
 ** RAII classes
-
 The RAII (Resource Allocation Is Initialisation) is very popular in C++. It is a programming tehnique
 which binds the lifetime of resources to an object's lifetime. Normally,
 C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
@@ -321,17 +297,19 @@ is created and when it becomes unavailable, respectivelly.
 
 #+BEGIN_SRC C++
 {
-  Foo obj1; // obj1 is constructed here, unlike Java, where it would be a null reference 
+  // obj1 is constructed here, unlike Java,
+  // where it would be a null reference. 
+  Foo obj1; 
   Bar obj2;
-} // End of scope, obj2 is destructed,
-Foo *obj3 = new Foo(); // Foo constructor called here
-delete obj3; // Foo destructor is called here on obj3 
+} // End of scope, obj2 is destructed, followed by obj1.
+Foo *obj3 = new Foo(); // Foo constructor called here.
+delete obj3; // Foo destructor is called here on obj3.
 #+END_SRC
 
 We can use this mechanism to implement automatic resource management, or RAII. We simply make sure
 the underlying resource is allocated in the constructor and deallocated in the destructor.
 Smart pointers like ~std::unique_ptr~ are a good showcase of the power of RAII. As soon as the
-smart pointer objects become inaccessible (i.e by going out of scope), the underlying pointer
+smart pointer objects become inaccessible (e.g by going out of scope), the underlying pointer
 is safely deleted, providing a primitive (but very effective) form of automatic reference counting.
 
 When chaning the codebase to use C++ features I found various opportunities to apply the RAII pattern,
@@ -350,28 +328,36 @@ allocations are optimisied away. Simply reading the code to evaluate allocates
 Each instruction is a list data structure, with each elements allocated.
 Serialising allocations is guaranteed to slow down the language enough to cancel 
 any advantage multi-threading brings to the language.
-Indeed, we can easily see the impact when trying to build reduce:
-
-|   | VSL | MUTEX | SEGMENT |
-|---+-----+-------+---------|
-|   |     |       | 2m1s    |
  
 I wanted to allow multiple threads in parallel without affecting the performance
 of allocations. To do this I had to use a lock-free approach. To do this, I further
 split the memory into regions, which I call /segments/. A segment is a thread-local region
 for allocation in memory.
 
- Just like before, memory is allocated to the segments in a continuous 
-fashion. A pointer indicates the start of the non-allocated part of the segment(the /segment fringe/.), 
-while another tells us the end of the segment(the /segment limit/). 
+Just like before, memory is allocated to the segments in a continuous 
+fashion. A pointer indicates the start of the non-allocated part of the segment
+(the /segment fringe/.), while another tells us the end of the segment
+(the /segment limit/).
 
+Now, contention is reduced to getting a new segment. Each thread only allocates within 
+its own segment, so allocations do not require any synchronisation, and they still only
+require incrementing one variable in most cases. If the requested allocation would bring
+the fringe over the segment limit, then the current segment is /sealed/ and a new one is
+requested. 
 
-Now, contention is reduced to getting a new
-segment. Each thread only allocates within its own segment, so allocations do not require
-any synchronisation, and they still only require incrementing one variable in most
-cases.
+If the requested memory is larger than the segment size (e.g a large string or number), 
+the current segment is sealed, then the large object will occupy its own custom segment, 
+and the thread will then have to request a new segment.
 
-Global regions are are kept and handled in sorted order by their location in memory.
+There is a tradeoff involved when choosing the segment size. If the size is too small,
+there will be a lot of contention on requesting segments, leading back to the original
+problem of locking on every allocation. If the segment size is too large, there is a risk
+of threads holding large amounts of memory without using it and causing early garbage collection
+cycles. This is because reclaiming memory is requested when a new segment cannot be created,
+regardless of how much free space there is in existing segments. While tradeoff depends on the
+total memory, I have found a good compromise for segments of a few kilobytes each.
+
+Global regions are kept and handled in sorted order by their location in memory.
 
 Memory allocation are contained within a /segment/. When attempting to allocate for the first time,
 or after a garbage collection cycle, a thread will request a new segment. If there is not
@@ -859,7 +845,6 @@ to structure data.
 
 
 * TODO Evaluation
-
 ** TODO Single-threaded building of Reduce
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
@@ -899,6 +884,12 @@ good performance benchmark. The building process simply runs ParVSL code.
 
 *** Coverage
 
+** TODO Memory Allocation
+Indeed, we can easily see the impact when trying to build reduce:
+
+|   | VSL | MUTEX | SEGMENT |
+|---+-----+-------+---------|
+|   |     |       | 2m1s    |
 ** Stress tests
 ** TODO Parallel implementation of common algorithms
 *** FFT
@@ -929,4 +920,15 @@ Chez scheme?
 
 * TODO Conclusions
 
+
+
+*** TODO medium sized program. say no of lines
+*** TODO Concurrency stuff
+explain there was 
+*** TODO have a hard part
+
+*** TODO Talk about bugs in VSL
+*** TODO enough of the system has to work just to evalute RLISP
+*** TODO talk about planning
+*** TODO describe how I could have debugged it well
 
