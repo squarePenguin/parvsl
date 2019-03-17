@@ -155,8 +155,13 @@ This method has the advantage that it fully compacts memory, fixing the issue of
 straight-forward way. The main trade-off this approach has is the total memory usage. A region of memory at least
 as large as the one in use has to be used to copy the live objects into. In addition, when a very large amount 
 of memory is in use, the copying of all live memory might become more expensive than managing the free memory.
+Finally, this approach is not incremental. The entire heap is scanned and cleaned every run. Other ways might
+reduce latency by collecting only partially in more, but shorter cycles. 
 The problem sizes in REDUCE are usually not bound by memory on modern computers, with none of the applications
-being known to use more than one gigabyte. This makes the copying approach suitable for the language. 
+being known to use more than one gigabyte. Its application is also not latency-sensitive. It is used for
+solving large problems as fast as possible. A large compaction stage is more efficient as it reduces time 
+switching between running code and collecting garbage and minimises fragmentation.
+This makes the copying approach suitable for the language. 
 
 Cheaney's algorithm is a method of stop-the-world copying garbage collection. The virtual /heap/ is divided into
 two halves, and only one half is in use for allocations. The other half is considered free and used during garbage
@@ -330,8 +335,7 @@ smart pointer objects become inaccessible (i.e by going out of scope), the under
 is safely deleted, providing a primitive (but very effective) form of automatic reference counting.
 
 When chaning the codebase to use C++ features I found various opportunities to apply the RAII pattern,
-and I will document some of the uses in this chapter.
-
+when managing threads, shallow binding and garbage collection.
 
 ** TODO Memory allocation
 
@@ -392,11 +396,159 @@ needed, they hold chunks of memory from being used by other threads and can lead
 to more garbage collection cycles. 
 
 ** Garbage collection
-*** TODO Garbage collection locks and safety
-The garbage collector is /stop-the-world/. All running threads have to be paused before it can
-initiate. Similarly, all threads must constantly check whether a garbage collection cycle was
-initiated and act accordingly. T
+I will use the shortened form GC to refer to garbage collection.
+The garbage collector has to account for the state of all threads. These threads have to be synchronised
+and in a safe state to initiate the GC. They must also be included in the calculation of the root set. 
 
+I store all the threa-local information required for synchronisation in a class called ~Thread_data~. This
+class is populated when a thread is started and updated before and after a GC cycle. All threads register
+themseleves in a global thread table at startup. The thread starting the GC can use this table to check the status
+of the other threads.
+
+The /amabiguous root set/ is the set of potential references found on the stack. The stack is a continuous area
+of memory to managed by incrementing and derementing a stack pointer. The stack pointer is normally not accessible
+from C++, however we can dereference a stack variable to find its location on the stack. VSL remembers the position
+of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
+scans the all locations in between for ambiguous roots.
+
+#+BEGIN_SRC C++
+
+uintptr_t C_stackbase;
+
+int main() {
+  int t; // t is any variable on the stack, before execution of VSL code begins
+
+  // When starting VSL, we store the base of the stack
+  // Here we need to cast the reference to an in type then align to the size of a LispObject
+  C_stackbase = ((intptr_t)&t & -sizeof(LispObject));
+}
+
+void garbage_collection() {
+  int t;
+  // before GC, we note the head of the stack
+  uintptr_t C_stackhead = ((uintptr_t)&t & -sizeof(LispObject));
+
+  // scan the stack from its head to base (the stack grows downwards)
+  for (uintptr_t s = C_stackhead; s < C_stackbase; s += sizeof(LispObject)) {
+    if (in_heap(s)) { // check if s points within our virtual heap
+      // we found an ambiguous root
+      set_pinned(s);
+    }
+  }
+
+  inner_garbage_collection();
+}
+
+#+END_SRC
+
+Each thread will have its own stack so I had to modify the code to scan all the stacks before garbage
+collection. This is one reason I had to pause work on all threads for GC. If I hadn't, then a thread might
+change add references to heap objects on its stack after those objects have been marked safe to delete.
+
+When a thread is initialised, I save its own stackbase in ~Thread_data~, and then also save its stackhead
+when it is paused to wait for GC. All these stack ranges are scanned before I start garbage collection:
+
+#+BEGIN_SRC C++
+void garbage_collection() {
+  for (auto thread: thread_table) {
+    // scan the stack from its head to base (the stack grows downwards)
+    for (uintptr_t s = thread.C_stackhead; s < thread.C_stackbase; s += sizeof(LispObject)) {
+      if (in_heap(s)) { // check if s points within our virtual heap
+        // we found an ambiguous root
+        set_pinned(s);
+      }
+    }
+  }
+
+  inner_garbage_collection();
+}
+#+END_SRC
+
+*** TODO Garbage collection locks and safety
+The garbage collector is /stop-the-world/. The thread initiating garbage collection must wait for all
+threads to be ready. Similarly, all threads must regularly check whether a garbage collection cycle was
+initiated and act accordingly.
+
+The first idea I had was to trap all calls to allocate memory and check whether garbage collection is needed.
+To do this, I could simply reset all thread segments. Threads would need to allocate eventually and
+would request a new segment, at which point the would need to call the GC. This solution is incomplete however.
+First of all, a thread might be busy for a long time without needing to allocate. This would cause all other
+threads to be idle waiting for it to finish. 
+
+A bigger issue was the risk of deadlocks. If thread A is waiting for the result of a computation on thread B,
+but thread B was paused waiting for the GC, then the program is deadlocked. Similarly, any effectful computation,
+like waiting for user input will prevent the collection from starting. 
+
+#+BEGIN_SRC C++
+// global variables for synchronising garbage collection
+std::atomic_int num_threads(0);
+std::atomic_int safe_threads(0);
+std::condition_variable gc_waitall;
+std::condition_variable gc_cv;
+std::atomic_bool gc_on(false);
+#+END_SRC
+
+To deal with the issue of blocking calls, I defined another state threads can be in: /safe for GC/. A thread
+is in a safe state if it has saved all the information the garbage collector needs to begin (e.g stackbase
+and stackhead) and guarantees not to run any code that invalidates the garbage collection. Threads go into a safe
+state whenever they get paused for GC. However, they can also be in safe state when waiting for a blocking call.
+
+I created a special RAII class to handle both scenarios, which I called ~Gc_guard~. The class only has a constructor
+and a destructor and is a way for the thread to promise it is in a safe state.
+
+#+BEGIN_SRC C++
+class Gc_guard {
+public:
+  Gc_guard() {
+    int stack_var;
+    // save the stackhead
+    thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+    paused_threads += 1; 
+
+    // notify the gc thread that this thread is in a safe state
+    gc_waitall.notify_one();
+  }
+   ~Gc_guard() {
+    std::mutex m;
+    std::unique_lock<std::mutex> lock(m);
+
+    // wait here for gc to finish
+    gc_cv.wait(lock, []() { return !gc_on; });
+    paused_threads -= 1;
+    
+    // invalidate the stackhead
+    thread_data.C_stackhead = nullptr;
+  }
+}
+#+END_SRC
+
+The ~Gc_guard~ class is accompanied by ~Gc_lock~. A thread trying to initiate the GC will have to
+acquire a ~Gc_lock~. The lock will wait until all threads are in a safe state and will prevent
+other threads from acquiring.
+
+TODO: fix this code
+#+BEGIN_SRC C++
+class Gc_lock {
+  std::mutex m;
+  std::unique_lock<std::mutex> lock;
+  Gc_guard gc_guard;
+public:
+  Gc_lock() : m(), lock(m) {
+    int stack_var = 0;
+    thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+
+    paused_threads += 1;
+    gc_waitall.wait(lock, []() { return paused_threads == num_threads; });
+  }
+
+  ~Gc_lock() {
+    paused_threads -= 1;
+    gc_on = false;
+    thread_data.C_stackhead = nullptr;
+    gc_cv.notify_all();
+  }
+};
+#+END_SRC
 
 ** DONE Data races in the interpreter
    CLOSED: [2019-03-07 Thu 20:51]
@@ -476,7 +628,6 @@ can do so safely, as they will each access their own versions. This eliminates d
 
 *** TODO make diagram
  
-
 
 ** DONE Shared memory and global variables
    CLOSED: [2019-03-07 Thu 20:51]
@@ -690,21 +841,72 @@ Finally, primitive functions for threading were added to the language. They simp
 
 
 *** The symbol `x`
+** TODO Thread pool
+
+One of the success criteria for the project was to implement a thread-pool. The thread pool
+is the smallest example of code using all the multi-threading features, but also of
+inter-thread communication and synchronisation. The thread pool is based on a simple
+safe queue implemented with a linked list, a condition variable and a mutex. It spawns
+the number of available hardware threads as workers which poll the queue for waiting
+jobs. The waiting is done using a condition variable, to allow the thread to sleep rather than
+busy spin.
+
+ParVSL is not strongly typed and has no algebraic data types. Please note the use of a lists
+to structure data.
+
 ** TODO Computing Groebner basis in parallel
 
 
 
 * TODO Evaluation
 
-** TODO Thread pool
+** TODO Single-threaded building of Reduce
+My project involved modifying a large body of code and it was almost guaranteed
+that I would introduce bugs during development. Since the work involves a complex,
+multi-paradigm programming language, it is not possible to guarantee to cover all
+possible scenarios that might exhibit new bugs. Thankfully, the language and its
+direct application are well intertwined, so there is a vey large coverage test already
+available to demonstrate the most functionalities of the language: building REDUCE.
+
+REDUCE consists of around 400 thousand lines of code, and since VSL was built to
+run it, all functionality in VSL is being used in REDUCE. In addition to that,
+REDUCE comes with a comprehensive suite of regression tests, which were written over the
+years to detect bugs in new code. Finally, almost every library in REDUCE contains a
+set of tests. These tests involve a large amount of heavy computation, stress testing
+many different algorithms, using large amounts of memory and requiring multiple cycles
+of garbage collection.
+
+Between building REDUCE and passing its tests, I can be confident that ParVSL retains
+backwards compatibility and catch development bugs. Any error while running the code,
+or any difference in output between VSL is considered a bug. This approach helped me
+find most of the bugs in my code. The disadvantage was that when I had to debug there
+was too much code running and it was difficult to pinpoint to origin of the problem.
+
+To aid with this, I had multiple stages to build. The first stage was just building
+the core, while the second involved building the libraries. If an error showed up while
+building a library, most other libraries could be skipped to help pinpoint the problem.
+The problem was not completely fixed as just building the core involved running
+a very large amount of code, and libraries are also significant in size.
+
+Most of the bugs I could have potentially introduced were data corruption bugs.
+I used asserts in various places to try to get the program to crash as soon as possible
+and find the issue early. Sometimes I had to introduce a system of binary searching the
+problem by trapping the program early and checking for the state of the computation.
+
+
+In addition to helping me find issues in ParVSL, building REDUCE also provided for a
+good performance benchmark. The building process simply runs ParVSL code. 
+
+*** Coverage
 
 ** Stress tests
 ** TODO Parallel implementation of common algorithms
 *** FFT
 *** 
-** TODO Single-threaded building of Reduce
-*** Coverage
 ** TODO Parallel building of Reduce
+
+Building the entirety of REDUCE provided a good test for ParVSL.
+
 ** TODO baby groebner base package
 ** TODO Thread-local performance on Windows
 
