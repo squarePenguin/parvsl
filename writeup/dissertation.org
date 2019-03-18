@@ -315,8 +315,7 @@ is safely deleted, providing a primitive (but very effective) form of automatic 
 When chaning the codebase to use C++ features I found various opportunities to apply the RAII pattern,
 when managing threads, shallow binding and garbage collection.
 
-** TODO Memory allocation
-
+** Memory allocation
 All the memory is global and shared, and multiple threads will often try
 to allocate concurently, causing contention. A naive solution to this problem
 would have been to use a mutex lock on allocations. While this would be easy to
@@ -345,6 +344,11 @@ require incrementing one variable in most cases. If the requested allocation wou
 the fringe over the segment limit, then the current segment is /sealed/ and a new one is
 requested. 
 
+I carefully modified all the areas where allocations are preformed to use the segment fringe
+instead of the global fringe. The global fringe is only moved to assign a new segment. Writes
+to the global fringe are executed under a mutex lock, while the segment fringe is a thread local
+variable accessed without any locks.
+
 If the requested memory is larger than the segment size (e.g a large string or number), 
 the current segment is sealed, then the large object will occupy its own custom segment, 
 and the thread will then have to request a new segment.
@@ -357,32 +361,10 @@ cycles. This is because reclaiming memory is requested when a new segment cannot
 regardless of how much free space there is in existing segments. While tradeoff depends on the
 total memory, I have found a good compromise for segments of a few kilobytes each.
 
-Global regions are kept and handled in sorted order by their location in memory.
-
-Memory allocation are contained within a /segment/. When attempting to allocate for the first time,
-or after a garbage collection cycle, a thread will request a new segment. If there is not
-enough memory left to allocate a new segment, this will trigger a garbage collection cycle, and possibly
-extend total memory. Otherwise, TODO
-
-Each segment is defined by a /fringe/ and a /limit/. When a new object is allocated, the fringe is
-compared to the limit to test whether there is enough available space within the segment. If the segment
-cannot accommodate the requested allocation it is considered full and a new segment is requested.
-
-Sometimes, a new object might need to be allocated which is comparable or larger than the default segment size.
-
-
-
-The code was modified so that checks and operations on the global block "fringe"
-affect the thread-local segment fringe. The block fringe is only modified under a lock
-when a thread asks for a new segment. Segment sizes can be decided dinamically,
-but will generally be a minimum fixed size which has to be tuned for performance.
-The tradeoff here is performance vs memory. If the segments are too small then there
-will be contention as threads request new segments too often. When segments are larger than 
-needed, they hold chunks of memory from being used by other threads and can lead 
-to more garbage collection cycles. 
-
 ** Garbage collection
-I will use the shortened form GC to refer to garbage collection.
+I will use the shortened form /GC/ to refer to garbage collection throughout the rest of this chapter for
+brevity.
+
 The garbage collector has to account for the state of all threads. These threads have to be synchronised
 and in a safe state to initiate the GC. They must also be included in the calculation of the root set. 
 
@@ -392,20 +374,21 @@ themseleves in a global thread table at startup. The thread starting the GC can 
 of the other threads.
 
 The /amabiguous root set/ is the set of potential references found on the stack. The stack is a continuous area
-of memory to managed by incrementing and derementing a stack pointer. The stack pointer is normally not accessible
+of memory to managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
 from C++, however we can dereference a stack variable to find its location on the stack. VSL remembers the position
 of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
 scans the all locations in between for ambiguous roots.
 
 #+BEGIN_SRC C++
-
 uintptr_t C_stackbase;
 
 int main() {
-  int t; // t is any variable on the stack, before execution of VSL code begins
+  // t is any variable on the stack, before execution of VSL code begins
+  int t; 
 
   // When starting VSL, we store the base of the stack
-  // Here we need to cast the reference to an in type then align to the size of a LispObject
+  // Here we need to cast the reference to an in type 
+  // then align to the size of a LispObject
   C_stackbase = ((intptr_t)&t & -sizeof(LispObject));
 }
 
@@ -415,7 +398,10 @@ void garbage_collection() {
   uintptr_t C_stackhead = ((uintptr_t)&t & -sizeof(LispObject));
 
   // scan the stack from its head to base (the stack grows downwards)
-  for (uintptr_t s = C_stackhead; s < C_stackbase; s += sizeof(LispObject)) {
+  for (uintptr_t s = C_stackhead;
+       s < C_stackbase; 
+       s += sizeof(LispObject)) 
+  {
     if (in_heap(s)) { // check if s points within our virtual heap
       // we found an ambiguous root
       set_pinned(s);
@@ -424,10 +410,9 @@ void garbage_collection() {
 
   inner_garbage_collection();
 }
-
 #+END_SRC
 
-Each thread will have its own stack so I had to modify the code to scan all the stacks before garbage
+Each thread will have its own stack, so I had to modify the code to scan all the stacks before garbage
 collection. This is one reason I had to pause work on all threads for GC. If I hadn't, then a thread might
 change add references to heap objects on its stack after those objects have been marked safe to delete.
 
@@ -488,7 +473,8 @@ public:
   Gc_guard() {
     int stack_var;
     // save the stackhead
-    thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+    thread_data.C_stackhead =
+      (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
     paused_threads += 1; 
 
     // notify the gc thread that this thread is in a safe state
@@ -521,7 +507,8 @@ class Gc_lock {
 public:
   Gc_lock() : m(), lock(m) {
     int stack_var = 0;
-    thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+    thread_data.C_stackhead =
+      (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
     paused_threads += 1;
     gc_waitall.wait(lock, []() { return paused_threads == num_threads; });
@@ -536,17 +523,15 @@ public:
 };
 #+END_SRC
 
-** DONE Data races in the interpreter
-   CLOSED: [2019-03-07 Thu 20:51]
-
+** Data races in the interpreter
 The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
 
 All named objects in the lifecycle of the program are /symbols/. All global and local variables, including
 special ones (like ~true~ or ~nil~) and function arguments are symbols. A global hash-table keeps track of
-all symbols. This means each names can only be in use in one place at once. 
+all symbols. This means each name can only be in use in one place at a time. 
 
-Lisp is a language with dynamic scope. 
-
+Lisp is a language with dynamic scope. This has many implications for the interpreter. The following
+fragment of code is an example of this behaviour:
 #+BEGIN_SRC ocaml
 let f x = x + y in
 let g () =
@@ -556,7 +541,7 @@ in
 g ()
 #+END_SRC
 
-The above example will not compile in any static language such as OCaml or C++ 
+The above example will not compile in any statically scoped languages such as OCaml or C++ 
 because the variable ~y~ is not defined in its scope.
 Most dynamic languages, even weakly typed ones, like Javascript or Python, will allow equivalent
 code as valid, but will encounter a runtime error because ~y~ is not defined.
@@ -569,7 +554,6 @@ When a variable name is bound, e.g. as a function parameter name during a functi
 ~let~ statement, its old value is stored by the interpreter and replaced with the new value. At the end of the binding,
 the old value is restored. The main advantage of this method is performance. Old values can simply be saved
 on the stack:
-
 #+BEGIN_SRC ocaml
 let varName = expr1 in expr2
 #+END_SRC
@@ -614,10 +598,7 @@ can do so safely, as they will each access their own versions. This eliminates d
 
 *** TODO make diagram
  
-
-** DONE Shared memory and global variables
-   CLOSED: [2019-03-07 Thu 20:51]
-
+** Shared memory and global variables
 VSL has dynamic scoping and exhibits shallow binding. This means there is a global
 storage mapping each symbol to exactly one value. A variable is defined as long 
 as the symbol is assigned a value. The user can explicitly mark a symbol as global
@@ -631,15 +612,58 @@ could be locally bound to different values on different threads. One approach to
 issue is to use a deep-binding approach: passing around an associative list mapping the symbols
 to values. The approach would add a penalty to performance, however it should be investigated
 how significant the trade-off is. Instead, I have modified the code to try to keep the
-shallow-binding. Global values work just as before and no modification is needed. For local and
+shallow-binding. 
+
+Global values work just as before and no modification is needed. For local and
 fluids however, I added a thread-local storage array. The global storage now only
 holds a pointer to the array location where the actual value is stored. This way, each thread can
 hold its own version of the symbol and modify it safely. For fluids, there will still be a global
 shared value. Since I already used the global storage for the pointer, I added one more global
 array, where the pointer indicates the global value.
 
-** TODO Lock-free hashtable
+*** TODO more comments
+#+BEGIN_SRC C++
+std::atomic_int num_symbols(0);
 
+thread_local std::vector<LispObject> fluid_locals;
+std::vector<LispObject> fluid_globals; // the global values
+
+LispObject& local_symbol(int loc) {
+  if (num_symbols > (int)fluid_locals.size()) {
+    fluid_locals.resize(num_symbols, undefined);
+  }
+
+  return fluid_locals[loc];
+}
+
+LispObject& symval(LispObject s) {
+  assert(isSYMBOL(s));
+  if (is_global(s)) {
+    // This value is in the same location as in VSL on the heap.
+    return global_value(s);
+  }
+
+  // If it is not a global value, then it is a location, represented as an integer.
+  size_t loc = get_int(global_value(s));
+  LispObject& res = local_symbol(loc);
+  // Here I assume undefined is a sort of "reserved value", meaning it can only exist
+  // when the object is not shallow_bound. This helps me distinguish between fluids that
+  // are actually global and those that have been bound. 
+  // When the local value is undefined, I refer to the global value.
+  if (is_fluid(s) && res == undefined) {
+      return fluid_globals[loc];
+  }
+  // THis is either local or locally bound fluid
+  return res;
+}
+#+END_SRC
+*** TODO draw diagram
+
+
+*** Shallow binding
+
+To implement shallow binding 
+** TODO Lock-free hashtable
 Just like allocations are a critical region of code in VSL, so are symbol lookups.
 Every occurence of a symbol must be looked upin the symbol table. If the symbol does
 not exist, it will be created. Multiple threads looking up symbols will cause contention.
