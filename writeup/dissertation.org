@@ -2,6 +2,7 @@
 #+SUBTITLE: Computer Science Part II Project
 #+AUTHOR: Andrei Vlad Badelita
 #+EMAIL: avb40@cam.ac.uk
+#+LATEX_HEADER: \documentclass[a4paper]{article}
 
 * Introduction
 The motivation of this project is to explore the implementation of multi-threading
@@ -315,6 +316,11 @@ is safely deleted, providing a primitive (but very effective) form of automatic 
 When chaning the codebase to use C++ features I found various opportunities to apply the RAII pattern,
 when managing threads, shallow binding and garbage collection.
 
+*** TODO wanted more robust code
+modern tehniques
+if there is an exception etc make sure it will always happen
+previous code spent time testing error flags
+
 ** Memory allocation
 All the memory is global and shared, and multiple threads will often try
 to allocate concurently, causing contention. A naive solution to this problem
@@ -523,6 +529,11 @@ public:
 };
 #+END_SRC
 
+*** TODO just having a non-stop gc would be its own project
+reference java, etc. but what I have is good enough
+interlocks add overhead, but w do not need real-time performance
+not many threads
+
 ** Data races in the interpreter
 The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
 
@@ -699,7 +710,6 @@ LispObject lookup(std::string name) {
 
 As before, the naive solution would be to implement a mutex lock on the entire 
 lookup function.
-
 
 To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access 
 to either a single writing thread, or all the reading threads. This would would allow multiple
@@ -944,7 +954,7 @@ Chez scheme?
 
 * TODO Conclusions
 
-
+  
 
 *** TODO medium sized program. say no of lines
 *** TODO Concurrency stuff
@@ -955,4 +965,14 @@ explain there was
 *** TODO enough of the system has to work just to evalute RLISP
 *** TODO talk about planning
 *** TODO describe how I could have debugged it well
+*** TODO increase font size by 1pt
+*** TODO smaller margin
+*** TODO less code, pseudocode
 
+starting from a root, transfer the data into a new space
+when you finish scanning for new space.
+if it has been moved already, nothing to do, if it hasn't move it. 
+storage management bugs
+introduce lisp earlier
+use cormen pesudocode
+mentioning implementing thread early

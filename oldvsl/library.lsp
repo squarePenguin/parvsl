@@ -10,7 +10,7 @@
 
 % The library itself if in "vsl.lsp"...
 
-(rdf "vsl-arith.lsp")
+(rdf "vsl.lsp")
 
 % The compatibility file "vsl.lsp" defines a macro called
 % "~let" rather than "let" because of a name-clash with the

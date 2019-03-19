@@ -37,7 +37,7 @@
 % $Id: buildreduce.lsp 4265 2017-11-12 13:36:25Z arthurcnorman $
 
 (cond
-   ((eq 'vsl (car lispsystem!*)) (rdf "$srcdir/vsl.lsp")))
+   ((eq 'vsl (car lispsystem!*)) (rdf "$srcdir/parvsl.lsp")))
 
 (verbos 3)
 
@@ -172,7 +172,7 @@
   ((memq 'vsl lispsystem!*)
    (faslout 'cslcompat)
 % Ha ha. faslout does not support this usage!
-   (rdf "$srcdir/vsl.lsp")
+   (rdf "$srcdir/parvsl.lsp")
    (faslend))
   (t
     (rdf "$srcdir/fastgets.lsp")

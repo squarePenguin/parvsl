@@ -3,17 +3,8 @@
 % functions that can be defined in terms of the
 % things that are built into vsl. 
 
-% The vsl system supports big-number arithmetic via Lisp
-% code in this file. It can not even read in numbers properly
-% until arithmetic is working. So the next two definitions
-% instate temporary versions of "plus2" and "times2" that will
-% make it possible to read this file.
-
-(de plus2 (u v) (iplus u v))
-
-(de times2 (u v) (itimes u v))
-
-(de minus (u) (iminus u))
+% This version is for a VSL that has all its arithmetic built into
+% the kernel.
 
 % There are a number of pre-defined symbols that stand for
 % characters and the like. Define them here.
@@ -26,103 +17,6 @@
 (setq rpar    '!))
 
 (setq f       nil)
-
-% Many combinations of car and cdr are supported. Here I define
-% versions that do up to four accesses. These would of course be
-% trivial to move into C code!
-
-(de caar (x)
-    (car (car x)))
-
-(de cadr (x)
-    (car (cdr x)))
-
-(de cdar (x)
-    (cdr (car x)))
-
-(de cddr (x)
-    (cdr (cdr x)))
-
-(de caaar (x)
-    (car (car (car x))))
-
-(de caadr (x)
-    (car (car (cdr x))))
-
-(de cadar (x)
-    (car (cdr (car x))))
-
-(de caddr (x)
-    (car (cdr (cdr x))))
-
-(de cdaar (x)
-    (cdr (car (car x))))
-
-(de cdadr (x)
-    (cdr (car (cdr x))))
-
-(de cddar (x)
-    (cdr (cdr (car x))))
-
-(de cdddr (x)
-    (cdr (cdr (cdr x))))
-
-(de caaaar (x)
-    (car (car (car (car x)))))
-
-(de caaadr (x)
-    (car (car (car (cdr x)))))
-
-(de caadar (x)
-    (car (car (cdr (car x)))))
-
-(de caaddr (x)
-    (car (car (cdr (cdr x)))))
-
-(de cadaar (x)
-    (car (cdr (car (car x)))))
-
-(de cadadr (x)
-    (car (cdr (car (cdr x)))))
-
-(de caddar (x)
-    (car (cdr (cdr (car x)))))
-
-(de cadddr (x)
-    (car (cdr (cdr (cdr x)))))
-
-(de cdaaar (x)
-    (cdr (car (car (car x)))))
-
-(de cdaadr (x)
-    (cdr (car (car (cdr x)))))
-
-(de cdadar (x)
-    (cdr (car (cdr (car x)))))
-
-(de cdaddr (x)
-    (cdr (car (cdr (cdr x)))))
-
-(de cddaar (x)
-    (cdr (cdr (car (car x)))))
-
-(de cddadr (x)
-    (cdr (cdr (car (cdr x)))))
-
-(de cdddar (x)
-    (cdr (cdr (cdr (car x)))))
-
-(de cddddr (x)
-    (cdr (cdr (cdr (cdr x)))))
-
-% "not" and "eqcar" are used while processing some parts of
-% this file and so get defined early.
-
-(de not (x)
-   (null x))
-
-(de eqcar (a b)                % Is (car a) the same as b?
-   (and (not (atom a)) (eq (car a) b)))
 
 % The vsl kernel checks for a function called macroexpand_list
 % whenever it is about to define a function, and expects it to
@@ -159,78 +53,13 @@
       (t (cons (macroexpand (car l))
                (macroexpand_list (cdr l))))))
 
-% Now I start on defining the proper arithmetic including
-% in particular support for big integers. The function
-% "expand" is used to map (plus a b c d) onto
-% (plus2 a (plus2 b (plus2 c d))) [and similarly for other
-% arithmetic functions that take arbitrary numbers of arguments].
-
 (de expand (l fn)
    (cond
       ((null (cdr l)) (car l))
       (t (list fn (car l) (expand (cdr l) fn)))))
 
-(dm plus (u) (expand (cdr u) 'plus2))
-(dm times (u) (expand (cdr u) 'times2))
-(dm logand (u) (expand (cdr u) 'logand2))
-(dm logor (u) (expand (cdr u) 'logor2))
-(dm logxor (u) (expand (cdr u) 'logxor2))
-(dm max (u) (expand (cdr u) 'max2))
-(dm min (u) (expand (cdr u) 'min2))
-
-(dm land (u) (expand (cdr u) 'logand2))
-(dm lor (u) (expand (cdr u) 'logor2))
-
-% The function "iplus2"  behaved like "iplus" but accepts
-% exactly two arguments. And similarly for several others.
-
-(de iplus2 (u v) (iplus u v))
-(de itimes2 (u v) (itimes u v))
-(de ilogand2 (u v) (ilogand u v))
-(de ilogor2 (u v) (ilogor u v))
-(de ilogxor2 (u v) (ilogxor u v))
-
 % Back to defining what are sometimes merely alternate
 % names for very basic operations.
-
-(de idp (x)
-   (symbolp x))
-
-(de pairp (x)
-   (null (atom x)))
-
-(de prog1 (a b)
-   a)
-
-(de reverse (x)
-   (prog (y)
-   loop
-      (cond ((atom x) (return y)))
-      (setq y (cons (car x) y))
-      (setq x (cdr x))
-      (go loop)))
-
-% "reverse" reverses a list, while "reversip" creates the
-% reversed version by overwriting the data that makes up its
-% input. This may be held to save a little space, but is
-% to be used with care.
-
-(de reversip2 (a b)
-   (prog (w)
-   loop
-      (cond ((atom a) (return b)))
-      (setq w (cdr a))
-      (rplacd a b)
-      (setq b a)
-      (setq a w)
-      (go loop)))
-
-(de reversip (x) (reversip2 x nil)) % Destructive reverse
-
-(de append (a b)                % Append a pair of lists.
-   (cond
-      ((atom a) b)
-      (t (cons (car a) (append (cdr a) b)))))
 
 (de last (l)                    % Last element of a (non-empty) list.
    (cond
@@ -250,21 +79,6 @@
       ((atom (cdr l)) l)
       (t (lastpair (cdr l)))))
 
-%(de member (a l)
-%   (cond
-%      ((atom l) nil)
-%      ((equal a (car l)) l)
-%      (t (member a (cdr l)))))
-
-% "member" checks it a value is present in a list using the
-% "equal" test, while "memq" uses "eq".
-
-%(de memq (a l)
-%   (cond
-%      ((atom l) nil)
-%      ((eq a (car l)) l)
-%      (t (memq a (cdr l)))))
-
 (de delete (a l)
    (cond
       ((atom l) l)
@@ -282,9 +96,6 @@
       ((atom a) b)
       ((member (car a) b) (union (cdr a) b))
       (t (cons (car a) (union (cdr a) b)))))
-
-(de neq (a b)                  % Not equal.
-   (null (equal a b)))
 
 (de assoc (a l)                % Look item up in association list using equal.
    (cond
@@ -648,486 +459,9 @@ top (cond ((atom a) (return (reversip r))))
          (rplacd u v)
          w)))
 
-% Now the main body of the arithmetic code. the vsl kernel provides
-% functions with names like iplus, itimes, igreaterp, ... that
-% work with either floating point values or with integers up to 64-bits.
-% Building on that this code allows a list of the form
-%   (!~bignum d0 d1 d2 ...)
-% to stand for a number expressed with radix 2^30 and with d0 as its
-% least significant digit. A very small number of hooks within vsl
-% allow reading and printing of general numbers to divert into the
-% code written here.
-% Implementing arithmetic in (interpreted) Lisp like this will be
-% seriously inefficient, so there would be big gains from re-working
-% the C code to make this stuff irrelevant!
-
-(setq !~radix (itimes 1024 1024 1024))
-(setq !~fpradix (ifloat !~radix))
-
-% The numeric data type must now include these cases.
-% The "atom" test in vsl needs to know that a bit of
-% data stored as (!~bignum ...) should viewed as atomic.
-
-(de fixp (u) (and (inumberp u) (not (floatp u))))
-(de numberp (u) (or (inumberp u) (bignump u)))
 (de complexp (u) nil)
 
-% There are two representations of numbers. The one used in the
-% main parts of the code are
-%    integer < 2^30
-%    float
-%    (!~bignum list of digits ...)
-%
-% but within the code that implements big arithemetic I want
-% to keep things JUST as lists of digits with the "~bignum"
-% marker omitted. I need functions that map between these two
-% formats are here they are.
-
-(de !~embiggen (n)
-   (cond
-      ((zerop n) nil)
-      ((ifixp n) (list n))
-      ((bignump n) (cdr n))
-      (t (error "number expected but received" n))))
-
-(global '(!~!~bignum))
-(setq !~!~bignum (compress '(!! !~ b i g n u m)))
-
-(de !~sizecheck (l)
-   (cond
-      ((null l) 0)
-      ((null (cdr l)) (car l))
-      (t (cons !~!~bignum l))))
-
-% Various two-argument functions will be able to use built-in
-% vsl functions on floating point input but need to do more
-% if they have a potentially big integer. The dispatch between
-% these cases can be encapsulated within a macro...
-
-(dm !~bignum_dispatch2 (u)
-   `(cond
-      ((or (floatp ,(cadr u)) (floatp ,(caddr u)))
-       (,(car (cdddr u)) (float ,(cadr u)) (float ,(caddr u))))
-      (t (!~sizecheck (,(cadr (cdddr u))
-                      (!~embiggen ,(cadr u)) (!~embiggen ,(caddr u)))))))
-
-% The Lisp reader in vsl will call plus2 and times2 when it reads
-% in integers, so I defer defining either until all their sub-functions
-% are in place.
-
-%(de plus2 (u v)
-%   (!~bignum_dispatch2 u v iplus !~bigplus2))
-
-% The internal functions used here are all given names starting with
-% "~" to reduce the prospect of clashes with user-written code.
-
-(de !~bigplus2 (u v) (!~bigplus2carry u v 0))
-
-% "~xdivide" is like divide on native small numbers except that
-% it guarantees that the remainder it returns is non-negative.
-
-(de !~xdivide (u v)
-   (let!* ((r (idivide u v)))
-      (if (iminusp (cdr r))
-         (cons (isub1 (car r)) (iplus (cdr r) v))
-         r)))
-
-% "~bigcons" arranged to avoid leaving superfluous leading zeros
-% as part of big-numbers.
-
-(de !~bigcons (a b)
-   (cond
-      ((and (zerop a) (null b)) nil)
-      ((equal b '(-1)) (if (onep a) nil (cons (idifference a !~radix) nil)))
-      (t (cons a b))))
-
-(de !~carryinto (u c)
-   (cond
-      ((zerop c) u)
-      ((null u) (!~bigcons c nil))
-      (t (let!* ((x (!~xdivide (iplus (car u) c) !~radix)))
-         (!~bigcons (cdr x) (!~carryinto (cdr u) (car x)))))))
-
-(de !~bigplus2carry (u v c)
-   (cond
-      ((null u) (!~carryinto v c))
-      ((null v) (!~carryinto u c))
-      (t (let!* ((x (!~xdivide (iplus (car u) (car v) c) !~radix)))
-         (!~bigcons (cdr x) (!~bigplus2carry (cdr u) (cdr v) (car x)))))))
-
-%(de times2 (u v) 
-%   (!~bignum_dispatch2 u v itimes !~bigtimes2))
-
-
-% Multiply a big-number by a simple small integer.
-
-(de !~bigtimesn (n u c)
-   (cond
-      ((null u) (if (zerop c) nil (list c)))
-      (t (let!* ((x (!~xdivide (iplus (itimes n (car u)) c) !~radix)))
-         (!~bigcons (cdr x) (!~bigtimesn n (cdr u) (car x)))))))
-
-(de !~bigtimes2 (u v)
-   (cond
-      ((or (null u) (null v)) nil)
-      (t (!~bigplus2carry
-         (!~bigtimesn (car u) v 0)
-         (!~bigcons 0 (!~bigtimes2 (cdr u) v))
-         0))))
-
-(de logand2 (u v)
-   (!~bignum_dispatch2 u v ilogand !~biglogand2))
-
-(de logor2 (u v)
-   (!~bignum_dispatch2 u v ilogor !~biglogor2))
-
-(de logxor2 (u v)
-   (!~bignum_dispatch2 u v ilogxor !~biglogxor2))
-
-(de difference (u v)
-   (!~bignum_dispatch2 u v idifference !~bigdifference))
-
-(de divide (u v)
-   (!~bigdivide (!~embiggen u) (!~embiggen v)))
-
-(de geq (u v)
-   (not (greaterp v u)))
-
-(de greaterp (u v)
-   (cond
-      ((floatp u) (igreaterp u (float v)))
-      ((floatp v) (igreaterp (float u) v))
-      ((or (bignump u) (bignump v))
-       (!~biggreaterp (!~embiggen u) (!~embiggen v)))
-      (t (igreaterp u v))))
-
-(de leftshift (u v)
-   (if (iminusp v)
-       (rightshift u (iminus v))
-       (times u (expt 2 v))))
-
-(de lshift (u v) (leftshift u v))
-
-(de leq (u v)
-   (not (greaterp u v)))
-
-(de lessp (u v)
-   (greaterp v u)))
-
-(de quotient (u v)
-   (cond
-      ((floatp u) (iquotient u (float v)))
-      ((floatp v) (iquotient (float u) v))
-      (t (car (divide u v)))))
-
-(de remainder (u v)
-   (cdr (divide u v)))
-
-(de rightshift (u v)
-   (if (iminusp v)
-       (leftshift u (iminus v))
-       (let!* ((p (expt 2 v)))
-           (if (minusp u)
-               (quotient (add1 (difference u p)) p)
-               (quotient u p)))))
-
-% At present the boolen things only cope with positive inputs
-
-(de !~biglogand2 (u v)
-   (cond
-      ((null u) nil)
-      ((null v) nil)
-      (t (!~bigcons (ilogand (car u) (car v))
-                    (!~biglogand2 (cdr u) (cdr v))))))
-
-(de !~biglogor2 (u v)
-   (cond
-      ((null u) v)
-      ((null v) u)
-      (t (!~bigcons (ilogor (car u) (car v))
-                    (!~biglogor2 (cdr u) (cdr v))))))
-
-(de !~biglogxor2 (u v)
-   (cond
-      ((null u) v)
-      ((null v) u)
-      (t (!~bigcons (ilogxor (car u) (car v))
-                    (!~biglogxor (cdr u) (cdr v))))))
-
-(de !~bigdifference (u v)
-   (!~bigplus2carry u (!~bigminus v) 0))
-
-% Division is pretty well the messiest thing to implement
-% here. The first function deals with the consequences of
-% negative values, while the second ones actually does the work.
-
-(de !~bigdivide (u v)
-   (prog (su sv)
-      (when (null u) (return (cons 0 0)))
-      (when (null v) (error "attempt to divide by zero" u))
-      (when (!~bigminusp u) (setq su t u (!~bigminus u)))
-      (when (!~bigminusp v) (setq sv t v (!~bigminus v)))
-      (if (null (cdr v))
-         (progn
-            (setq u (!~shortdivide 0 (reverse u) (car v)))
-            (setq v (car u))
-            (while (eqcar v 0) (setq v (cdr v)))
-            (setq u (cons
-               (reverse v)
-               (if (zerop (cdr u)) nil (list (cdr u))))))
-         (setq u (!~bigdivide1 u v)))
-      (return (cons
-         (!~sizecheck (if (eq su sv) (car u) (!~bigminus (car u))))
-         (!~sizecheck (if su (!~bigminus (cdr u)) (cdr u)))))))
-
-(de !~shortdivide (u1 u v)
-   (cond
-      ((null u) (cons nil u1))
-      (t (let!* ((d (idivide (iplus (itimes !~radix u1) (car u)) v))
-                 (d1 (!~shortdivide (cdr d) (cdr u) v)))
-            (cons (cons (car d) (car d1)) (cdr d1))))))
-
-(de !~bigdivide1 (u v)   % Positive arguments and v is at least 2 digits
-   (prog (r d)
-      (while (not (!~biggreaterp1 v u))
-         (setq d (!~approx_quotient u v))
-         (setq u (!~bigdifference u (!~bigtimes2 d v)))
-%(printc (list "xxx = " (!~bigtimes2 d v)))
-%(printc (list "new u = " u))
-         (if (!~bigminusp u)
-            (error 99 (list "approx was overestimate, v=" v " d=" d " u=" u)))
-         (setq r (!~bigplus2carry r d 0)))
-      (return (cons r u))))
-
-(setq !~big (itimes 1024 1024 1024 1024 1024 512))
-
-(de !~approx_quotient (u v) % v has at least 2 digits and u >= v
-   (prog (x xx un vn q)
-%      (printc (list "u = " (cons '!~bignum u)))
-%      (printc (list "v = " (cons '!~bignum v)))
-%      (printc (list "greaterp = " (!~biggreaterp1 v u)))
-      (when (null (cddr u)) % then v must also be short
-         (setq un (iplus (car u) (itimes !~radix (cadr u))))
-         (setq vn (iplus (car v) (itimes !~radix (cadr v))))
-%         (printc (list "small case " un vn (iquotient un vn)))
-         (return (list (iquotient un vn))))
-      (while (cddr v) (setq u (cdr u) v (cdr v)))
-      (setq x 0)
-      (while (cddr u) (setq u (cdr u) x (add1 x)))
-%      (printc (list "truncated u v =" u v x))
-      (setq un (iplus (car u) (itimes !~radix (cadr u))))
-      (setq vn (iplus (car v) (itimes !~radix (cadr v))))
-%      (printc (list "un vn =" un vn))
-      (setq xx 0)
-      (while (ilessp un !~big) (setq un (ileftshift un 1) xx (iadd1 xx)))
-      (while (igeq vn !~radix) (setq vn (irightshift vn 1) xx (iadd1 xx)))
-%      (printc (list "normalised un vn =" un vn x xx))
-      (setq q (iquotient un (iadd1 vn)))
-      (when (igeq xx 30) (setq x (isub1 x) xx (idifference xx 30)))
-%      (printc (list "q=" q "xx=" xx " x=" x))
-      (if (zerop xx)
-          (setq un q vn 0)
-          (progn
-             (setq un (irightshift q xx))
-             (setq vn (ileftshift (idifference q (ileftshift un xx))
-                                  (idifference 30 xx)))))
-%      (printc (list "split & shifted " xx " bits = " un vn))
-      (setq q nil)
-      (if (igreaterp x 0) (dotimes (i x) (setq q (cons 0 q))))
-      (setq q (cons un (cons vn q)))
-      (setq q (cdr (reverse q)))
-      (if (equal x -1) (setq q (cdr q)))
-%      (printc (list "result = " q (cons '!~bignum q)))
-      (if (or (null q) (equal q '(0))) (setq q '(1)))
-      (return q)))
-
-% All the arithmetic comparisons can be expressed in terms of
-% a single basic case. Here I choose to make "greaterp" the
-% one that is actually coded.
-
-(de !~biggreaterp (u v)
-   (if (!~bigminusp u)
-      (if (!~bigminusp v) (!~biggreaterp1 (!~bigminus v) (!~bigminus u)) nil)
-      (if (!~bigminusp v) t (!~biggreaterp1 u v))))
-
-(de !~biggreaterp1 (u v)
-   (cond
-      ((null u) nil)
-      ((null v) t)
-      ((equal (cdr u) (cdr v)) (igreaterp (car u) (car v)))
-      (t (!~biggreaterp1 (cdr u) (cdr v)))))
-
-% Now for some one-argument arithmetic functions.
-% In these cases it does not seem worth having a macro
-% to dispatch between the various cases.
-
-(de add1 (u)
-   (plus2 u 1))
-
-(de ceiling (u)
-   (cond
-      ((floatp u) (!~bigceiling u))
-      (t u)))
-
-(de fix (u)
-   (cond
-      ((floatp u) (!~bigfix u))
-      (t u)))
-
-(de float (u)
-   (cond
-      ((floatp u) u)
-      ((inumberp u) (ifloat u))
-      ((bignump u) (!~bigfloat (cdr u)))
-      (t (error "bad arg to float" u))))
-
-(de floor (u)
-   (cond
-      ((floatp u) (!~bigfloor u))
-      (t u)))
-
-(de lognot (u)
-   (cond
-      ((ifixp u) (!~biglognot (list '!~bignum u)))
-      ((bignump u) (!~biglognot (cdr u)))
-      (t (error "bad arg to lognot" u))))
-
-(de minus (u)
-   (cond
-      ((or (ifixp u) (floatp u)) (iminus u))
-      ((bignump u) (!~sizecheck (!~bigminus (cdr u))))
-      (t (error "bad arg to minus" u))))
-
-(de minusp (u)
-   (cond
-      ((or (floatp u) (inumberp u)) (iminusp u))
-      ((bignump u) (and (cdr u) (iminusp (last (cdr u)))))
-      (t nil)))
-
-(de sub1 (u)
-   (plus2 u -1))
-
-(de !~bigceiling (u)
-   (if (iminusp u)
-       (minus (!~bigfloor (iminus u)))
-       (!~bigfixer u 1)))
-
-(de !~bigfloor (u)
-   (if (iminusp u)
-       (minus (!~bigceiling (iminus u)))
-       (!~bigfixer u -1)))
-
-(de !~bigfix (u)
-   (if (iminusp u)
-       (minus (!~bigfix (iminus u)))
-       (!~bigfixer u 0)))
-
-(de !~bigfixer (u updown)
-   (cond
-      ((ilessp u !~fpradix)
-         (cond
-            ((zerop updown) (ifix u))
-            ((onep updown) (iceiling u))
-            (t (ifloor u))))
-      (t (prog (w)  % Now u is definitely large!
-         (setq w (fix (iquotient u !~fpradix)))
-         (setq u (idifference u (itimes !~fpradix (float w))))
-         (return (plus (times w !~radix) (!~bigfixer u updown)))))))
-           
-(de !~bigfloat (u)
-   (cond
-      ((null u) 0.0)
-      (t (iplus (ifloat (car u))
-         (itimes !~fpradix (!~bigfloat (cdr u)))))))
-
-(de !~biglognot (u)
-   (cond
-      ((null u) nil)
-      ((null (cdr u)) (list (ilognot (car u))))
-      (t (cons (ilogxor (isub1 !~radix) (car u))
-               (!~biglognot (cdr u))))))
-
-(de !~bigminus (u)
-   (cond
-      ((null u) nil)
-      ((zerop (car u)) (cons (car u) (!~bigminus (cdr u))))
-      ((null (cdr u)) (list (iminus (car u))))
-      (t (cons (ilogand (isub1 !~radix) (iminus (car u)))
-               (!~biglognot (cdr u))))))
-
-(de !~bigminusp (u)
-   (and u (iminusp (last u))))
-
-% onep and zerop are built-in, and although there is no real
-% merit in anybody using a function ionep or izerop I provide
-% both here just for completeness.
-
-(de ionep (u) (onep u))
-
-(de izerop (u) (zerop u))
-
-% A handy macro arranges that a big-number will evaluate to itself.
-
-(dm !~bignum (u) (list 'quote u))
-
-% If vsl finds a big-number it calls this function to turn it
-% into a string that it can then print. Again this is pretty
-% inefficient! I provide a flag !*rawbig that, when set, causes
-% big numbers to be displayed in terms of their internal representation
-% as well as "properly" because that is sometimes useful while debugging.
-% !*onlyraw is even more drastic and only shows the internal form,
-% thereby avoiding division etc in this code.
-
-(setq !*rawbig nil !*onlyraw nil)
-
-(de !~big2str (n)
-   (prog (r neg)
-      (setq r n)
-   a  (when (null r) (go b))
-      (when (not (numberp (car r))) (return nil))
-      (setq r (cdr r))
-      (go a)
-   b  (when (null n) (return "0"))
-      (setq r '(!"))
-      (when (or !*rawbig !*onlyraw)
-         (setq r (cons '!] r))
-         (dolist (c (reverse (explode n)))
-            (setq r (cons c r)))
-         (setq r (cons '!: (cons '![ r))))
-      (when (not !*onlyraw)
-         (when (!~bigminusp n) (setq n (!~bigminus n) neg t))
-         (while (or (cdr n) (igreaterp (car n) 9))
-% !~shortdivide is an internal function to this code with a slightly
-% odd interface that involves numbers passed most significant digit
-% first.
-            (setq n (!~shortdivide 0 (reverse n) 10))
-            (setq r (cons (car (explodec (cdr n))) r))
-            (setq n (car n))
-            (while (eqcar n 0) (setq n (cdr n)))
-            (setq n (reverse n)))
-         (setq r (cons (car (explodec (!~sizecheck n))) r))
-         (when neg (setq r (cons '!- r))))
-      (return (compress (cons '!" r)))))
-
-% I want to define these two AFTER I have defined all of the rest
-% of the big-number support because they can be called by the vsl
-% kernel when it tries to read numbers.
-
-(de plus2 (u v)
-   (!~bignum_dispatch2 u v iplus !~bigplus2))
-
-(de times2 (u v) 
-   (!~bignum_dispatch2 u v itimes !~bigtimes2))
-
-(de expt (a n)
-   (cond
-      ((zerop n) 1)
-      ((onep n) a)
-      ((minusp n) (expt (quotient 1.0 a) (minus n)))
-      ((zerop (remainder n 2)) (expt (times a a) (quotient n 2)))
-      (t (times a (expt (times a a) (quotient (sub1 n) 2))))))
-
-% Now arithmetic is all in place.
+% At some stage if I get keen I might migrate this stuff into the kernel too!
 
 (setq small!-modulus 3)
 
@@ -1156,29 +490,6 @@ top (cond ((atom a) (return (reversip r))))
 (de small!-modular!-quotient (a b)
    (error "small-modular-quotient not implemented yet" (cons a b)))
 
-% "fluid" and "global" are concepts that mainly belong with
-% a compiler, but versions are provided here even if they
-% are not terribly useful.
-% (de ensure_defined (v)
-%    (when (not (boundp v))
-%          (eval (list 'setq v nil))))
-% (de fluid (x)
-%    (remflag x 'global)
-%    (flag x 'fluid)
-%    (dolist (v x) (ensure_defined v)))
-% (de global (x)
-%    (remflag x 'fluid)
-%    (flag x 'global)
-%    (dolist (v x) (ensure_defined v)))
-% (de unfluid (x)
-%    (remflag x 'fluid))
-% (de unglobal (x)
-%    (remflag x 'global))
-
-(de fluidp (x) (flagp x 'fluid))
-
-(de globalp (x) (flagp x 'global))
-
 % Now some more general-purpose small functions. Including
 % cases that are alternative names for built-in ones that
 % it is convenient to have for the support of some historic
@@ -1189,12 +500,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de remflag (l tag)
    (dolist (v l) (remprop v tag)))
-
-(de flagp (v tag) (get v tag))
-
-(de prin2 (x) (princ x))
-
-(de explode2 (x) (explodec x))
 
 (de mkquote (x) (list 'quote x))
 
@@ -1223,13 +528,17 @@ top (cond ((atom a) (return (reversip r))))
 % assumptions about the character-code that is in use.
 
 (de liter (x)
-   (let!* ((c (char!-code x)))
-      (or (and (leq 65 c) (leq c 90))
-          (and (leq 97 c) (leq c 122)))))
+   (if (symbolp x)
+      (let!* ((c (char!-code x)))
+         (or (and (leq 65 c) (leq c 90))
+             (and (leq 97 c) (leq c 122))))
+      nil))
 
 (de digit (x)
-   (let!* ((c (char!-code x)))
-      (and (leq 48 c) (leq c 57))))
+   (if (symbolp x)
+      (let!* ((c (char!-code x)))
+         (and (leq 48 c) (leq c 57)))
+      nil))
 
 (de tolower (x)
    (let!* ((c (char!-code x)))
@@ -1255,8 +564,6 @@ top (cond ((atom a) (return (reversip r))))
 (setq !*lower t)
 
 (setq !*redefmsg nil)
-
-(de set!-print!-precision (n) n)
 
 (de constantp (x)
    (or (null x)
@@ -1344,52 +651,7 @@ top (cond ((atom a) (return (reversip r))))
       (t (append (sort_flatten (cadr x))
          (cons (car x) (sort_flatten (cddr x)))))))
 
-(de gcdn (a b)
-   (cond
-      ((minusp a) (gcdn (minus a) b))
-      ((minusp b) (gcdn a (minus b)))
-      ((greaterp b a) (gcdn b a))
-      ((zerop b) a)
-      (t (gcdn b (remainder a b)))))
-
-(de lcmn (a b) (times a (quotient b (gcdn a b))))
-
-(de abs (x)
-   (if (minusp x) (minus x) x))
-
-(de max2 (a b)
-   (if (greaterp a b) a b))
-
-(de min2 (a b)
-   (if (lessp a b) a b))
-
-(de evenp (x) (zerop (remainder x 2)))
-
-(de msd (n)
-   (prog (r)
-      (setq r 0)
-      (while (not (zerop n))
-         (setq n (quotient n 2))
-         (setq r (add1 r)))
-      (return r)))
-
-(de lsd (n)
-   (if (zerop n)
-      0
-      (prog (r)
-         (setq r 0)
-         (while (zerop (remainder n 2))
-            (setq n (quotient n 2))
-            (setq r (add1 r)))
-         (return r))))
-
-(de ash (a n) (leftshift a n))
-(de ashift (a n) (leftshift a n))
-
-(de ash1 (a n)
-   (if (minusp a) (minus (leftshift (minus a) n)) (leftshift a n)))
-
-(de remd (x) nil)
+(de remd(a) nil)
 
 % The "fasl" scheme here is used when building large programs.
 % Code gets put in files in a directory called "modules".
@@ -1577,20 +839,7 @@ top (cond ((atom a) (return (reversip r))))
 
 (de verbos (x) nil)
 
-(de linelength (n) 80)
-
 (de getenv (x) nil)
-
-% Because I have onnly just migrated a version of filep into the kernel
-% I leave the Lisp-coded copy here for use when I have an old copy of vsl
-% in use. In a while I will just remove this!
-
-(cond
-  ((null (getd 'filep))
-   (de filep (x)
-      (let!* ((h (errorset (list 'open x ''input) nil nil)))
-         (if (atom h) nil
-             (progn (close (car h)) t))))))
 
 (de lengthc (x) (length (explodec x)))
 
@@ -1612,12 +861,6 @@ top (cond ((atom a) (return (reversip r))))
 
 (de gctime () 0)
 
-(de eqn (a b) (equal a b))
-
-(cond
-  ((null (getd 'setpchar))
-   (de setpchar (u) nil)))
-
 (de threevectorp (x)
    (and (vectorp x) (equal (upbv x) 2)))
 
@@ -1632,25 +875,10 @@ top (cond ((atom a) (return (reversip r))))
          (setq l (cdr l)))
       (return v)))
 
-(de frexp (x)
-   (prog (n)
-      (if (zerop x) (return '(0 . 0.0)))
-      (setq n 0)
-      (while (geq x 1.0)
-             (setq x (times x 0.5))
-             (setq n (add1 n)))
-      (while (lessp x 0.5)
-             (setq x (times x 2.0))
-             (setq n (sub1 n)))
-      (return (cons n x))))
-
-(de verbos (x) nil)
-
 (de window!-heading (x) (print x))
 
 (de make!-special (x)
-   (set x nil)
-   (flag (list x) 'fluid))
+   (fluid (list x)))
 
 (de compile!-all () nil)
 
@@ -1676,24 +904,12 @@ top (cond ((atom a) (return (reversip r))))
 
 (de md60 (x) 123456789)
 
-(de error1 () (error 99 nil))
-
 (dm eval!-when (u)
    (if (member 'eval (cadr u))
        (cons 'progn (cddr u))
        nil))
 
 (de tmpnam () "./temporary-file.tmp")
-
-% Reduce these days needs unwind-protect. I will not provide its
-% key function here, but will support the easy case where the
-% protected block does NOT fail...
-
-(dm unwind!-protect (u)
-  (list
-    (list 'lambda '(!*x!*)
-      (cons 'progn (append (cddr u) '(!*x!*))))
-    (cadr u)))
 
 (de smember (u v)
   (cond
@@ -1718,12 +934,6 @@ top (cond ((atom a) (return (reversip r))))
 (de find!-gnuplot ()
   "gnuplot")
 
-(de posn () 0)
-
-(de prin1 (x) (prin x))
-
-(de iequal (x y) (equal x y))
-
 (de string2list (x) (explodecn x))
 
 (de id2string (x)
@@ -1746,7 +956,35 @@ top (cond ((atom a) (return (reversip r))))
 
 (dm bldmsg (u) (list 'bldmsg1 (list 'explodec (cadr u)) (cons 'list (cddr u))))
 
-"End of vsl.lsp"
+(de printprompt (u) nil)
+(flag '(printprompt) 'lose)
 
-% End of vsl.lsp
+(flag '(oddp evenp) 'lose)
 
+% At present the C++ version of gcdn is broken, so here is a Lisp version.
+% I have left the broken version available but named "gcdn1" so that testing
+% can be easier.
+
+(remflag '(gcdn lcmn) 'lose)
+
+(de gcdn (u v)
+  (cond ((zerop v) (abs u))
+        (t (gcdn v (remainder u v)))))
+
+(de lcmn (u v) (times u (quotient v (gcdn u v))))
+
+(flagp '(gcdn lcmn) 'lose)
+
+(flag '(
+    sqrt      exp        log        log2       log10      sin
+    cos       tan        sec        csc        cot        sind
+    cosd      tand       secd       cscd       cotd       sinh
+    cosh      tanh       sech       csch       coth       asin
+    acos      atan       asec       acsc       acot       asind
+    acosd     atand      asecd      acscd      acotd      asinh
+    acosh     atanh      asech      acsch      acoth)
+    'lose)
+
+"End of vsl-arith.lsp"
+
+% End of vsl-arith.lsp

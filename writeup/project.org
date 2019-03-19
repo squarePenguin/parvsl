@@ -217,3 +217,34 @@ find critical pairs:
 when you get stuck: it's a groebner base
 allows you to work with many multivariate polynomial equations
 generilsation of gcd and gaussian
+
+
+headings:
+- storage management + garbage collection
+- variable binding
+extra level of indirection when you access a fluid
+- shared memory, symbol table, 
+atomics are not guaranteed to be lock-free
+use library call to determine if its lock free
+needed to make variables thread local 
+and in reduce fix global variable with common naming
+and I put stuff in code to find top level value of variables
+
+
+grobner:
+when you have linear system, gaussian elimination
+choose a variable at a time and eliminate it
+
+but if you have two polynomial equations
+e.g 2 single variate
+try to eliminate the leading term of one of them
+repeatedly do that until you end up with their gcd 
+and the roots of the gcd are the common roots of the polynomials
+successivley reducing by a degree (leading term)
+
+now if you have multiple equations polynomial in multiple terms
+simultaneusly a generalisation of gcd and gaussian 
+if they were linear the grobner base would be the triangular forms
+if they were the two polys it would be their gcd 
+
+not garbage collecting mutexes and condvars

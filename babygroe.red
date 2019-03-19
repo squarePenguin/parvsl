@@ -177,7 +177,7 @@ symbolic procedure dfmake_monic u;
   else if dflc u = '(1 . 1) then u
   else dfmuln(qrecip dflc u, u);
 
-% Multiply u by the term with coefficienc and and exponent vector x
+% Multiply u by the term with coefficient c and and exponent vector x
 
 symbolic procedure dfmulterm(c, x, u);
   if null u then nil

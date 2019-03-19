@@ -29,7 +29,7 @@
 % $Id: buildreduce.lsp 4265 2017-11-12 13:36:25Z arthurcnorman $
 
 (cond
-   ((eq 'vsl (car lispsystem!*)) (rdf "$srcdir/vsl-arith.lsp")))
+   ((eq 'vsl (car lispsystem!*)) (rdf "$srcdir/vsl.lsp")))
 
 (verbos 3)
 
@@ -164,7 +164,7 @@
   ((memq 'vsl lispsystem!*)
    (faslout 'cslcompat)
 % Ha ha. faslout does not support this usage!
-   (rdf "$srcdir/vsl-arith.lsp")
+   (rdf "$srcdir/vsl.lsp")
    (faslend))
   (t
     (rdf "$srcdir/fastgets.lsp")
@@ -1688,7 +1688,7 @@ build_reduce_modules reduce_base_modules;
 symbolic restart!-csl nil;
 
 (cond
-   ((memq 'vsl lispsystem!*) (rdf "$srcdir/vsl-arith.lsp")))
+   ((memq 'vsl lispsystem!*) (rdf "$srcdir/vsl.lsp")))
 
 
 (setq !*savedef (and (null (memq 'embedded lispsystem!*))

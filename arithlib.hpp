@@ -562,7 +562,7 @@ inline uint64_t ASR(uint64_t a, int n)
 // I need to work in an unsigned type. Well at some stage in the future it
 // may be that C++ will insist that signed integers are handled in 2s
 // complement form and shifts on them behave "as naively expected" but at
-// present that can not be relied upon. 
+// present that can not be relied upon.
 
 inline int32_t ASL(int32_t a, int n)
 {   if (n < 0 || n>=8*(int)sizeof(uint32_t)) n = 0;
@@ -670,7 +670,7 @@ inline void pop(intptr_t&);
 
 // In many cases where I want to save things I will have a reference to
 // an array of uint64_t objects, so when I push it I must convert it back to
-// a Lisp-friendly form.  
+// a Lisp-friendly form.
 inline void push(uint64_t *p)
 {   push(vector_to_handle(p);
 }
@@ -964,7 +964,7 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
 // I allocate a new smaller block and copy the data across.
 // That situation can most plausibly arise when two similar-values big
 // numbers are subtracted.
-    int bits = ((uint32_t *)(&p[-1]))[0]; 
+    int bits = ((uint32_t *)(&p[-1]))[0];
     size_t capacity = ((size_t)1)<<bits;
     if (capacity > 4*final)
     {   uint64_t *w = fc.allocate(((size_t)1)<<log_next_power_of_2(final+1));
@@ -1879,25 +1879,25 @@ public:
     {   intptr_t r = op_dispatch2<Remainder,intptr_t>(val, x.val);
         abandon(val);
         val = r;
-    } 
+    }
 
     inline void operator &=(const Bignum &x)
     {   intptr_t r = op_dispatch2<Logand,intptr_t>(val, x.val);
         abandon(val);
         val = r;
-    } 
+    }
 
     inline void operator |=(const Bignum &x)
     {   intptr_t r = op_dispatch2<Logor,intptr_t>(val, x.val);
         abandon(val);
         val = r;
-    } 
+    }
 
     inline void operator ^=(const Bignum &x)
     {   intptr_t r = op_dispatch2<Logxor,intptr_t>(val, x.val);
         abandon(val);
         val = r;
-    } 
+    }
 
     inline void operator <<=(int n)
     {   intptr_t r = op_dispatch1<Leftshift,intptr_t>(val, n);
@@ -2355,7 +2355,7 @@ typedef unsigned __int128 UINT128;
 inline std::ostream & operator << (std::ostream &out, UINT128 a)
 {   out << std::hex << std::setw(16) << std::setfill('0') <<(uint64_t)(a>>64)
         << " "
-        << (uint64_t)a << std::dec << std::setfill(' '); 
+        << (uint64_t)a << std::dec << std::setfill(' ');
     return out;
 }
 
@@ -2463,7 +2463,7 @@ inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
     u0 += w;
     if (u0 < w) u1++;
     u0 += c;                         // add in C.
-    if (u0 < c) u1++; 
+    if (u0 < c) u1++;
     hi = u1;
     lo = u0;
 }
@@ -2863,10 +2863,10 @@ inline void truncate_unsigned(const uint64_t *r, size_t &n)
 // A is the (positive) input value and X is A rounded down to the nearest
 // power of 2 less than it (ie keeping just the top bit of A):
 //
-//    0   X-1                     8   -(X-1)    
-//    1   X                       9   -X        
-//    2   X+1                    10   -(X+1)    
-//    3   A                      11   -A        
+//    0   X-1                     8   -(X-1)
+//    1   X                       9   -X
+//    2   X+1                    10   -(X+1)
+//    3   A                      11   -A
 //    4   A                      12   -A
 //    5   A                      13   -A
 //    6   A                      14   -A
@@ -3086,7 +3086,7 @@ inline float Float::op(int64_t a)
     uint64_t top24 = sign ? -(uint64_t)a : a;
 // Because top24 > 2^24 the number of leading zeros in its representation is
 // at most 39. Ha ha. That guaranteed that the shift below will not overflow
-// and is why I chose my range as I did. 
+// and is why I chose my range as I did.
     int lz = nlz(top24);
     uint64_t low = top24 << (lz+24);
     top24 = top24 >> (64-24-lz);
@@ -3100,7 +3100,7 @@ inline float Float::op(int64_t a)
     d = ldexpf(d, (int)(64-24-lz));
     if (sign) return -d;
     else return d;
-}   
+}
 
 inline float Float::op(uint64_t *a)
 {   size_t lena = number_size(a);
@@ -3186,7 +3186,7 @@ inline double Frexp::op(int64_t a, int64_t &x)
     uint64_t top53 = sign ? -(uint64_t)a : a;
 // Because top53 >= 2^53 the number of leading zeros in its representation is
 // at most 10. Ha ha. That guaranteed that the shift below will not overflow
-// and is why I chose my range as I did. 
+// and is why I chose my range as I did.
     int lz = nlz(top53);
     uint64_t low = top53 << (lz+53);
     top53 = top53 >> (64-53-lz);
@@ -3200,7 +3200,7 @@ inline double Frexp::op(int64_t a, int64_t &x)
     if (sign) d = -d;
     x =64-53-lz;
     return d;
-}   
+}
 
 inline double Double::op(int64_t a)
 {   int64_t x = 0;
@@ -3293,7 +3293,7 @@ inline double Double::op(uint64_t *a)
 
 inline float128_t Float128::op(int64_t a)
 {   return i64_to_f128(a);
-}   
+}
 
 inline float128_t Frexp128::op(int64_t a, int64_t &x)
 {   float128_t d = i64_to_f128(a), d1;
@@ -3301,7 +3301,7 @@ inline float128_t Frexp128::op(int64_t a, int64_t &x)
     f128M_frex(&d, &d1, &xi); // in the CSL sources.
     x = xi;
     return d1;
-}   
+}
 
 inline float128_t Frexp128::op(uint64_t *a, int54_t &x)
 {   size_t lena = number_size(a);
@@ -3540,7 +3540,7 @@ inline size_t predict_size_in_bytes(const uint64_t *a, size_t lena)
     r = 1 + (size_t)((617*(uint64_t)r)/2048);
     if (negative(a[lena-1])) r += 2; // allow space for a "-" sign.
     return r;
-} 
+}
 
 // The "as_unsigned" option here is not for general use - it is JUST for
 // internal debugging because at times I work with values that are known
@@ -3767,7 +3767,7 @@ inline string_handle bignum_to_string_hex(intptr_t aa)
             }
             *p++ = "0123456789abcdef"[d];
         }
-    }   
+    }
     return confirm_size_string(r, m, m);
 }
 
@@ -3867,7 +3867,7 @@ inline string_handle bignum_to_string_binary(intptr_t aa)
             }
             *p++ = '0' + d;
         }
-    }   
+    }
     return confirm_size_string(r, m, m);
 }
 
@@ -3923,7 +3923,7 @@ inline bool Oddp::op(int64_t a)
 inline bool bigeqn(const uint64_t *a, size_t lena,
             const uint64_t *b, size_t lenb)
 {   if (lena != lenb) return false;
-    return std::memcmp(a, b, lena*sizeof(uint64_t)) == 0;   
+    return std::memcmp(a, b, lena*sizeof(uint64_t)) == 0;
 }
 
 
@@ -3972,7 +3972,7 @@ inline bool Eqn::op(int64_t a, double b)
     if (b >= 9223372036854775808.0) return false;
     else if (b < -9223372036854775808.0) return false;
     if (std::isnan(b)) return false;
-    return a == (int64_t)b; 
+    return a == (int64_t)b;
 }
 
 inline bool eqnfloat(uint64_t *a, size_t lena, double b)
@@ -4009,7 +4009,7 @@ inline bool eqnfloat(uint64_t *a, size_t lena, double b)
     int64_t ib = (int64_t)b;
     int sh = (int)lz - 64 + 53;
     if (sh < 0)
-    {   next |= (((uint64_t)top) << (64+sh)); 
+    {   next |= (((uint64_t)top) << (64+sh));
         top = top >> (-sh);
     }
     else if (sh != 0)
@@ -4158,7 +4158,7 @@ inline bool Greaterp::op(int64_t a, double b)
     if (std::isnan(b)) return false;
 // Because |b| >= 2^53 but < 2^63 it can be converted to an int64_t value
 // without rounding.
-    return a > (int64_t)b; 
+    return a > (int64_t)b;
 }
 
 // This compares a bignum that has at least 2 words against a double.
@@ -4214,7 +4214,7 @@ inline bool greaterpfloat(uint64_t *a, size_t lena, double b,
 // remain below that next will be nonzero.
     int sh = (int)lz - 64 + 53; // amount to shift left by.
     if (sh < 0)
-    {   next |= (((uint64_t)top) << (64+sh)); 
+    {   next |= (((uint64_t)top) << (64+sh));
         top = top >> (-sh);
     }
     else if (sh != 0)
@@ -4299,7 +4299,7 @@ inline bool Geq::op(int64_t a, double b)
     if (b >= 9223372036854775808.0) return false;
     else if (b < -9223372036854775808.0) return true;
     if (std::isnan(b)) return false;
-    return a >= (int64_t)b; 
+    return a >= (int64_t)b;
 }
 
 inline bool Geq::op(uint64_t *a, double b)
@@ -4377,7 +4377,7 @@ inline bool Lessp::op(int64_t a, double b)
     if (b >= 9223372036854775808.0) return true;
     else if (b < -9223372036854775808.0) return false;
     if (std::isnan(b)) return false;
-    return a < (int64_t)b; 
+    return a < (int64_t)b;
 }
 
 inline bool Lessp::op(uint64_t *a, double b)
@@ -4455,7 +4455,7 @@ inline bool Leq::op(int64_t a, double b)
     if (b >= 9223372036854775808.0) return true;
     else if (b < -9223372036854775808.0) return false;
     if (std::isnan(b)) return false;
-    return a <= (int64_t)b; 
+    return a <= (int64_t)b;
 }
 
 inline bool Leq::op(uint64_t *a, double b)
@@ -4517,7 +4517,7 @@ inline void bignegate(const uint64_t *a, size_t lena, uint64_t *r, size_t &lenr)
 // ahead of it, but when negated the bignum can shrink.
     if (r[lena-1]==topbit) r[lena++] = 0;
     else if (r[lena-1]==UINT64_C(0xffffffffffffffff) && lena>1 &&
-        negative(r[lena-2])) lena--; 
+        negative(r[lena-2])) lena--;
     lenr = lena;
 }
 
@@ -4843,7 +4843,7 @@ inline void bigleftshift(const uint64_t *a, size_t lena,
     }
     truncate_positive(r, lenr);
     truncate_negative(r, lenr);
-    
+
 }
 
 inline intptr_t rightshift_b(uint64_t *a, int n);
@@ -4942,7 +4942,7 @@ intptr_t Rightshift::op(int64_t a, int64_t n)
 // Because C++ does not guarantee that right shifts on signed values
 // duplicate the sign bit I perform the "shift" here using division by
 // a power of 2. Because I have n <= 62 here I will not get overflow.
-    int64_t q = ((int64_t)1)<<n; 
+    int64_t q = ((int64_t)1)<<n;
     return int_to_handle((a & ~(q-1))/q);
 }
 
@@ -5398,7 +5398,7 @@ inline void bigmultiply(const uint64_t *a, size_t lena,
 // to account for ways I round up when I halve things along the way.
 
 // For use within the multiplication code I need variants on my
-// addition and subtraction code. 
+// addition and subtraction code.
 
 // I want:
 //    kadd(a, lena, r, lenr);          // r += a; and return a carry
@@ -5715,7 +5715,7 @@ intptr_t Times::op(uint64_t *a, int64_t b)
 }
 
 // For big multi-digit numbers squaring can be done almost twice as fast
-// as general multiplication. 
+// as general multiplication.
 // eg (a0,a1,a2,a3)^2 can be expressed as
 // a0^2+a1^2+a2^2+a3^2 + 2*(a0*a1+a0*a2+a0*a3+a1*a2+a1*a3+a2*a3)
 // where the part that has been doubled uses symmetry to reduce the work.
@@ -6206,7 +6206,7 @@ inline void unsigned_long_division(uint64_t *a, size_t &lena,
 // for want_r. The inputs a and b can be bignums of any size and are allowed
 // to be positive or negative - this sorts everything out.
 
-// Divide a by b to obtain a quotient q and a remainder r. 
+// Divide a by b to obtain a quotient q and a remainder r.
 
 inline void division(uint64_t *a, size_t lena,
                      uint64_t *b, size_t lenb,
@@ -6235,7 +6235,7 @@ inline void division(uint64_t *a, size_t lena,
         return;
     }
 // Next I have b in the range 2^63 to 2^64-1. Such values can be represented
-// in uint64_t. 
+// in uint64_t.
     else if (lenb == 2 && b[1]==0)
     {   unsigned_short_division(a, lena, b[0], false,
                                 want_q, q, olenq, lenq,
@@ -6394,7 +6394,7 @@ inline void division(uint64_t *a, size_t lena,
 // bb than r. So copy it into there so that the allocate/abandon and
 // size confirmation code is given less extreme things to cope with.
     assert(lenr<=lenb);
-    if (want_r) internal_copy(r, lenr, bb); 
+    if (want_r) internal_copy(r, lenr, bb);
     abandon(r);
     if (want_q)
     {   if (negative(q[lenq-1]))
@@ -6468,7 +6468,7 @@ inline void multiply_and_subtract(uint64_t *r, size_t lenr,
 // 1 and I detect that when I calculate r = r - b*q and end up with r negative
 // result. I fix things up by decrementing q and going
 //         r = r + (b<<(lenr-lenb-1))
- 
+
 inline void add_back_correction(uint64_t *r, size_t lenr,
                                 uint64_t *b, size_t lenb)
 {   assert(lenr > lenb);
@@ -6622,7 +6622,7 @@ intptr_t Quotient::op(uint64_t *a, int64_t b)
 intptr_t Quotient::op(int64_t a, uint64_t *b)
 {   if (number_size(b)==1 &&
         b[0]==-(uint64_t)a) return int_to_handle(-1);
-    return int_to_handle(0); 
+    return int_to_handle(0);
 }
 
 // unpleasantly -0x8000000000000000 / -1 => a bignum
@@ -6657,7 +6657,7 @@ intptr_t Remainder::op(uint64_t *a, int64_t b)
 intptr_t Remainder::op(int64_t a, uint64_t *b)
 {   if (number_size(b)==1 &&
         b[0]==-(uint64_t)a) return int_to_handle(0);
-    return int_to_handle(a); 
+    return int_to_handle(a);
 }
 
 intptr_t Remainder::op(int64_t a, int64_t b)
@@ -6675,7 +6675,7 @@ intptr_t Remainder::op(int64_t a, int64_t b)
 
 }
 
-inline LispObject cons(LispObject a, LispObject b);
+static inline LispObject cons(LispObject a, LispObject b);
 
 namespace arithlib
 {
@@ -6869,7 +6869,7 @@ inline bool minus_ua_plus_vb(uint64_t *a, size_t lena,
     if (lena > lenb)
     {   multiply64(a[lena-1], u, hia, loa);
         hia += add_with_carry(loa, ca, loa);
-        borrow = subtract_with_borrow(cb, loa, borrow, r[lena-1]); 
+        borrow = subtract_with_borrow(cb, loa, borrow, r[lena-1]);
         lenr = lena;
 // It will be perfectly reasonable for hia to be zero and borrow to be zero
 // and hence the overall result positive.
@@ -7019,13 +7019,13 @@ printf("q = %" PRIu64 "\n", q);
             if (ua >= 0)
             {   if (ua - INT64_MAX > (int64_t)l1) break;
             }
-            else if (ua - INT64_MIN < (int64_t)l1) break; 
+            else if (ua - INT64_MIN < (int64_t)l1) break;
             signed_multiply64(q, vb, h, l2);
             if ((uint64_t)h + (l2>>63) != 0) break;
             if (ub >= 0)
             {   if (ub - INT64_MAX > (int64_t)l2) break;
             }
-            else if (ub - INT64_MIN < (int64_t)l2) break; 
+            else if (ub - INT64_MIN < (int64_t)l2) break;
 // I must either update both or neither of ua, ub.
             ua -= l1;
             ub -= l2;
@@ -7224,7 +7224,7 @@ intptr_t Gcd::op(uint64_t *a, uint64_t *b)
 {   if (number_size(b) == 1) return Gcd::op(a, (int64_t)b[0]);
 // I will start by making copies of |a| and |b| that I can overwrite
 // during the calculation and use part of in my result.
-    size_t lena = number_size(a), lenb = number_size(b); 
+    size_t lena = number_size(a), lenb = number_size(b);
     size_t olena = lena, olenb = lenb;
     if (olena == olenb &&   // See comments later for an explanation of this!
         negative(a[lena-1]) && negative(b[lenb-1]) &&
