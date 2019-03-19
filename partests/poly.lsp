@@ -25,7 +25,7 @@
       (t (cons (car a) (interleave b (cdr a))))))
 
 (de reverse0 (l acc)
-    (cond 
+    (cond
       ((null l) acc)
       (t (reverse0 (cdr l) (cons (car l) acc)))))
 
@@ -89,6 +89,6 @@
 
 (setq a (gen_poly 1000))
 (setq b (gen_poly 500))
-(setq c (multiply_polys a b))
+% (setq c (multiply_polys a b))
 % (setq c2 (multiply_polys2 a b))
-% (setq cp (multiply_polys_par a b))
+(setq cp (multiply_polys_par a b))

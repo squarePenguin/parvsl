@@ -417,7 +417,7 @@ static inline void clearpinned(block_header *block)
 
 // Here there are some memory blocks allocated, each with their
 // halfbitmapsize field filled in. Fill in the rest of the entries
-// in them. 
+// in them.
 
 static inline uintptr_t ALIGN8(uintptr_t a)
 {   return (a + 7) & ~(uintptr_t)7;
@@ -935,7 +935,7 @@ void inner_reclaim()
     {   block_header *b = (block_header *)blocks[i];
         clearpinned(b);
     }
-    
+
 // Here at the start of garbage collection heap1 contains a list (now
 // called heap2_pinchain) of all the items in heap2 that were pinned.
 // These should be the only things present in heap2, and the list is used
@@ -1133,7 +1133,7 @@ void inner_reclaim()
 // be respectably economical in memory use. It is possible that
 // measuring the proportion of CPU time that has been spent in the
 // garbage collector so far could inform the judgement made...
-            for (;;)            
+            for (;;)
             {   b = (block_header *)allocate_memory(sizeof(block_header) +
                                                     (2*64 + 5)*w1 + 16);
                 if (b != NULL) break; // allocated another block
@@ -1172,7 +1172,7 @@ void inner_reclaim()
                 blocks[i] = bi;
                 nblocks++;
             }
-        } 
+        }
     }
     printf("- collection complete\n");
     printf("Pins = %" PRIuPTR
@@ -1595,7 +1595,7 @@ LispObject Llinelength(LispObject lits, LispObject a1)
     }
     return packfixnum(oo);
 }
-    
+
 
 #ifdef DEBUG
 FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
@@ -1695,7 +1695,7 @@ int rdch()
         {   if (input_ptr >= input_max)
             {   int n = -1;
                 const char *s;
-                
+
                 {
                     par::Gc_guard guard;
                     s = el_gets(el_struct, &n);
@@ -1842,7 +1842,7 @@ static void fp_sprint(char *buff, double x, int prec, int xmark)
         }
         return; // no E present. Add exponent mark if not default type
     }
-    if (xmark != 'e') *buff = xmark; 
+    if (xmark != 'e') *buff = xmark;
     buff++;
 // At this stage I am looking at the exponent part
     if (*buff == 0) strcpy(buff, "+00");
@@ -2358,7 +2358,7 @@ LispObject readT()
 std::mutex lookup_lock;
 
 LispObject lookup(const char *s, size_t len, int flag)
-{   
+{
     std::lock_guard<std::mutex> lock(lookup_lock);
     LispObject w, pn;
     size_t i, hash = 1;
@@ -2651,7 +2651,7 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
     // I'm using a list here to make sure there's no resizing, and thus destruction
     std::list<par::Shallow_bind> binds_a5up;
     while (v != nil)
-    {   
+    {
         binds_a5up.emplace_back(qcar(v), qcar(w)); // bind another argument
         v = qcdr(v);
         w = qcdr(w);
@@ -3261,7 +3261,7 @@ LispObject Lsetq(LispObject lits, LispObject x)
 }
 
 LispObject Lprogn(LispObject lits, LispObject x)
-{   
+{
     guard_gc();
     LispObject r = nil;
     while (isCONS(x))
@@ -3293,7 +3293,7 @@ LispObject Lunwind_protect(LispObject lits, LispObject x)
 }
 
 LispObject Lprog(LispObject lits, LispObject x)
-{   
+{
     guard_gc();
     LispObject w, vars, save_x;
     if (!isCONS(x)) return nil;
@@ -6844,7 +6844,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
         return error1("bad arg for open", cons(x, y));
 // If the filename that is passed is something like "$word/rest" then I look
 // for a Lisp variable "@word" and look at its value. If that value is a
-// string I use it for to replace the "$word" part, leaving "/rest" unchanged. 
+// string I use it for to replace the "$word" part, leaving "/rest" unchanged.
     int r;
     if (*qstring(x)=='$' && (p=strchr(qstring(x), '/'))!=NULL)
     {   r = snprintf(filename, sizeof(filename),
@@ -7657,7 +7657,7 @@ LispObject Lthread_id(LispObject _data) {
 // In order that it is possible to save and restore images and end up with
 // function entrypoints correctly fixed up I need to be certain that the
 // version of vsl that saved an image has at least the same set of functions
-// provided as the version reloading. 
+// provided as the version reloading.
 
 
 // With subversion there is an unambiguous concept of "revision number" and
@@ -8026,7 +8026,7 @@ int warm_start_1(gzFile f, int *errcode)
 // large adjustments that forcing all images to be re-built surely makes
 // sense.
     if (setupsize <= SETUPSIZE/2 || setupsize >= 2*SETUPSIZE) return __LINE__;
-    imagesetup_names = (char (*)[MAX_NAMESIZE])h2alloc(setupsize*MAX_NAMESIZE);    
+    imagesetup_names = (char (*)[MAX_NAMESIZE])h2alloc(setupsize*MAX_NAMESIZE);
     if (imagesetup_names == NULL) return __LINE__;
 // Note that gzread and gzwrite return an int not an unsigned value, so
 // when I want to check if they processed the expected number of bytes I
@@ -8234,7 +8234,7 @@ int warm_start_1(gzFile f, int *errcode)
         }
     }
 // I will zero out the bitmaps in any blocks of memory that the image
-// did not get as far as using. 
+// did not get as far as using.
     for (i=b1+1; i<nblocks; i++)
     {   uint32_t *s = (uint32_t *)((block_header *)blocks_by_age[i])->h1starts;
         uint32_t *f = (uint32_t *)((block_header *)blocks_by_age[i])->h1fp;
@@ -8347,7 +8347,7 @@ int warm_start_1(gzFile f, int *errcode)
                     if (fr1+11*sizeof(LispObject) < lim1)
                         qdefn5up(w) = (LispFn5up *)relocate_fn((void *)qdefn5up(w));
                     fr1 += SYMSIZE*sizeof(LispObject);
-                    
+
 // Now if the symbol was split across two heap segments I need to relocate
 // the parts of it at the start of the next heap block. What a mess!
                     if (fr1 > lim1 )

@@ -25,7 +25,7 @@
       (t (cons (car a) (interleave b (cdr a))))))
 
 (de reverse0 (l acc)
-    (cond 
+    (cond
       ((null l) acc)
       (t (reverse0 (cdr l) (cons (car l) acc)))))
 
@@ -63,18 +63,11 @@
             (b0 (car b_unwind))
             (b1 (cadr b_unwind))
 
-            (la0b0 (list a0 b0))
-            (la0b1 (list a0 b1))
-            (la1b0 (list a1 b0))
-            (la1b1 (list a1 b1))
+            (t1 (thread2 'multiply_polys (list a0 b0)))
+            (t2 (thread2 'multiply_polys (list a0 b1)))
+            (t3 (thread2 'multiply_polys (list a1 b1)))
 
-            (t0 (thread2 'multiply_polys 'la0b0))
-            (t0 (thread2 'multiply_polys la0b0))
-            (t1 (thread2 'multiply_polys 'la0b1))
-            (t2 (thread2 'multiply_polys 'la1b0))
-            (t3 (thread2 'multiply_polys 'la1b1))
-
-            (a0b0 (jointhread t0))
+            (a0b0 (multiply_polys a0 b0))
             (a0b1 (jointhread t1))
             (a1b0 (jointhread t2))
             (a1b1 (jointhread t3)))
@@ -91,5 +84,5 @@
 (setq a (gen_poly 1000))
 (setq b (gen_poly 500))
 % (setq c (multiply_polys a b))
-(setq c2 (multiply_polys2 a b))
-% (setq cp (multiply_polys_par a b))
+% (setq c2 (multiply_polys2 a b))
+(setq cp (multiply_polys_par a b))

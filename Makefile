@@ -67,10 +67,10 @@ dvsl.img:	dvsl library.lsp vsl.lsp
 vsl.img:	vsl library.lsp vsl.lsp
 	time ./vsl -z library.lsp | tee vsl.img.log
 
-dparvsl.img:	dparvsl parlibrary.lsp dparvsl.lsp
+dparvsl.img:	dparvsl parlibrary.lsp parvsl.lsp
 	time ./dparvsl -z parlibrary.lsp | tee dparvsl.img.log
 
-parvsl.img:	parvsl parlibrary.lsp dparvsl.lsp
+parvsl.img:	parvsl parlibrary.lsp parvsl.lsp
 	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
 
 # In much the way that dvsl.img (and friends) is a Lisp built on top of
@@ -189,7 +189,7 @@ bench_both:	bench_both.cpp arithlib.hpp
 runbench:	bench_both
 	./bench_both
 
-# "make clean" does some tidying up. 
+# "make clean" does some tidying up.
 
 clean:
 	rm -rf dvsl *.exe *.log *.bak dreduce.img* dvsl.img* *.o *~ \
@@ -199,7 +199,7 @@ clean:
 # The original VSL had some (pretence at) documentation, and this target
 # arranges to build that.
 
-docs:   
+docs:
 	cd docs && $(MAKE)
 
 # end of Makefile
