@@ -3325,6 +3325,7 @@ LispObject Lprog(LispObject lits, LispObject x)
             continue;
         }
         if (unwindflag != unwindNONE) break;
+        work1 = nil;
     }
 // Now I must unbind all the variables.
 
