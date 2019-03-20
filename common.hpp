@@ -14,7 +14,7 @@
 #ifdef MAP_ANONYMOUS
 #define MMAP_FLAGS (MAP_PRIVATE|MAP_ANONYMOUS)
 #define MMAP_FD    -1
-#else 
+#else
 #ifdef MAP_ANON
 #define MMAP_FLAGS (MAP_PRIVATE|MAP_ANON)
 #define MMAP_FD    -1
@@ -564,7 +564,7 @@ INLINE constexpr int MAX_LISPFILES = 30;
 // using the preprocessor in this manner:
 //-
 //- extern Lispobject nil, undefined, ...;
-//- LispObject nil, undefined, ... 
+//- LispObject nil, undefined, ...
 //- INLINE LispObject read_base(size_t n)
 //- {   switch (n)
 //-     {
@@ -616,7 +616,7 @@ const int BASES_SIZE = MAX_LISPFILES+29;
 #define filecursym (&listbases[29])
 
 LispObject listbases[BASES_SIZE];
-LispObject obhash[OBHASH_SIZE];
+std::atomic<LispObject> obhash[OBHASH_SIZE];
 
 // Each thread uses its own threadlocal workspace and shouldn't interfere
 // with the others.

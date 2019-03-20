@@ -1,7 +1,7 @@
 
 % This is a collection of commonly useful Lisp
 % functions that can be defined in terms of the
-% things that are built into vsl. 
+% things that are built into vsl.
 
 % This version is for a VSL that has all its arithmetic built into
 % the kernel.
@@ -820,7 +820,7 @@ top (cond ((atom a) (return (reversip r))))
          ((eqcar u (quote rdf))
             (prog nil
                (setq w (open (setq u (eval (cadr u))) (quote input)))
-               (cond 
+               (cond
                   (w (princ "Reading file ")
                      (prin u)
                      (terpri)
@@ -985,6 +985,6 @@ top (cond ((atom a) (return (reversip r))))
     acosh     atanh      asech      acsch      acoth)
     'lose)
 
-"End of vsl-arith.lsp"
+"End of parvsl.lsp"
 
-% End of vsl-arith.lsp
+% End of parvsl.lsp

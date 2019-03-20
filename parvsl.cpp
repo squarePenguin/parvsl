@@ -86,6 +86,7 @@
 #include <assert.h>
 #include <zlib.h>
 
+#include <atomic>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -1042,8 +1043,10 @@ void inner_reclaim()
 //
 // Next I copy all objects directly accessible from proper list list bases.
     for (o=0; o<BASES_SIZE; o++) listbases[o] = copy(listbases[o]);
-    for (o=0; o<OBHASH_SIZE; o++)
-        obhash[o] = copy(obhash[o]);
+    for (o=0; o<OBHASH_SIZE; o++) {
+        LispObject s = obhash[o].load(std::memory_order_acquire);
+        obhash[o].store(copy(s), std::memory_order_release);
+    }
 
     par_reclaim();
 
@@ -2123,7 +2126,8 @@ static LispObject Nplus2(LispObject a, LispObject b);
 static LispObject Ntimes2(LispObject a, LispObject b);
 
 LispObject token()
-{   symtype = 'a';           // Default result is an atom.
+{
+    symtype = 'a';           // Default result is an atom.
     while (1)
     {   while (curchar == ' ' ||
                curchar == '\t' ||
@@ -2359,33 +2363,55 @@ LispObject readT()
     }
 }
 
-// I lock the entire lookup function to prevent the same symbol being created twice
-std::mutex lookup_lock;
-
-LispObject lookup(const char *s, size_t len, int flag)
-{
-    std::lock_guard<std::mutex> lock(lookup_lock);
-    LispObject w, pn;
-    size_t i, hash = 1;
-    for (i=0; i<len; i++) hash = 13*hash + s[i];
-    hash = hash % OBHASH_SIZE;
-    w = obhash[hash];
-    while (w != tagFIXNUM)
-    {   LispObject a = qcar(w);        // Will be a symbol.
+/**
+ * [search_bucket] searches a particular bucket in the symbol table
+ * It can search the whole bucket, or down to a location.
+ * If specifying [stop] make sure it is in the bucket, otherwise it will loop.
+ * Returns -1 if not found.
+ * */
+LispObject search_bucket(LispObject bucket, std::string name, LispObject stop=tagFIXNUM) {
+    for (LispObject w = bucket; w != stop; w = qcdr(w)) {
+        LispObject a = qcar(w);    // Will be a symbol.
         LispObject n = qpname(a);      // Will be a string.
         size_t l = veclength(qheader(n)); // Length of the name.
-        if (l == len &&
-            strncmp(s, qstring(n), len) == 0)
+
+        if (l == name.length() && name.compare(0, l, qstring(n), 0, l) == 0) {
             return a;                  // Existing symbol found.
-        w = qcdr(w);
+        }
     }
-// here the symbol as required was not already present.
-// TODO: add mutex lock here
+
+    return -1;
+}
+
+LispObject lookup(std::string name, int flag)
+{
+    size_t loc = std::hash<std::string>{}(name) % OBHASH_SIZE;
+
+    LispObject bucket = obhash[loc].load(std::memory_order_acquire);
+    LispObject s = search_bucket(bucket, name);
+
+    if (s != -1) return s; // found the symbol
+
     if ((flag & 1) == 0) return undefined;
-    pn = makestring(s, len);
-    w = allocatesymbol(pn);
-    obhash[hash] = cons(w, obhash[hash]);
-    return w;
+    LispObject pn = makestring(name.c_str(), name.length());
+    LispObject sym = allocatesymbol(pn);
+
+    LispObject new_bucket = cons(sym, bucket);
+
+    while (!obhash[loc].compare_exchange_strong(bucket, new_bucket, std::memory_order_acq_rel)) {
+        LispObject old_bucket = bucket;
+        bucket = obhash[loc].load(std::memory_order_acquire);
+
+        // Reaching here means bucket is constructed from old_bucket
+        s = search_bucket(bucket, name, old_bucket);
+
+        if (s != -1) return s; // another thread has created the symbol in the meantime
+
+        new_bucket = cons(sym, bucket);
+    }
+
+    // successfully inserted the symbol in the hash, can return it.
+    return sym;
 }
 
 INLINE constexpr unsigned int unwindNONE      = 0;
@@ -4591,7 +4617,7 @@ LispObject Loblist(LispObject lits)
 {   size_t i;
     work1 = nil;
     for (i=0; i<OBHASH_SIZE; i++)
-        for (work2=obhash[i]; isCONS(work2); work2 = qcdr(work2))
+        for (work2=obhash[i].load(std::memory_order_acquire); isCONS(work2); work2 = qcdr(work2))
         {   if (qcar(work2) != undefined)
                 work1 = cons(qcar(work2), work1);
         }
@@ -7912,7 +7938,7 @@ void cold_start()
 // I make the object-hash-table lists end in a fixnum rather than nil
 // because I want to create the hash table before even the symbol nil
 // exists.
-    for (i=0; i<OBHASH_SIZE; i++) obhash[i] = tagFIXNUM;
+    for (i=0; i<OBHASH_SIZE; i++) obhash[i].store(tagFIXNUM, std::memory_order_relaxed);
     for (i=0; i<BASES_SIZE; i++) listbases[i] = NULLATOM;
     setup();
 // The following fields could not be set up quite early enough in the
@@ -8309,8 +8335,10 @@ int warm_start_1(gzFile f, int *errcode)
 // scan and fix things up. First deal with the list listbases...
     for (i=0; i<BASES_SIZE; i++)
         listbases[i] = relocate(listbases[i]);
-    for (i=0; i<OBHASH_SIZE; i++)
-        obhash[i] = relocate(obhash[i]);
+    for (i=0; i<OBHASH_SIZE; i++) {
+        LispObject s = obhash[i].load(std::memory_order_relaxed);
+        obhash[i].store(relocate(s), std::memory_order_relaxed);
+    }
 // Now do a scan of the heap... There is a further horrid issue here. I
 // reloaded the heap into what might have been several blocks, and
 // it could be that some object (especially a vector) ended up straddling
@@ -8753,7 +8781,7 @@ void write_image(gzFile f)
     // VB: we want to find all symbols and move everything back from thread_local data to global
     // THis has do be done after compaction, as we invalidate the [symval] calls.
     for (size_t i = 0; i < OBHASH_SIZE; i += 1) {
-        for (LispObject l = obhash[i]; isCONS(l); l = qcdr(l)) {
+        for (LispObject l = obhash[i].load(std::memory_order_acquire); isCONS(l); l = qcdr(l)) {
             LispObject x = qcar(l);
             if (isSYMBOL(x) && !is_global(x)) {
                 // If it wasn't a global symbol, the value is thread_local;

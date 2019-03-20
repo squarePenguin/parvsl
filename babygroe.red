@@ -290,7 +290,7 @@ symbolic procedure dfremainder(u, v);
           not xless(dfx u, dfx v) do <<
       u := dfmake_monic dfsub(u,
                               dfmulterm(1 . 1, xdiff(dfx u, dfx v), v)) >>;
-    return u   
+    return u
   end;
 
 symbolic procedure reduce_by(S, L);

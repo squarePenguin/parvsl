@@ -924,6 +924,12 @@ Indeed, we can easily see the impact when trying to build reduce:
 |   | VSL | MUTEX | SEGMENT |
 |---+-----+-------+---------|
 |   |     |       | 2m1s    |
+
+
+|   | VSL   | MUTEX | LOCK-free |
+|---+-------+-------+-----------|
+|   | 1m55s | 2m10s | 2m4s     |
+
 ** Stress tests
 ** TODO Parallel implementation of common algorithms
 *** FFT
