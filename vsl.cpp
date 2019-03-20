@@ -4822,6 +4822,50 @@ LispObject Lneq(LispObject lits, LispObject x, LispObject y)
     return (Lequal(lits, x, y) == nil ? lisptrue : nil);
 }
 
+// ORDERP is only supposed to be called on symbols.
+
+LispObject Lorderp(LispObject lits, LispObject x, LispObject y)
+{   if (x == y) return lisptrue;
+    if (!isSTRING(x) && !isSTRING(y))
+    {   if (!isSYMBOL(x))
+        {   if (!isSYMBOL(y)) return x < y ? lisptrue : nil;
+            else return lisptrue;
+        }
+        if (!isSYMBOL(y)) return nil;
+        LispObject pn = qpname(x);
+// Now I want to compare the print-names of two symbnols, but there is a
+// messy case where one or both are gensyms that have not been printed yet,
+// so in that case I need to allocate printnames for them!
+        if (pn == nil)
+        {   int len = snprintf(printbuffer, sizeof(printbuffer),
+                               "g%.3d", gensymcounter++);
+            if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+                pn = makestring("?gensym?", 8);
+            else pn = makestring(printbuffer, len);
+            qpname(x) = pn;
+        }
+        x = pn;
+        pn = qpname(y);
+        if (pn == nil)
+        {   int len = snprintf(printbuffer, sizeof(printbuffer),
+                               "g%.3d", gensymcounter++);
+            if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+                pn = makestring("?gensym?", 8);
+            else pn = makestring(printbuffer, len);
+            qpname(y) = pn;
+        }
+        y = pn;
+    }
+// now both x and y are strings
+    size_t lenx = veclength(qheader(x));
+    size_t leny = veclength(qheader(y));
+    for (size_t i=0; i<lenx && i<leny; i++)
+    {   if (qstring(x)[i] == qstring(y)[i]) continue;
+        return qstring(x)[i] < qstring(y)[i] ? lisptrue : nil;
+    }
+    return lenx <= leny ? lisptrue : nil;
+}
+
 LispObject Lmemq(LispObject lits, LispObject a, LispObject l)
 {   while (isCONS(l))
     {   if (a == qcar(l)) return l;
@@ -4962,6 +5006,11 @@ LispObject Loblist(LispObject lits)
 LispObject Leval(LispObject lits, LispObject x)
 {
     return eval(x);
+}
+
+LispObject Levlis(LispObject lits, LispObject x)
+{
+    return evlis(x);
 }
 
 LispObject Lapply(LispObject lits, LispObject x, LispObject y)
@@ -7682,6 +7731,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
     SETUP_TABLE_SELECT("eval",              Leval),             \
+    SETUP_TABLE_SELECT("evlis",             Levlis),            \
     SETUP_TABLE_SELECT("explode",           Lexplode),          \
     SETUP_TABLE_SELECT("explode2",          Lexplodec),         \
     SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
@@ -7905,6 +7955,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_2),         \
     SETUP_TABLE_SELECT("open",              Lopen),             \
     SETUP_TABLE_SELECT("open-module",       Lopen_module),      \
+    SETUP_TABLE_SELECT("orderp",            Lorderp),           \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_2),       \
     SETUP_TABLE_SELECT("prog1",             Lprog1_2),          \
     SETUP_TABLE_SELECT("prog2",             Lprog2_2),          \

@@ -19,12 +19,13 @@
 //=========================================================================
 
 // Visible Lisp                                  A C Norman, August 2012-19
+//                                                    Vlad Badelita 2018-19
 //
 // This is a small Lisp system, but large enough to run significant
 // code such as the Reduce algebra system.
 
 /**************************************************************************
- * Copyright (C) 2019.                                   A C Norman       *
+ * Copyright (C) 2019.                    A C Norman, Vlad Badelita       *
  *                                                                        *
  * Redistribution and use in source and binary forms, with or without     *
  * modification, are permitted provided that the following conditions are *
@@ -747,11 +748,14 @@ static LispObject lookup(const char *s, size_t n, int flags);
 
 static LispObject Lchar_upcase(LispObject data, LispObject arg)
 {   LispObject a = arg;
-    if (isSYMBOL(a)) a = qpname(a);
+    if (isSYMBOL(a))
+    {   if (qpname(a) == nil) return a; // gensym as arg.
+        a = qpname(a);
+    }
     int ch = 0;
     if (isSTRING(a))
     {   ch = qstring(a)[0] & 0xff;
-        size_t len = strlen(qstring(a));
+        size_t len = veclength(qheader(a)); // strlen(qstring(a));
         if (len==1 && (ch&0x80) == 0) ch = toupper(ch);
         else if (len==2 && (ch & 0xe0) == 0xc0) // 2-byte UTF8
         {   ch = ((ch & 0x1f)<<6) | (qstring(a)[1] & 0x3f);
@@ -796,11 +800,14 @@ static LispObject Lchar_upcase(LispObject data, LispObject arg)
 
 static LispObject Lchar_downcase(LispObject data, LispObject arg)
 {   LispObject a = arg;
-    if (isSYMBOL(a)) a = qpname(a);
+    if (isSYMBOL(a))
+    {   if (qpname(a) == nil) return a;
+        a = qpname(a);
+    }
     int ch = 0;
     if (isSTRING(a))
     {   ch = qstring(a)[0] & 0xff;
-        size_t len = strlen(qstring(a));
+        size_t len = veclength(qheader(a)); // strlen(qstring(a));
         if (len==1 && (ch&0x80) == 0) ch = tolower(ch);
         else if (len==2 && (ch & 0xe0) == 0xc0) // 2-byte UTF8
         {   ch = ((ch & 0x1f)<<6) | (qstring(a)[1] & 0x3f);
@@ -978,7 +985,6 @@ void inner_reclaim()
     // section has its "starts" bit set, and so the loop can never zoom down and
     // drop beyond the bottom of a segment.
                 block_header *block_a = find_block(a);
-                LispObject initial_a = a;
                 while (!getheapstarts(a))
                 {
                     a -= 8;
@@ -986,7 +992,6 @@ void inner_reclaim()
                     assert(block_a == block_b && (uintptr_t)block_a != (uintptr_t)(-1));
                     assert(block_a->h1base <= (uintptr_t)a && (uintptr_t)a < block_a->h1top);
                 }
-    if (initial_a == 123456) printf("ook\n"); // to get it used.
                 if (!getpinned(a))
                 {   LispObject h;
     // ensureheapspace is here to arrange to skip past any of the pinned items
@@ -3325,6 +3330,7 @@ LispObject Lprog(LispObject lits, LispObject x)
             continue;
         }
         if (unwindflag != unwindNONE) break;
+        work1 = nil;
     }
 // Now I must unbind all the variables.
 
@@ -4411,6 +4417,50 @@ LispObject Lneq(LispObject lits, LispObject x, LispObject y)
     return (Lequal(lits, x, y) == nil ? lisptrue : nil);
 }
 
+// ORDERP is only supposed to be called on symbols.
+
+LispObject Lorderp(LispObject lits, LispObject x, LispObject y)
+{   if (x == y) return lisptrue;
+    if (!isSTRING(x) && !isSTRING(y))
+    {   if (!isSYMBOL(x))
+        {   if (!isSYMBOL(y)) return x < y ? lisptrue : nil;
+            else return lisptrue;
+        }
+        if (!isSYMBOL(y)) return nil;
+        LispObject pn = qpname(x);
+// Now I want to compare the print-names of two symbnols, but there is a
+// messy case where one or both are gensyms that have not been printed yet,
+// so in that case I need to allocate printnames for them!
+        if (pn == nil)
+        {   int len = snprintf(printbuffer, sizeof(printbuffer),
+                               "g%.3d", gensymcounter++);
+            if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+                pn = makestring("?gensym?", 8);
+            else pn = makestring(printbuffer, len);
+            qpname(x) = pn;
+        }
+        x = pn;
+        pn = qpname(y);
+        if (pn == nil)
+        {   int len = snprintf(printbuffer, sizeof(printbuffer),
+                               "g%.3d", gensymcounter++);
+            if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+                pn = makestring("?gensym?", 8);
+            else pn = makestring(printbuffer, len);
+            qpname(y) = pn;
+        }
+        y = pn;
+    }
+// now both x and y are strings
+    size_t lenx = veclength(qheader(x));
+    size_t leny = veclength(qheader(y));
+    for (size_t i=0; i<lenx && i<leny; i++)
+    {   if (qstring(x)[i] == qstring(y)[i]) continue;
+        return qstring(x)[i] < qstring(y)[i] ? lisptrue : nil;
+    }
+    return lenx <= leny ? lisptrue : nil;
+}
+
 LispObject Lmemq(LispObject lits, LispObject a, LispObject l)
 {   while (isCONS(l))
     {   if (a == qcar(l)) return l;
@@ -4551,6 +4601,11 @@ LispObject Loblist(LispObject lits)
 LispObject Leval(LispObject lits, LispObject x)
 {
     return eval(x);
+}
+
+LispObject Levlis(LispObject lits, LispObject x)
+{
+    return evlis(x);
 }
 
 LispObject Lapply(LispObject lits, LispObject x, LispObject y)
@@ -7297,6 +7352,7 @@ LispObject Lthread_id(LispObject _data) {
     SETUP_TABLE_SELECT("error",             Lerror_1),          \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_1),       \
     SETUP_TABLE_SELECT("eval",              Leval),             \
+    SETUP_TABLE_SELECT("evlis",             Levlis),            \
     SETUP_TABLE_SELECT("explode",           Lexplode),          \
     SETUP_TABLE_SELECT("explode2",          Lexplodec),         \
     SETUP_TABLE_SELECT("explodec",          Lexplodec),         \
@@ -7525,6 +7581,7 @@ LispObject Lthread_id(LispObject _data) {
     SETUP_TABLE_SELECT("mkhash",            Lmkhash_2),         \
     SETUP_TABLE_SELECT("open",              Lopen),             \
     SETUP_TABLE_SELECT("open-module",       Lopen_module),      \
+    SETUP_TABLE_SELECT("orderp",            Lorderp),           \
     SETUP_TABLE_SELECT("preserve",          Lpreserve_2),       \
     SETUP_TABLE_SELECT("prog1",             Lprog1_2),          \
     SETUP_TABLE_SELECT("prog2",             Lprog2_2),          \

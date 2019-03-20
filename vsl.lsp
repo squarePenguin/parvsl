@@ -606,17 +606,17 @@ top (cond ((atom a) (return (reversip r))))
 (de ordpv (u v)
     (error "ordpv not yet implemented" (cons u v)))
 
-(de orderp (u v)
-   (prog ()
-      (setq u (explodec u))
-      (setq v (explodec v))
-      (while (and u v (eq (car u) (car v)))
-         (setq u (cdr u) v (cdr v)))
-      (cond
-         ((and u v)
-            (return (lessp (char!-code (car u)) (char!-code (car v)))))
-         (v (return t))
-         (t (return nil)))))
+% (de orderp (u v)
+%    (prog ()
+%       (setq u (explodec u))
+%       (setq v (explodec v))
+%       (while (and u v (eq (car u) (car v)))
+%          (setq u (cdr u) v (cdr v)))
+%       (cond
+%          ((and u v)
+%             (return (lessp (char!-code (car u)) (char!-code (car v)))))
+%          (v (return t))
+%          (t (return (null u))))))
 
 (dm function (x) (cons 'quote (cdr x)))
 

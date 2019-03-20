@@ -6675,6 +6675,8 @@ intptr_t Remainder::op(int64_t a, int64_t b)
 
 }
 
+// The declaration of "cons" here *MUST* match the one in code that uses
+// this library!
 static inline LispObject cons(LispObject a, LispObject b);
 
 namespace arithlib

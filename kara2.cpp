@@ -174,16 +174,16 @@ inline uint64_t ksub(uint64_t *a, size_t lena,
                      uint64_t *b, size_t lenb,
                      uint64_t *r, size_t lenr,
                      uint64_t borrow = 0)
-{   size_h shorter = lena < lenb ? lena : lenb;
+{   size_t shorter = lena < lenb ? lena : lenb;
     size_t i;
     for (i=0; i<shorter; i++)
-        carry = subtract_with_borrow(a[i], b[i], borrow, r[i]);
+        borrow = subtract_with_borrow(a[i], b[i], borrow, r[i]);
     while (i<lena)
-    {   borrow = subtract_with_borrow(a[i], carry, r[i]);
+    {   borrow = subtract_with_borrow(a[i], borrow, r[i]);
         i++;
     }
     while (i<lenb)
-    {   borrow = subtract_with_borrow(0, a[i], carry, r[i]);
+    {   borrow = subtract_with_borrow(0, a[i], borrow, r[i]);
         i++;
     }
     while (i < lenr) r[i++] = -borrow;
@@ -318,16 +318,51 @@ void mul4x4(uint64_t a3, uint64_t a2, uint64_t a1, uint64_t a0,
 
 // c = a*b;
 
+#ifdef NEWER
+
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
                                uint64_t *c)
 {
-// Here I experimented with working with 2 or 3 digits at a time -
-// in effect unrolling the loops and rearranging the sequence of memory
-// accesses in case I could speed things up. With g++ on x86_64 the
-// changes hurt rather than benefitted me. So this has dropped back
-// to simple code. Note that this should work with lena==1 or lenb==1 so
-// I will not need top make those special cases.
+// This version does things collecting one digit of the result at a time.
+    if (lena < lenb)
+    {   std::swap(a, b);
+        std::swap(lena, lenb);
+    }
+//  a[0]*b[0]
+//  for i=1; i<lenb; i++)
+//    b[0]*a[i]
+//    for j=1; j<i; j++
+//      b[j]*a[i-j]
+//  for i=lenb; i<lena; i++         // If lenb==lena this loop is not executed
+//    b[0]*a[i]
+//    for j=1; j<lenb; j++
+//      b[j]*a[i-j]
+//  for i=lena; i<lena+lenb-2; i++  // If lenb==2 this loop is not executed
+//    b[i-lena]*a[lena-1]
+//    for j=1:lenb-1
+//      b[i-lena+j]*a[lena-1-j]
+//  a[lena-1]*b[lena-1]
+
+    uint64_t carry, hi, lo;
+    multiply64(a[0], b[0], lo, c[0]);
+    hi = carry = 0;
+    size_t i = 1;
+    while (i<lenb)
+    {   for (size_t j=0; j<=i; j++)
+        {   uint64_t hi1;
+            multiplyadd64(a[j], b[i-j], lo, hi1, lo);
+            carry += add_with_carry(hi, hi1, hi);
+        }
+        c[i] = lo;
+        lo = hi;
+        hi = carry;
+        carry = 0;
+        i++;
+    } 
+    for (size_t i=0; i<lena+lenb; i++)
+    {
+
     uint64_t hi=0, lo;
     for (size_t j=0; j<lenb; j++)
         multiplyadd64(a[0], b[j], hi, hi, c[j]);
@@ -359,6 +394,52 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
     for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
         carry = add_with_carry(c[i], carry, c[i]);
 }
+
+#else // NEWER
+
+inline void classical_multiply(uint64_t *a, size_t lena,
+                               uint64_t *b, size_t lenb,
+                               uint64_t *c)
+{
+// Here I experimented with working with 2 or 3 digits at a time -
+// in effect unrolling the loops and rearranging the sequence of memory
+// accesses in case I could speed things up. With g++ on x86_64 the
+// changes hurt rather than benefitted me. So this has dropped back
+// to simple code. Note that this should work with lena==1 or lenb==1 so
+// I will not need to make those special cases.
+    uint64_t hi=0, lo;
+    for (size_t j=0; j<lenb; j++)
+        multiplyadd64(a[0], b[j], hi, hi, c[j]);
+    c[lenb] = hi;
+    for (size_t i=1; i<lena; i++)
+    {   hi = 0;
+        for (size_t j=0; j<lenb; j++)
+        {   multiplyadd64(a[i], b[j], hi, hi, lo);
+            hi += add_with_carry(lo, c[i+j], c[i+j]);
+        }
+        c[i+lenb] = hi;
+    }
+}
+
+// c = c + a*b. Potentially carry all the way up to lenc.
+
+inline void classical_multiply_and_add(uint64_t *a, size_t lena,
+                                       uint64_t *b, size_t lenb,
+                                       uint64_t *c, size_t lenc)
+{   uint64_t hi=0, lo, carry=0;
+    for (size_t i=0; i<lena; i++)
+    {   hi = 0;
+        for (size_t j=0; j<lenb; j++)
+        {   multiplyadd64(a[i], b[j], hi, hi, lo);
+            hi += add_with_carry(lo, c[i+j], c[i+j]);
+        }
+        carry = add_with_carry(hi, c[i+lenb], carry, c[i+lenb]);
+    }
+    for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
+        carry = add_with_carry(c[i], carry, c[i]);
+}
+
+#endif // NEWER
 
 // Now variants that use just a single digit first argument. These may be seen
 // as optimized cases.
