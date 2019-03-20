@@ -2369,13 +2369,13 @@ LispObject readT()
  * If specifying [stop] make sure it is in the bucket, otherwise it will loop.
  * Returns -1 if not found.
  * */
-LispObject search_bucket(LispObject bucket, std::string name, LispObject stop=tagFIXNUM) {
+LispObject search_bucket(LispObject bucket, const char *name, size_t len, LispObject stop=tagFIXNUM) {
     for (LispObject w = bucket; w != stop; w = qcdr(w)) {
         LispObject a = qcar(w);    // Will be a symbol.
         LispObject n = qpname(a);      // Will be a string.
         size_t l = veclength(qheader(n)); // Length of the name.
 
-        if (l == name.length() && name.compare(0, l, qstring(n), 0, l) == 0) {
+        if (l == len && strncmp(name, qstring(n), len) == 0) {
             return a;                  // Existing symbol found.
         }
     }
@@ -2383,17 +2383,19 @@ LispObject search_bucket(LispObject bucket, std::string name, LispObject stop=ta
     return -1;
 }
 
-LispObject lookup(std::string name, int flag)
+LispObject lookup(const char *name, size_t len, int flag)
 {
-    size_t loc = std::hash<std::string>{}(name) % OBHASH_SIZE;
+    size_t loc = 1;
+    for (size_t i = 0; i < len; i += 1) loc = 13 * loc + name[i];
+    loc = loc % OBHASH_SIZE;
 
     LispObject bucket = obhash[loc].load(std::memory_order_acquire);
-    LispObject s = search_bucket(bucket, name);
+    LispObject s = search_bucket(bucket, name, len);
 
     if (s != -1) return s; // found the symbol
 
     if ((flag & 1) == 0) return undefined;
-    LispObject pn = makestring(name.c_str(), name.length());
+    LispObject pn = makestring(name, len);
     LispObject sym = allocatesymbol(pn);
 
     LispObject new_bucket = cons(sym, bucket);
