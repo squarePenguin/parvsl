@@ -1,11 +1,72 @@
-#+TITLE: Implementing parallelism in Lisp for REDUCE
-#+SUBTITLE: Computer Science Part II Project
-#+AUTHOR: Andrei Vlad Badelita
-#+EMAIL: avb40@cam.ac.uk
-#+LATEX_HEADER: \documentclass[a4paper]{article}
+# #+TITLE: Implementing parallelism in Lisp for REDUCE
+# #+SUBTITLE: Computer Science Part II Project
+# #+AUTHOR: Andrei Vlad Badelita
+# #+EMAIL: avb40@cam.ac.uk
+
+#+OPTIONS: toc:nil
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [a4paper, 12pt]
+#+LATEX_HEADER: \usepackage[margin=3cm]{geometry}
+# #+LATEX_HEADER_EXTRA:
+#+DATE: \today
+
+#+BEGIN_EXPORT latex
+% Title
+
+\pagestyle{empty}
+
+\hfill{\LARGE \bf Andrei-Vlad Bădeliță}
+
+\vspace*{60mm}
+\begin{center}
+\Huge{\bf Implementing Parallelism in Lisp for REDUCE} \\
+\vspace*{5mm}
+Part II Computer Science Dissertation \\
+\vspace*{5mm}
+Trinity College \\
+\vspace*{5mm}
+\today  % today's date
+\end{center}
+
+\cleardoublepage
+#+END_EXPORT
+
+#+LATEX: \newpage
+
+\section*{Declaration of originality}
+
+I, Andrei-Vlad Bădeliță of Trinity College,
+being a candidate for Part II of the Computer Science Tripos,
+hereby declare that this dissertation and the work described in it
+are my own work, unaided except as may be specified below, and
+that the dissertation does not contain material that has already
+been used to any substantial extent for a comparable purpose.
+
+Signed 
+
+Date
+
+\section*{Proforma}
+
+TODO Write proforma
+- Your candidate number.
+- The Title of your Project.
+- The Examination and Year.
+- Word-count for the dissertation.
+- Final line count: Number of lines written by the *student* in the final version of their software work.
+- Project Originator.
+- Project Supervisor.
+- At most 100 words describing the original aims of the project.
+- At most 100 words summarising the work completed.
+- At most 100 words describing any special difficulties that you faced. 
+
+
+#+LATEX: \newpage
+
+#+TOC: headlines 2
 
 * Introduction
-The motivation of this project is to explore the implementation of multi-threading
+The motivation for this project is to explore the implementation of multi-threading
 capabilities within a working compiler and assess the benefits and tradeoffs it brings
 to a real-world application with a large, actively-developed body of code. 
 
@@ -877,8 +938,7 @@ to structure data.
 ** TODO Computing Groebner basis in parallel
 
 
-
-* TODO Evaluation
+* Evaluation
 ** TODO Single-threaded building of Reduce
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
@@ -957,8 +1017,7 @@ Chez scheme?
 
 
 
-
-* TODO Conclusions
+* Conclusions
 
   
 
