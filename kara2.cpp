@@ -125,7 +125,7 @@ void test_add_with_carry2()
 // addition and subtraction code. 
 
 // I want:
-//    kadd(a, lena, r, lenc);          // c += a; and return a carry
+//    kadd(a, lena, c, lenc);          // c += a; and return a carry
 //    kadd(a, lena, b, lenb, c, lenc); // c := a + b; and return a carry
 // and correspondingly for subtraction. Note that these have lenc set on
 // input and will propagate carries or extend a result all the way up to
@@ -134,13 +134,13 @@ void test_add_with_carry2()
 // On other occasions they are used with lena=lenb<lenc and carries can
 // propagate as far as lenc but any overflow beyond there is unimportant.
 
-inline uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
+inline uint64_t kadd(uint64_t *a, size_t lena, uint64_t *c, size_t lenc)
 {   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lena; i++)
-        carry = add_with_carry(a[i], r[i], carry, r[i]);
-    while (carry!=0 && i<lenr)
-    {   carry = add_with_carry(r[i], carry, r[i]);
+        carry = add_with_carry(a[i], c[i], carry, c[i]);
+    while (carry!=0 && i<lenc)
+    {   carry = add_with_carry(c[i], carry, c[i]);
         i++;
     }
     return carry;
@@ -150,55 +150,55 @@ inline uint64_t kadd(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 
 inline uint64_t kadd(uint64_t *a, size_t lena,
                      uint64_t *b, size_t lenb,
-                     uint64_t *r, size_t lenr)
+                     uint64_t *c, size_t lenc)
 {   uint64_t carry = 0;
     size_t i;
     for (i=0; i<lenb; i++)
-        carry = add_with_carry(a[i], b[i], carry, r[i]);
+        carry = add_with_carry(a[i], b[i], carry, c[i]);
     while (i<lena)
-    {   carry = add_with_carry(a[i], carry, r[i]);
+    {   carry = add_with_carry(a[i], carry, c[i]);
         i++;
     }
-    if (i < lenr)
-    {   r[i++] = carry;
+    if (i < lenc)
+    {   c[i++] = carry;
         carry = 0;
     }
-    while (i < lenr) r[i++] = 0;
+    while (i < lenc) c[i++] = 0;
     return carry;
 }
 
-// r = a - b (with input borrow optionally provided). In the use I make of
+// c = a - b (with input borrow optionally provided). In the use I make of
 // this I may need to allow for either a or b to be longer than the other.
 
 inline uint64_t ksub(uint64_t *a, size_t lena,
                      uint64_t *b, size_t lenb,
-                     uint64_t *r, size_t lenr,
+                     uint64_t *c, size_t lenc,
                      uint64_t borrow = 0)
 {   size_t shorter = lena < lenb ? lena : lenb;
     size_t i;
     for (i=0; i<shorter; i++)
-        borrow = subtract_with_borrow(a[i], b[i], borrow, r[i]);
+        borrow = subtract_with_borrow(a[i], b[i], borrow, c[i]);
     while (i<lena)
-    {   borrow = subtract_with_borrow(a[i], borrow, r[i]);
+    {   borrow = subtract_with_borrow(a[i], borrow, c[i]);
         i++;
     }
     while (i<lenb)
-    {   borrow = subtract_with_borrow(0, a[i], borrow, r[i]);
+    {   borrow = subtract_with_borrow(0, a[i], borrow, c[i]);
         i++;
     }
-    while (i < lenr) r[i++] = -borrow;
+    while (i < lenc) c[i++] = -borrow;
     return borrow;
 }
 
-// r = r - a;
+// c = c - a;
 
-inline uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
+inline uint64_t ksub(uint64_t *a, size_t lena, uint64_t *c, size_t lenc)
 {   uint64_t borrow = 0;
     size_t i;
     for (i=0; i<lena; i++)
-        borrow = subtract_with_borrow(r[i], a[i], borrow, r[i]);
-    while (borrow!=0 && i<lenr)
-    {   borrow = subtract_with_borrow(r[i], borrow, r[i]);
+        borrow = subtract_with_borrow(c[i], a[i], borrow, c[i]);
+    while (borrow!=0 && i<lenc)
+    {   borrow = subtract_with_borrow(c[i], borrow, c[i]);
         i++;
     }
     return borrow;
@@ -209,92 +209,92 @@ inline uint64_t ksub(uint64_t *a, size_t lena, uint64_t *r, size_t lenr)
 
 inline void mul2x2(uint64_t a1, uint64_t a0,
                    uint64_t b1, uint64_t b0,
-                   uint64_t &r3, uint64_t &r2, uint64_t &r1, uint64_t &r0)
-{   uint64_t r1a, r1b, r2a, r2b, r3a;
-    multiply64(a0, b0, r1a, r0);
-    multiplyadd64(a0, b1, r1a, r2a, r1a);
-    multiplyadd64(a1, b0, r1a, r2b, r1);
-    multiplyadd64(a1, b1, r2a, r3a, r2a);
-    r3a += add_with_carry(r2a, r2b, r2);
-    r3 = r3a;
+                   uint64_t &c3, uint64_t &c2, uint64_t &c1, uint64_t &c0)
+{   uint64_t c1a, c1b, c2a, c2b, c3a;
+    multiply64(a0, b0, c1a, c0);
+    multiplyadd64(a0, b1, c1a, c2a, c1a);
+    multiplyadd64(a1, b0, c1a, c2b, c1);
+    multiplyadd64(a1, b1, c2a, c3a, c2a);
+    c3a += add_with_carry(c2a, c2b, c2);
+    c3 = c3a;
 }
 
 inline void mul2x2S(int64_t a1, uint64_t a0,
                     int64_t b1, uint64_t b0,
-                    int64_t &r3, uint64_t &r2, uint64_t &r1, uint64_t &r0)
-{   uint64_t r1a;
-    multiply64(a0, b0, r1a, r0);
-    uint64_t r1b, r2a;
-    multiplyadd64(a0, (uint64_t)b1, r1a, r2a, r1a);
-    uint64_t r2b;
-    multiplyadd64((uint64_t)a1, b0, r1a, r2b, r1);
-    int64_t r3a;
-    signed_multiplyadd64(a1, b1, r2a, r3a, r2a);
-    r3a = (int64_t)((uint64_t)r3a + add_with_carry(r2a, r2b, r2a));
+                    int64_t &c3, uint64_t &c2, uint64_t &c1, uint64_t &c0)
+{   uint64_t c1a;
+    multiply64(a0, b0, c1a, c0);
+    uint64_t c1b, c2a;
+    multiplyadd64(a0, (uint64_t)b1, c1a, c2a, c1a);
+    uint64_t c2b;
+    multiplyadd64((uint64_t)a1, b0, c1a, c2b, c1);
+    int64_t c3a;
+    signed_multiplyadd64(a1, b1, c2a, c3a, c2a);
+    c3a = (int64_t)((uint64_t)c3a + add_with_carry(c2a, c2b, c2a));
 // Do the arithmetic in unsigned mode in case of overflow problems.
-    if (a1 < 0) r3a = (int64_t)((uint64_t)r3a -
-                                subtract_with_borrow(r2a, b0, r2a));
-    if (b1 < 0) r3a = (int64_t)((uint64_t)r3a -
-                                subtract_with_borrow(r2a, a0, r2a));
-    r2 = r2a;
-    r3 = r3a;
+    if (a1 < 0) c3a = (int64_t)((uint64_t)c3a -
+                                subtract_with_borrow(c2a, b0, c2a));
+    if (b1 < 0) c3a = (int64_t)((uint64_t)c3a -
+                                subtract_with_borrow(c2a, a0, c2a));
+    c2 = c2a;
+    c3 = c3a;
 }
 
 inline void mul3x2(uint64_t a2, uint64_t a1, uint64_t a0,
                    uint64_t b1, uint64_t b0,
-                   uint64_t &r4, uint64_t &r3, uint64_t &r2,
-                   uint64_t &r1, uint64_t &r0)
-{   uint64_t r4a, r3a;
-    mul2x2(a1, a0, b1, b0, r3, r2, r1, r0);
-    multiplyadd64(a2, b0, r2, r3a, r2);
-    uint64_t carry = add_with_carry(r3, r3a, r3);
-    multiplyadd64(a2, b1, r3, r4, r3);
-    r4 += carry;
+                   uint64_t &c4, uint64_t &c3, uint64_t &c2,
+                   uint64_t &c1, uint64_t &c0)
+{   uint64_t c4a, c3a;
+    mul2x2(a1, a0, b1, b0, c3, c2, c1, c0);
+    multiplyadd64(a2, b0, c2, c3a, c2);
+    uint64_t carry = add_with_carry(c3, c3a, c3);
+    multiplyadd64(a2, b1, c3, c4, c3);
+    c4 += carry;
 }
 
 inline void mul3x3(uint64_t a2, uint64_t a1, uint64_t a0,
                    uint64_t b2, uint64_t b1, uint64_t b0,
-                   uint64_t &r5, uint64_t &r4, uint64_t &r3,
-                   uint64_t &r2, uint64_t &r1, uint64_t &r0)
-{   uint64_t r4a, r3a;
-    mul2x2(a1, a0, b1, b0, r3, r2, r1, r0);
-    multiplyadd64(a2, b0, r2, r3a, r2);
-    uint64_t carry = add_with_carry(r3, r3a, r3);
-    multiplyadd64(a0, b2, r2, r3a, r2);
-    carry += add_with_carry(r3, r3a, r3);
-    multiplyadd64(a2, b1, r3, r4, r3);
-    carry = add_with_carry(r4, carry, r4);
-    multiplyadd64(a1, b2, r3, r4a, r3);
-    carry = add_with_carry(r4, r4a, r4);
-    multiplyadd64((int64_t)a2, (int64_t)b2, r4, r5, r4);
-    r5 = (int64_t)((uint64_t)r5 + carry);
+                   uint64_t &c5, uint64_t &c4, uint64_t &c3,
+                   uint64_t &c2, uint64_t &c1, uint64_t &c0)
+{   uint64_t c4a, c3a;
+    mul2x2(a1, a0, b1, b0, c3, c2, c1, c0);
+    multiplyadd64(a2, b0, c2, c3a, c2);
+    uint64_t carry = add_with_carry(c3, c3a, c3);
+    multiplyadd64(a0, b2, c2, c3a, c2);
+    carry += add_with_carry(c3, c3a, c3);
+    multiplyadd64(a2, b1, c3, c4, c3);
+    carry = add_with_carry(c4, carry, c4);
+    multiplyadd64(a1, b2, c3, c4a, c3);
+    carry = add_with_carry(c4, c4a, c4);
+    multiplyadd64((int64_t)a2, (int64_t)b2, c4, c5, c4);
+    c5 = (int64_t)((uint64_t)c5 + carry);
 }
 
 inline void mul3x3S(uint64_t a2, uint64_t a1, uint64_t a0,
                     uint64_t b2, uint64_t b1, uint64_t b0,
-                    int64_t &r5, uint64_t &r4, uint64_t &r3,
-                    uint64_t &r2, uint64_t &r1, uint64_t &r0)
-{   uint64_t r4a, r3a;
-    mul2x2(a1, a0, b1, b0, r3, r2, r1, r0);
-    multiplyadd64(a2, b0, r2, r3a, r2);
-    uint64_t carry = add_with_carry(r3, r3a, r3);
-    multiplyadd64(a0, b2, r2, r3a, r2);
-    carry += add_with_carry(r3, r3a, r3);
-    multiplyadd64(a2, b1, r3, r4, r3);
-    carry = add_with_carry(r4, carry, r4);
-    multiplyadd64(a1, b2, r3, r4a, r3);
-    carry = add_with_carry(r4, r4a, r4);
-    signed_multiplyadd64((int64_t)a2, (int64_t)b2, r4, r5, r4);
-    r5 = (int64_t)((uint64_t)r5 + carry);
+                    int64_t &c5, uint64_t &c4, uint64_t &c3,
+                    uint64_t &c2, uint64_t &c1, uint64_t &c0)
+{   uint64_t c4a, c3a;
+    mul2x2(a1, a0, b1, b0, c3, c2, c1, c0);
+    multiplyadd64(a2, b0, c2, c3a, c2);
+    uint64_t carry = add_with_carry(c3, c3a, c3);
+    multiplyadd64(a0, b2, c2, c3a, c2);
+    carry += add_with_carry(c3, c3a, c3);
+    multiplyadd64(a2, b1, c3, c4, c3);
+    carry = add_with_carry(c4, carry, c4);
+    multiplyadd64(a1, b2, c3, c4a, c3);
+    carry = add_with_carry(c4, c4a, c4);
+    signed_multiplyadd64((int64_t)a2, (int64_t)b2, c4, c5, c4);
+    c5 = (int64_t)((uint64_t)c5 + carry);
     if (negative(b2))
-    {   uint64_t borrow = subtract_with_borrow(r3, a0, r3);
-        borrow = subtract_with_borrow(r4, a1, borrow, r4);
-        r5 = (int64_t)((uint64_t)r5 - borrow);
+    {   uint64_t borrow = subtract_with_borrow(c3, a0, c3);
+        borrow = subtract_with_borrow(c4, a1, borrow, c4);
+        c5 = (int64_t)((uint64_t)c5 - borrow);
     }
     if (negative(a2))
-    {   uint64_t borrow = subtract_with_borrow(r3, b0, r3);
-        borrow = subtract_with_borrow(r4, b1, borrow, r4);
-        r5 = (int64_t)((uint64_t)r5 - borrow);
+    {   uint64_t borrow = subtract_with_borrow(c3, b0, c3);
+        borrow = subtract_with_borrow(c4, b1, borrow, c4);
+        c5 = (int64_t)((uint64_t)c5 - borrow);
     }
 }
 
@@ -323,61 +323,59 @@ void mul4x4(uint64_t a3, uint64_t a2, uint64_t a1, uint64_t a0,
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
                                uint64_t *c)
-{
-// This version does things collecting one digit of the result at a time.
-    if (lena < lenb)
+{   if (lena < lenb)
     {   std::swap(a, b);
         std::swap(lena, lenb);
     }
-//  a[0]*b[0]
-//  for i=1; i<lenb; i++)
-//    b[0]*a[i]
-//    for j=1; j<i; j++
-//      b[j]*a[i-j]
-//  for i=lenb; i<lena; i++         // If lenb==lena this loop is not executed
-//    b[0]*a[i]
-//    for j=1; j<lenb; j++
-//      b[j]*a[i-j]
-//  for i=lena; i<lena+lenb-2; i++  // If lenb==2 this loop is not executed
-//    b[i-lena]*a[lena-1]
-//    for j=1:lenb-1
-//      b[i-lena+j]*a[lena-1-j]
-//  a[lena-1]*b[lena-1]
-
-    uint64_t carry, hi, lo;
-    multiply64(a[0], b[0], lo, c[0]);
-    hi = carry = 0;
-    size_t i = 1;
-    while (i<lenb)
-    {   for (size_t j=0; j<=i; j++)
-        {   uint64_t hi1;
-            multiplyadd64(a[j], b[i-j], lo, hi1, lo);
+// (1) do the lowest degree term as a separate step
+    uint64_t carry=0, hi, hi1, lo;
+    multiply64(b[0], a[0], lo, c[0]);
+// Now a sequence of stages where at each the number of terms to
+// be combined grows. 
+    hi = 0;
+    for (int i=1; i<lenb; i++)
+    {   carry = 0;
+        for (int j=0; j<=i; j++)
+        {   multiplyadd64(b[j], a[i-j], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
         c[i] = lo;
         lo = hi;
         hi = carry;
-        carry = 0;
-        i++;
-    } 
-    for (size_t i=0; i<lena+lenb; i++)
-    {
-
-    uint64_t hi=0, lo;
-    for (size_t j=0; j<lenb; j++)
-        multiplyadd64(a[0], b[j], hi, hi, c[j]);
-    c[lenb] = hi;
-    for (size_t i=1; i<lena; i++)
-    {   hi = 0;
-        for (size_t j=0; j<lenb; j++)
-        {   multiplyadd64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, c[i+j], c[i+j]);
-        }
-        c[i+lenb] = hi;
     }
+// If the two inputs are not the same size I demand that lena>=lenb and
+// there may be some slices to compute in the middle here.
+    for (int i=lenb; i<lena; i++)  //  If lenb==lena this loop is not executed
+    {   carry = 0;  
+        for (int j=0; j<lenb; j++)
+        {   multiplyadd64(b[j], a[i-j], lo, hi1, lo);
+            carry += add_with_carry(hi, hi1, hi);
+        }
+        c[i] = lo;
+        lo = hi;
+        hi = carry;
+    }
+// Now I will have some stages where the number of terms to be combined
+// gradually decreases.
+    for (int i=1; i<lenb-1; i++) //  If lenb==2 this loop is not executed
+    {   carry = 0;
+        for (int j=0; j<lenb-i; j++)
+        {   multiplyadd64(b[i+j], a[lena-j-1], lo, hi1, lo);
+            carry += add_with_carry(hi, hi1, hi);
+        }
+        c[lena+i-1] = lo;
+        lo = hi;
+        hi = carry;
+    }
+// Finally the very top term is computed.
+    multiplyadd64(b[lenb-1], a[lena-1], lo, hi1, c[lena+lenb-2]);
+    c[lena+lenb-1] = hi + hi1;
 }
 
+
 // c = c + a*b. Potentially carry all the way up to lenc.
+
+// NOT YET reworked!
 
 inline void classical_multiply_and_add(uint64_t *a, size_t lena,
                                        uint64_t *b, size_t lenb,
@@ -446,11 +444,11 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
 
 inline void classical_multiply(uint64_t a,
                                uint64_t *b, size_t lenb,
-                               uint64_t *r)
+                               uint64_t *c)
 {   uint64_t hi=0, lo;
     for (size_t j=0; j<lenb; j++)
-        multiplyadd64(a, b[j], hi, hi, r[j]);
-    r[lenb] = hi;
+        multiplyadd64(a, b[j], hi, hi, c[j]);
+    c[lenb] = hi;
 }
 
 // c = c + a*b and return any carry.
@@ -1104,20 +1102,20 @@ inline void kmultiply(uint64_t *a, size_t lena,
         break;
 
     case BY(3, 3):
-        {   int64_t r5;
-            uint64_t r4, r3, r2, r1;
+        {   int64_t c5;
+            uint64_t c4, c3, c2, c1;
             mul3x3S(a[2], a[1], a[0], b[2], b[1], b[0],
-                    r5, r4, r3, r2, r1, c[0]);
-            c[1] = r1;
-            c[2] = r2;
-            c[3] = r3;
-            c[4] = r4;
-            if (shrinkable(r5, r4))
-            {   if (shrinkable(r4, r3)) lenc = 4;
+                    c5, c4, c3, c2, c1, c[0]);
+            c[1] = c1;
+            c[2] = c2;
+            c[3] = c3;
+            c[4] = c4;
+            if (shrinkable(c5, c4))
+            {   if (shrinkable(c4, c3)) lenc = 4;
                 else lenc = 5;
             }
             else
-            {   c[5] = (uint64_t)r5;
+            {   c[5] = (uint64_t)c5;
                 lenc = 6;
             }
             return;
@@ -1381,6 +1379,7 @@ int main(int argc, char *argv[])
 
 #ifndef NO_CORRECTNESS
 
+#if 0
     for (int i=0; i<10; i++)
     {   a[i] = ((uint64_t)1) << (6*i);
         b[i] = ((uint64_t)1) << (63-6*i);
@@ -1397,20 +1396,21 @@ int main(int argc, char *argv[])
     display("c1", c1, lenc1);
     if (lenc != lenc1 ||
         c[lenc-1] != c1[lenc-1]) abort();
+#endif
 
 // This generates some random data and then calls the multiplication code
 // to multiply each m*n prefix of it. It compares the results from the
 // new code here against those from  "referencemultiply".
 
     std::cout << "Correctness test" << std::endl;
-    for (int run=0; run<100; run++)
+    for (int run=0; run<10000; run++)
     {   for (size_t i=0; i<MAX; i++)
         {   a[i] = mersenne_twister();
             b[i] = mersenne_twister();
         }
         uint64_t toplen = mersenne_twister();
         int count = 0;
-        int maxlen = 64;
+        int maxlen = 25;
         for (lena=1; lena<maxlen; lena++)
         {   for (lenb=1; lenb<maxlen; lenb++)
             {
@@ -1443,7 +1443,7 @@ int main(int argc, char *argv[])
                 {   std::cout << std::endl;
                     std::cout << "Failed at "
                               << lena << "*" << lenb << std::endl;
-                    std::cout << std::hex << "c-end = " << c[lena+lenb] << std::endl;
+                    std::cout << std::hex << "c-end  = " << c[lena+lenb] << std::endl;
                     std::cout << std::hex << "c1-end = " << c1[lena+lenb] << std::endl;
                     display("a", a, lena);
                     display("b", b, lenb);

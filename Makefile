@@ -10,6 +10,8 @@
 CFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O0 -g -rdynamic -pg -Wall
 FASTCFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O3 -Wall
 
+
+
 # The issue of just which libraries I need to link in seems to be
 # platform-specific so here are some particular cases...
 
@@ -17,7 +19,8 @@ ifeq ($(shell uname),Darwin)
 LIBS=-lm -lz -ledit -lncurses -ltermcap
 else
 ifeq ($(shell uname -o),Cygwin)
-LIBS=-lm -lz -ledit -lncurses
+# Give things a HUGE stack!
+LIBS=-lm -lz -ledit -lncurses -Wl,--stack,64000000
 else
 LIBS=-lm -lz -ledit -lncurses -ltermcap
 endif
