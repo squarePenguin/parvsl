@@ -303,7 +303,7 @@ symbolic procedure reduce_by(S, L);
         princ "Reduce "; dfprin s; princ " using "; dfprin p;
         s1 := dfremainder(s, p);
         princ " => "; dfprin s; terpri();
-% test if this made progress but did not reduce the polynoial all the way
+% test if this made progress but did not reduce the polynomial all the way
 % down to nil, set the "done" flag to nil so that we will try everything
 % again.
         if s1 neq s then <<
@@ -319,7 +319,9 @@ symbolic procedure delete_pairlist(p, L);
 
 symbolic procedure babygroe L;
   begin
-    scalar pairs := for each p on L conc
+    scalar pairs;
+    L := for each p in L collect dfmake_monic p;
+    pairs := for each p on L conc
       for each q in cdr p collect (car p . q);
     terpri();
     printc "Babygroe input:";
@@ -360,7 +362,7 @@ symbolic procedure babygroeeval u;
     u := prepsq simp car u;
     if not eqcar(u, 'list) then rederr "babygroe expects a list as an argument";
     u := babygroe (for each v in cdr u collect prefix_to_df v);
-% At present I do not convert the output from babygrow back into a prefix form
+% At present I do not convert the output from babygroe back into a prefix form
 % or an (!*sq..) form to return - I just print it. But the code I have for
 % displaying distributed forms could easily be adapted to return a prefix
 % representation of the list of polynomials.
@@ -382,6 +384,37 @@ babygroe {x*y-x, x^2-y};
 
 babygroe {x^3 - 2*x*y,
           x^2*y - 2*y^2 + x};
+
+
+lisp << varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8) >>;
+
+babygroe {
+  a0^2 - a4,
+  a1^2 - a5,
+  a2^2 - a6,
+  a8 - a0 - a1 - a2};
+
+% babygroe {
+%   a0^3 - a4,
+%   a1^2 - a5,
+%   a2^2 - a6,
+%   a8 - a0 - a1 - a2};
+%
+% babygroe {
+%   a0^3 - a4,
+%   a1^3 - a5,
+%   a2^2 - a6,
+%   a8 - a0 - a1 - a2};
+%
+% babygroe {
+%   a0^3 - a4,
+%   a1^3 - a5,
+%   a2^3 - a6,
+%   a8 - a0 - a1 - a2};
+
+
+quit;
+
 
 quit;
 

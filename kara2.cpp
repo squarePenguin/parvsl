@@ -320,6 +320,8 @@ void mul4x4(uint64_t a3, uint64_t a2, uint64_t a1, uint64_t a0,
 
 #ifdef NEWER
 
+// This version, activated via NEWER, forms a product digit by digit.
+
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
                                uint64_t *c)
@@ -345,6 +347,7 @@ inline void classical_multiply(uint64_t *a, size_t lena,
     }
 // If the two inputs are not the same size I demand that lena>=lenb and
 // there may be some slices to compute in the middle here.
+    carry = 0;
     for (int i=lenb; i<lena; i++)  //  If lenb==lena this loop is not executed
     {   carry = 0;  
         for (int j=0; j<lenb; j++)
@@ -357,6 +360,7 @@ inline void classical_multiply(uint64_t *a, size_t lena,
     }
 // Now I will have some stages where the number of terms to be combined
 // gradually decreases.
+    carry = 0;
     for (int i=1; i<lenb-1; i++) //  If lenb==2 this loop is not executed
     {   carry = 0;
         for (int j=0; j<lenb-i; j++)
@@ -373,9 +377,63 @@ inline void classical_multiply(uint64_t *a, size_t lena,
 }
 
 
+#ifdef MUCH_NEWER
 // c = c + a*b. Potentially carry all the way up to lenc.
 
-// NOT YET reworked!
+inline void classical_multiply_and_add(uint64_t *a, size_t lena,
+                                       uint64_t *b, size_t lenb,
+                                       uint64_t *c, size_t lenc)
+{   if (lena < lenb)
+    {   std::swap(a, b);
+        std::swap(lena, lenb);
+    }
+// (1) do the lowest degree term as a separate step
+    uint64_t carry=0, carry1, hi, hi1, lo;
+    multiplyadd64(b[0], a[0], c[0], lo, c[0]);
+// Now a sequence of stages where at each the number of terms to
+// be combined grows. 
+    hi = 0;
+    for (int i=1; i<lenb; i++)
+    {   carry = 0;
+        for (int j=0; j<=i; j++)
+        {   multiplyadd64(b[j], a[i-j], lo, hi1, lo);
+            carry += add_with_carry(hi, hi1, hi);
+        }
+        carry1 = add_with_carry(c[i], lo, c[i]);
+        hi = add_with_carry(hi, carry1, lo) + carry;
+    }
+// If the two inputs are not the same size I demand that lena>=lenb and
+// there may be some slices to compute in the middle here.
+    for (int i=lenb; i<lena; i++)  //  If lenb==lena this loop is not executed
+    {   carry = 0;  
+        for (int j=0; j<lenb; j++)
+        {   multiplyadd64(b[j], a[i-j], lo, hi1, lo);
+            carry += add_with_carry(hi, hi1, hi);
+        }
+        carry1 = add_with_carry(c[i], lo, c[i]);
+        hi = add_with_carry(hi, carry1, lo) + carry;
+    }
+// Now I will have some stages where the number of terms to be combined
+// gradually decreases.
+    for (int i=1; i<lenb-1; i++) //  If lenb==2 this loop is not executed
+    {   carry = 0;
+        for (int j=0; j<lenb-i; j++)
+        {   multiplyadd64(b[i+j], a[lena-j-1], lo, hi1, lo);
+            carry += add_with_carry(hi, hi1, hi);
+        }
+        carry1 = add_with_carry(c[lena+i-1], lo, c[lena+i-1]);
+        hi = add_with_carry(hi, carry1, lo) + carry;
+    }
+// Finally the very top term is computed.
+    multiplyadd64(b[lenb-1], a[lena-1], lo, hi1, c[lena+lenb-2]);
+    carry = add_with_carry(c[lena+lenb-1], hi+hi1, c[lena+lenb-1]);
+    for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
+        carry = add_with_carry(c[i], carry, c[i]);
+}
+
+#else // MUCHNEWER
+
+// c = c + a*b. Potentially carry all the way up to lenc.
 
 inline void classical_multiply_and_add(uint64_t *a, size_t lena,
                                        uint64_t *b, size_t lenb,
@@ -392,6 +450,8 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
     for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
         carry = add_with_carry(c[i], carry, c[i]);
 }
+
+#endif // MUCHNEWER
 
 #else // NEWER
 
@@ -476,9 +536,7 @@ inline uint64_t classical_multiply_and_add(uint64_t a,
 // (well their term is "limb") numbers.
 
 #ifndef K
-// I provide a default here but can override it at compile time. The value
-// set here is at least close to the best on my x86_64 test machine.
-
+// I provide a default here but can override it at compile time.
 #define K 18
 #endif
 
@@ -507,6 +565,42 @@ inline void kara_and_add1(uint64_t *a, size_t lena,
 inline void kara1(uint64_t *a, size_t lena,
                   uint64_t *b, size_t lenb,
                   uint64_t *c, uint64_t *w);
+
+inline void kara_and_add2(uint64_t *a, size_t lena,
+                  uint64_t *b, size_t lenb,
+                  uint64_t *c, size_t lenc,
+                  uint64_t *w)
+{
+// The all the cases that are supported here the next line sets n to a
+// suitably rounded up half length.
+    size_t n = (lena+1)/2;
+    uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
+    uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
+    kara_and_add1(w, n, w+n, n, c+n, lenc-n, w+2*n); // (a0+a1)*(b0+b1)
+    if (c1 != 0)
+    {   kadd(w+n, n, c+2*n, lenc-2*n);               // fix for overflow
+        if (c2 != 0)
+        {   kadd(w, n, c+2*n, lenc-2*n);             // fix for overflow
+            for (size_t i=3*n; c2!=0 && i<lenc; i++)
+                c2 = add_with_carry(c[i], c2, c[i]);
+        }
+    }
+    else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
+    assert(c[lena+lenb] == 0x5555555555555555);
+    for (size_t i=0; i<2*n+1; i++) w[i] = 0x5555555555555555;
+    assert(w[lena+lenb] == 0x5555555555555555);
+    kara1(a, n, b, n, w, w+2*n+1);                // a0*b0
+    assert(w[lena+lenb] == 0x5555555555555555);
+    kadd(w, 2*n, c, lenc);                           // add in at bottom..
+    ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
+    for (size_t i=0; i<lena+lenb-2*n+1; i++) w[i] = 0x5555555555555555;
+    assert(w[lena+lenb-2*n] == 0x5555555555555555);
+    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n+1);
+    assert(w[lena+lenb-2*n] == 0x5555555555555555);
+    kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
+    ksub(w, lena+lenb-2*n, c+n, lenc-n);
+}
+
 
 // This code is where the main recursion happens. The main complication
 // within it is dealing with unbalanced length operands.
@@ -756,34 +850,6 @@ inline void kara2(uint64_t *a, size_t lena,
     ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
 }
 
-inline void kara_and_add2(uint64_t *a, size_t lena,
-                  uint64_t *b, size_t lenb,
-                  uint64_t *c, size_t lenc,
-                  uint64_t *w)
-{
-// The all the cases that are supported here the next line sets n to a
-// suitably rounded up half length.
-    size_t n = (lena+1)/2;
-    uint64_t c1 = kadd(a, n, a+n, lena-n, w, n);     // a0+a1
-    uint64_t c2 = kadd(b, n, b+n, lenb-n, w+n, n);   // b0+b1
-    kara_and_add1(w, n, w+n, n, c+n, lenc-n, w+2*n); // (a0+a1)*(b0+b1)
-    if (c1 != 0)
-    {   kadd(w+n, n, c+2*n, lenc-2*n);               // fix for overflow
-        if (c2 != 0)
-        {   kadd(w, n, c+2*n, lenc-2*n);             // fix for overflow
-            for (size_t i=3*n; c2!=0 && i<lenc; i++)
-                c2 = add_with_carry(c[i], c2, c[i]);
-        }
-    }
-    else if (c2 != 0) kadd(w, n, c+2*n, lenc-2*n);   // fix for overflow
-    kara1(a, n, b, n, w, w+2*n);                     // a0*b0
-    kadd(w, 2*n, c, lenc);                           // add in at bottom..
-    ksub(w, 2*n, c+n, lenc-n);                       // and subtract 1 digit up
-    kara1(a+n, lena-n, b+n, lenb-n, w, w+2*n);
-    kadd(w, lena+lenb-2*n, c+2*n, lenc-2*n);         // a1*b1 may be shorter
-    ksub(w, lena+lenb-2*n, c+n, lenc-n);
-}
-
 #endif // SUBTRACTING
 
 // This code is where the main recursion happens. The main complication
@@ -801,7 +867,10 @@ inline void kara(uint64_t *a, size_t lena,
                  uint64_t *b, size_t lenb,
                  uint64_t *c, uint64_t *w)
 {   if (lena < KARATSUBA_CUTOFF || lenb < KARATSUBA_CUTOFF)
-        classical_multiply(a, lena, b, lenb, c);
+    {   if (lena==1) classical_multiply(a[0], b, lenb, c);
+        else if (lenb==1) classical_multiply(b[0], a, lena, c);
+        else classical_multiply(a, lena, b, lenb, c);
+    }
     else karabig(a, lena, b, lenb, c, w);
 }
 
@@ -1447,8 +1516,8 @@ int main(int argc, char *argv[])
                     std::cout << std::hex << "c1-end = " << c1[lena+lenb] << std::endl;
                     display("a", a, lena);
                     display("b", b, lenb);
-                    display("c ", c,  lenc);
-                    display("c1", c1, lenc1);
+                    display("c ", c,  lenc);   // Reference result
+                    display("c1", c1, lenc1);  // kmultiply result
                     std::cout << "Failed" << std::endl;
                     return 1;
                 }
@@ -1470,7 +1539,7 @@ int main(int argc, char *argv[])
 // a range of cutoffs, and see how long things take. For each potential
 // cutoff value I will test a range of different length inputs.
 
-    for (KARATSUBA_CUTOFF=4; KARATSUBA_CUTOFF<35; KARATSUBA_CUTOFF++)
+    for (KARATSUBA_CUTOFF=4; KARATSUBA_CUTOFF<40; KARATSUBA_CUTOFF++)
     {   for (size_t i=0; i<MAX; i++)
         {   a[i] = mersenne_twister();
             b[i] = mersenne_twister();
@@ -1478,15 +1547,18 @@ int main(int argc, char *argv[])
         clock_t cl0 = clock();
         for (lena=4; lena<100; lena++)
         {   lenb = lena;
-            for (size_t n = 0; n<100000/(lena*lena); n++)
+            for (size_t n = 0; n<200000/(lena*lena); n++)
             {
 // I make my test inputs positive because I do not want any confusion
 // with the cost of the extra subtraction needed when multiplying bt
 // a negative value.
                 a[lena-1] &= 0x7fffffffffffffff;
                 b[lenb-1] &= 0x7fffffffffffffff;
-                for (size_t m=0; m<500; m++)
+                for (size_t m=0; m<1000; m++)
                     kmultiply(a, lena, b, lenb, c1, lenc1);
+// I now use a simple linear conguential scheme to give myself different
+// inputs. This can have an effect on how many carry operations are
+// performed within the big multiplication.
                 for (size_t i=0; i<lena; i++)
                     a[i] = (MULT*a[i] + ADD);
                 for (size_t i=0; i<lenb; i++)
