@@ -84,8 +84,8 @@ symbolic procedure qmul(u, v);
   begin
     scalar g1 := gcdn(qnum u, qden v),
            g2 := gcdn(qnum u, qden u);
-    return q((qnum u/g1)*(qnum v/g2),
-             (qden u/g2)*(qden v/g1));
+    return qreduce((qnum u/g1)*(qnum v/g2),
+                   (qden u/g2)*(qden v/g1));
   end;
 
 symbolic procedure qdiv(u, v);
@@ -93,8 +93,8 @@ symbolic procedure qdiv(u, v);
     scalar g1 := gcdn(qnum u, qnum v),
            g2 := gcdn(qden v, qden u);
     if qnum u < 0 then g1 := -g1;
-    return q((qnum u/g1)*(qden v/g2),
-             (qden u/g2)*(qnum v/g1));
+    return qreduce((qnum u/g1)*(qden v/g2),
+                   (qden u/g2)*(qnum v/g1));
   end;
 
 symbolic procedure qrecip u;
@@ -294,21 +294,29 @@ symbolic procedure dfremainder(u, v);
     return u
   end;
 
+global '(!*noisy);
+
+!*noisy := nil; % Change for debugging!
+
 symbolic procedure reduce_by(S, L);
   begin
     scalar done := nil, s1;
     while not done do <<
       done := t;
       for each p in L do <<
-        princ "Reduce "; dfprin s; princ " using "; dfprin p;
-        s1 := dfremainder(s, p);
-        princ " => "; dfprin s; terpri();
+% If something has reduced to 0 there is no need to try further reductions!
+        if not null s then <<
+          if !*noisy then <<
+            princ "Reduce "; dfprin s; princ " using "; dfprin p >>;
+          s1 := dfremainder(s, p);
+          if !*noisy then <<
+            princ " => "; dfprin s; terpri() >>;
 % test if this made progress but did not reduce the polynomial all the way
 % down to nil, set the "done" flag to nil so that we will try everything
 % again.
-        if s1 neq s then <<
-          if s1 neq nil then done := nil;
-          s := s1 >>  >> >>;
+          if s1 neq s then <<
+            if s1 neq nil then done := nil;
+            s := s1 >> >> >> >>;
     return s
   end;
 
@@ -328,10 +336,12 @@ symbolic procedure babygroe L;
     for each p in L do << dfprin p; terpri() >>;
     while pairs do begin
       scalar s := s_poly(caar pairs, cdar pairs);
-      princ "Raw s-poly = "; dfprin s; terpri();
+      if !*noisy then <<
+        princ "Raw s-poly = "; dfprin s; terpri() >>;
       pairs := cdr pairs;
       s := reduce_by(s, L);
-      princ "Reduced s-poly = "; dfprin s; terpri();
+      if !*noisy then <<
+        princ "Reduced s-poly = "; dfprin s; terpri()>>;
       if not null s then begin
         scalar L1 := L;  % because I will update L as I scan it.
 % Now if any polynomial in the existing base would be divisible by the new
@@ -339,11 +349,13 @@ symbolic procedure babygroe L;
 % should let me end up with a miminal basis.
         for each p in L1 do
           if not xless(dfx p, dfx s) then <<
-            princ "I can now discard "; dfprin p;
+            if !*noisy then <<
+              princ "I can now discard "; dfprin p >>;
             L := delete(p, L);
             pairs := delete_pairlist(p, pairs) >>;
         for each p in L do pairs := (s . p) . pairs;
-        princ "Add new poly into the base: "; dfprin s; terpri();
+        if !*noisy then <<
+          princ "Add new poly into the base: "; dfprin s; terpri() >>;
         L := s . L end
     end;
     terpri();
@@ -377,6 +389,8 @@ algebraic;
 
 % Examples
 
+on time;
+
 % First S-poly should start off as -x^2+y^2 and that reduces to y^2-y
 % When we have added that to the set all the rest of the S-polys we compute
 % reduce to 0, so we are finished.
@@ -389,28 +403,23 @@ babygroe {x^3 - 2*x*y,
 lisp << varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8) >>;
 
 babygroe {
-  a0^2 - a4,
-  a1^2 - a5,
-  a2^2 - a6,
-  a8 - a0 - a1 - a2};
+  a0^4 - a4,
+  a1^3 - a5,
+  a8 - a0 - a1};
 
-% babygroe {
-%   a0^3 - a4,
-%   a1^2 - a5,
-%   a2^2 - a6,
-%   a8 - a0 - a1 - a2};
-%
-% babygroe {
-%   a0^3 - a4,
-%   a1^3 - a5,
-%   a2^2 - a6,
-%   a8 - a0 - a1 - a2};
-%
-% babygroe {
-%   a0^3 - a4,
-%   a1^3 - a5,
-%   a2^3 - a6,
-%   a8 - a0 - a1 - a2};
+lisp << !*noisy := t >>;
+
+babygroe {
+  a0^5 - a4,
+  a1^3 - a5,
+  a8 - a0 - a1};
+
+%babygroe {
+%  a0^2 - a4,
+%  a1^2 - a5,
+%  a2^2 - a6,
+%  a8 - a0 - a1 - a2};
+
 
 
 quit;
