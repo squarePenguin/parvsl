@@ -204,6 +204,7 @@ symbolic procedure prefix_to_df w;
     return r end
   else if eqcar(w, 'difference) then
     dfsub(prefix_to_df cadr w, prefix_to_df caddr w)
+  else if eqcar(w, 'minus) then dfneg prefix_to_df cadr w
   else if eqcar(w, 'times) then begin
     scalar r := prefix_to_df cadr w;
     for each u in cddr w do r := dfmul(r, prefix_to_df u);
@@ -351,25 +352,36 @@ symbolic procedure babygroe L;
     return L
   end;
 
+% Now partially hook this onto Reduce.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+symbolic procedure babygroeeval u;
+  begin
+    if null u or cdr u then rederr "babygroe only expects 1 argument";
+    u := prepsq simp car u;
+    if not eqcar(u, 'list) then rederr "babygroe expects a list as an argument";
+    u := babygroe (for each v in cdr u collect prefix_to_df v);
+% At present I do not convert the output from babygrow back into a prefix form
+% or an (!*sq..) form to return - I just print it. But the code I have for
+% displaying distributed forms could easily be adapted to return a prefix
+% representation of the list of polynomials.
+    print u;
+% Given nothing better to do I return the fixed value 42.
+    return 42
+  end;
+
+put('babygroe, 'psopfn, 'babygroeeval); 
+
+algebraic;
 
 % Examples
-
-input := list(prefix_to_df '(difference (times x y) x),
-              prefix_to_df '(difference (expt x 2) y));
 
 % First S-poly should start off as -x^2+y^2 and that reduces to y^2-y
 % When we have added that to the set all the rest of the S-polys we compute
 % reduce to 0, so we are finished.
+babygroe {x*y-x, x^2-y};
 
-babygroe input;
+babygroe {x^3 - 2*x*y,
+          x^2*y - 2*y^2 + x};
 
-input := list(prefix_to_df '(difference (expt x 3) (times 2 x y)),
-              prefix_to_df '(plus (difference (times (expt x 2) y)
-                                                (times 2 (expt y 2)))
-                                    x));
+quit;
 
-babygroe input;
-
-end;
