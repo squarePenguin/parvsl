@@ -1,11 +1,72 @@
-#+TITLE: Implementing parallelism in Lisp for REDUCE
-#+SUBTITLE: Computer Science Part II Project
-#+AUTHOR: Andrei Vlad Badelita
-#+EMAIL: avb40@cam.ac.uk
-#+LATEX_HEADER: \documentclass[a4paper]{article}
+# #+TITLE: Implementing parallelism in Lisp for REDUCE
+# #+SUBTITLE: Computer Science Part II Project
+# #+AUTHOR: Andrei Vlad Badelita
+# #+EMAIL: avb40@cam.ac.uk
+
+#+OPTIONS: toc:nil
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [a4paper, 12pt]
+#+LATEX_HEADER: \usepackage[margin=3cm]{geometry}
+# #+LATEX_HEADER_EXTRA:
+#+DATE: \today
+
+#+BEGIN_EXPORT latex
+% Title
+
+\pagestyle{empty}
+
+\hfill{\LARGE \bf Andrei-Vlad Bădeliță}
+
+\vspace*{60mm}
+\begin{center}
+\Huge{\bf Implementing Parallelism in Lisp for REDUCE} \\
+\vspace*{5mm}
+Part II Computer Science Dissertation \\
+\vspace*{5mm}
+Trinity College \\
+\vspace*{5mm}
+\today  % today's date
+\end{center}
+
+\cleardoublepage
+#+END_EXPORT
+
+#+LATEX: \newpage
+
+\section*{Declaration of originality}
+
+I, Andrei-Vlad Bădeliță of Trinity College,
+being a candidate for Part II of the Computer Science Tripos,
+hereby declare that this dissertation and the work described in it
+are my own work, unaided except as may be specified below, and
+that the dissertation does not contain material that has already
+been used to any substantial extent for a comparable purpose.
+
+Signed 
+
+Date
+
+\section*{Proforma}
+
+TODO Write proforma
+- Your candidate number.
+- The Title of your Project.
+- The Examination and Year.
+- Word-count for the dissertation.
+- Final line count: Number of lines written by the *student* in the final version of their software work.
+- Project Originator.
+- Project Supervisor.
+- At most 100 words describing the original aims of the project.
+- At most 100 words summarising the work completed.
+- At most 100 words describing any special difficulties that you faced. 
+
+
+#+LATEX: \newpage
+
+#+TOC: headlines 2
 
 * Introduction
-The motivation of this project is to explore the implementation of multi-threading
+The motivation for this project is to explore the implementation of multi-threading
 capabilities within a working compiler and assess the benefits and tradeoffs it brings
 to a real-world application with a large, actively-developed body of code. 
 
@@ -287,6 +348,34 @@ it unaffected when enabling multi-threaded programs is complicated. I ran into a
 which I will discuss in the implementation chapter.
 
 * Implementation
+** Integrating threads
+After familiarising myself with the VSL codebase I tried to implement the simplest form of
+multi-threading and test out how the language would behave. I added a new function to VSL
+which would takes a piece of code as an argument, starts a new thread and joins again with
+the main thread. Once implemented, I could run first and simplest unit test for ParVSL:
+
+#+BEGIN_SRC lisp
+(dotimes (i 4) (thread '(print "Hello World")))
+#+END_SRC
+#+RESULTS:
+: "Hello World"
+: "Hello World"
+: "Value: Hello Worln"Hello Woird"
+: ld"
+
+We can immediately observe the effects of parallelism in action. At this point, the code above
+is just about the only working example. The interpreter is non thread-safe and all contention
+on global variables (including printing to the same stream) leads to undefined behaviour. Printing
+still seems to work, however most other functions would fail. The spawned threads can only handle strings
+and will crash on handling numbers or symbols, or when trying to allocate anything. 
+There is no inter-thread communication, exception safety, and any garbage collection would produce a segmentation
+fault. To be able to write a more complicated test, I need to make changes in all ares of the compiler.  
+
+To manage the threads, I made futher use of the C++11 standard library. I created a global hashmap storing
+all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
+identifier, which is returned to the user. The user can then use the identifier to join the thread.
+
+
 ** RAII classes
 The RAII (Resource Allocation Is Initialisation) is very popular in C++. It is a programming tehnique
 which binds the lifetime of resources to an object's lifetime. Normally,
@@ -670,11 +759,11 @@ LispObject& symval(LispObject s) {
 #+END_SRC
 *** TODO draw diagram
 
-
 *** Shallow binding
 
 To implement shallow binding 
-** TODO Lock-free hashtable
+
+** Lock-free hashtable for symbol lookup
 Just like allocations are a critical region of code in VSL, so are symbol lookups.
 Every occurence of a symbol must be looked upin the symbol table. If the symbol does
 not exist, it will be created. Multiple threads looking up symbols will cause contention.
@@ -799,12 +888,6 @@ the world is consistent and relatively easy to restore. I have modified parts of
 all the thread-local data back into global storage and then restore it when reloading. This way the same
 file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
 
-** TODO Implementing threads
-
-I designed ParVSL to mirror the core of the C++11 multi-threading features. The mechanisms for spawining
-threads, mutual exclusion, and condition variables could be integrated by implementing a set of interface
-functions. I added the necessary book-keeping to keep track of these objects in the runtime.
-
 ** Threads
 
 To start a thread, you need to provide the code to run on that individual thread. To start a thread, the user
@@ -845,23 +928,12 @@ to the root set at the beginning of garbage collection.
 I must be careful to not collect the data during garbage
  collection, and I cover that in the [[Garbage collection]] section.
 
-** Mutexes and condition variables
-
-
-Once all the modifications above were made, implementing the actual multi-threading mechanism was an easy
-task. I used the standard library to start and join threads and created a thread table so that data about
-all threads can be accessed globally. WHen a  new thread is created, it registers a pointer to its thread-local
-data in the table. Using this, I added code to the garbage collector to handle all existing threads and
-extract the roots, but also to manage their allocation segments, which have to be reset after collection.
-Finally, primitive functions for threading were added to the language. They simply mirror their C++ counterparts.
- 
 ** TODO Thread communication
-
-** TODO Bugs in REDUCE
+** Bugs in REDUCE
 
 
 *** The symbol `x`
-** TODO Thread pool
+** Thread pool
 
 One of the success criteria for the project was to implement a thread-pool. The thread pool
 is the smallest example of code using all the multi-threading features, but also of
@@ -874,11 +946,10 @@ busy spin.
 ParVSL is not strongly typed and has no algebraic data types. Please note the use of a lists
 to structure data.
 
-** TODO Computing Groebner basis in parallel
+** Computing Groebner basis in parallel
 
 
-
-* TODO Evaluation
+* Evaluation
 ** TODO Single-threaded building of Reduce
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
@@ -957,8 +1028,7 @@ Chez scheme?
 
 
 
-
-* TODO Conclusions
+* Conclusions
 
   
 
