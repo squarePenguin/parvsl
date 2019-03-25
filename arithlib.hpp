@@ -2374,8 +2374,8 @@ inline void multiply64(uint64_t a, uint64_t b,
 // the 128-bit result. Both hi and lo are only updated at the end
 // of this, and so they are allowed to be the same as other arguments.
 
-inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
-                          uint64_t &hi, uint64_t &lo)
+inline void multiply64(uint64_t a, uint64_t b, uint64_t c,
+                       uint64_t &hi, uint64_t &lo)
 {   UINT128 r = (UINT128)a*(UINT128)b + (UINT128)c;
     hi = (uint64_t)(r >> 64);
     lo = (uint64_t)r;
@@ -2388,8 +2388,8 @@ inline void signed_multiply64(int64_t a, int64_t b,
     lo = (uint64_t)r;
 }
 
-inline void signed_multiplyadd64(int64_t a, int64_t b, uint64_t c,
-                                 int64_t &hi, uint64_t &lo)
+inline void signed_multiply64(int64_t a, int64_t b, uint64_t c,
+                             int64_t &hi, uint64_t &lo)
 {   UINT128 r = (UINT128)((INT128)a*(INT128)b) + (UINT128)c;
     hi = (int64_t)(r >> 64);
     lo = (uint64_t)r;
@@ -2442,8 +2442,8 @@ inline void multiply64(uint64_t a, uint64_t b,
 // the 128-bit result. Both hi and lo are only updated at the end
 // of this, and so they are allowed to be the same as other arguments.
 
-inline void multiplyadd64(uint64_t a, uint64_t b, uint64_t c,
-                          uint64_t &hi, uint64_t &lo)
+inline void multiply64(uint64_t a, uint64_t b, uint64_t c,
+                       uint64_t &hi, uint64_t &lo)
 {   uint64_t a1 = a >> 32,           // top half
              a0 = a & 0xFFFFFFFFU;   // low half
     uint64_t b1 = b >> 32,           // top half
@@ -3443,7 +3443,7 @@ inline intptr_t string_to_bignum(const char *s)
         next -= 19;
 // now perform r = 10^19*r + d to consolidate into the eventual result.
         for (size_t i=0; i<words; i++)
-            multiplyadd64(r[i], ten19, d, d, r[i]);
+            multiply64(r[i], ten19, d, d, r[i]);
     }
     size_t n1 = words;
 // Here I may be negating a positive number, and in 2s complement that
@@ -5350,7 +5350,7 @@ inline void bigmultiply(const uint64_t *a, size_t lena,
 // means that in all other cases (and in particular unless lo==0) hi ends
 // up LESS than the maximum, and so adding one to it can happen without
 // overflow.
-            multiplyadd64(a[i], b[j], hi, hi, lo);
+            multiply64(a[i], b[j], hi, hi, lo);
             hi += add_with_carry(lo, r[i+j], r[i+j]);
         }
         r[i+lenb] = hi;
@@ -5463,7 +5463,7 @@ inline void classical_multiply(uint64_t *a, size_t lena,
     {   uint64_t hi = 0;
         for (size_t j=0; j<lenb; j++)
         {   uint64_t lo;
-            multiplyadd64(a[i], b[j], hi, hi, lo);
+            multiply64(a[i], b[j], hi, hi, lo);
             hi += add_with_carry(lo, r[i+j], r[i+j]);
         }
         carry = add_with_carry(r[i+lenb], hi, carry, r[i+lenb]);
@@ -5696,7 +5696,7 @@ intptr_t Times::op(int64_t a, uint64_t *b)
     pop(b);
     uint64_t hi = 0;
     for (size_t i=0; i<lenb; i++)
-        multiplyadd64(a, b[i], hi, hi, c[i]);
+        multiply64(a, b[i], hi, hi, c[i]);
     c[lenb] = hi;
     if (negative(a))
     {   uint64_t carry = 1;
@@ -5734,7 +5734,7 @@ inline void bigsquare(const uint64_t *a, size_t lena,
 // final accounting.
         for (size_t j=i+1; j<lena; j++)
         {   uint64_t lo;
-            multiplyadd64(a[i], a[j], hi, hi, lo);
+            multiply64(a[i], a[j], hi, hi, lo);
             hi += add_with_carry(lo, r[i+j], r[i+j]);
         }
         r[i+lena] = hi;
@@ -5751,7 +5751,7 @@ inline void bigsquare(const uint64_t *a, size_t lena,
     uint64_t hi = 0;
     for (size_t i=0; i<lena; i++)
     {   uint64_t lo;
-        multiplyadd64(a[i], a[i], r[2*i], hi, lo);
+        multiply64(a[i], a[i], r[2*i], hi, lo);
         carry = add_with_carry(lo, carry, r[2*i]);
         carry = add_with_carry(hi, r[2*i+1], carry, r[2*i+1]);
     }
@@ -6456,7 +6456,7 @@ inline void multiply_and_subtract(uint64_t *r, size_t lenr,
 {   assert(lenr > lenb);
     uint64_t hi = 0, lo, carry = 1;
     for (size_t i=0; i<lenb; i++)
-    {   multiplyadd64(b[i], q0, hi, hi, lo);
+    {   multiply64(b[i], q0, hi, hi, lo);
 // lo is now the next digit of b*q, and hi needs to be carried up to the
 // next one.
         carry = add_with_carry(r[i+lenr-lenb-1], ~lo, carry, r[i+lenr-lenb-1]);
