@@ -224,64 +224,6 @@ to other objects, which are also considered reachable. For example, all elements
 The reachable set is the transitive closure of the reachability relation. All objects in the reachable set must be kept
 during collection, while eveything else may be safely collected.
 
-
-#+BEGIN_SRC C++
-// LispObject is just a pointer type
-typedef uintptr_t LispObject;
-
-// LispObject is a pointer type
-uintptr_t fringe1, limit1; // heap1, where all allocations happen 
-uintptr_t fringe2, limit2; // heap2 used for copying GC
-
-LispObject allocate(size_t size) {
-  if (fringe1 + size > limit1) {
-    collect();
-  }
-
-  if (fringe1 + size > limit1) {
-     // We are out of memory. Try to increase memory
-     // ...
-  }
-
-  uintptr_t result = fringe1;
-  fringe1 += size;
-  return result;
-}
-
-// Two helper functions are needed
-LispObject copy(LispObject obj) {
-  size_t len = size(obj);
-
-  LispObject new_obj = static_cast<LispObject>(fringe2);
-  fringe2 += len;
-  return new_obj;
-}
-
-uintptr_t copycontent(LispObject obj) {
-  for (auto ref&: forward_references(obj)) {
-    ref = copy(ref);
-  }
-
-  return static_cast<uintptr_t>(obj) + size(obj);
-}
-
-void collect() {
-  // First we copy over the root set, which includes symbols.
-  for (LispObject& symbol: symbols_table) {
-    symbol = copy(symbol);
-  }
-
-  uintptr_t s = heap2;
-  while (fringe2 < fringe2) {
-    s = copycontent(static_cast<LispObject>(s));
-  }
-
-  swap(fringe1, fringe2);
-  swap(limit1, limit2);
-}
-
-#+END_SRC 
-
 The algorithm presented above is a heavily simplified abstraction. The root set includes other
 locations apart from the symbol table, and all of them have to be handled carefully. This was an area
 of particular importance when adding multi-threading.
@@ -292,6 +234,8 @@ and manually accessing it as needed has significant performance benefits. ~LispO
 for a pointer type, it allows many different types of objects (integers, floats, strings, lists) to be accessed
 in a unified way, while staying compact in memory. The disadvantage is that it is is difficult to track memory
 corruption, making debugging more difficult. This will become a problem if any bug in the code produces a data-race.
+
+Please refer to the [[Appendix]] for a more detailed implementation of the algorithm.
 
 **** TODO reference cheney
 *** Conservative GC
@@ -364,8 +308,8 @@ the main thread. Once implemented, I could run first and simplest unit test for 
 : ld"
 
 We can immediately observe the effects of parallelism in action. At this point, the code above
-is just about the only working example. The interpreter is non thread-safe and all contention
-on global variables (including printing to the same stream) leads to undefined behaviour. Printing
+is just about the only working example. The interpreter is non thread-safe and data races
+on global variables (including printing to the same stream) lead to undefined behaviour. Printing
 still seems to work, however most other functions would fail. The spawned threads can only handle strings
 and will crash on handling numbers or symbols, or when trying to allocate anything. 
 There is no inter-thread communication, exception safety, and any garbage collection would produce a segmentation
@@ -375,9 +319,8 @@ To manage the threads, I made futher use of the C++11 standard library. I create
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
 identifier, which is returned to the user. The user can then use the identifier to join the thread.
 
-
 ** RAII classes
-The RAII (Resource Allocation Is Initialisation) is very popular in C++. It is a programming tehnique
+The RAII (Resource Allocation Is Initialisation) design pattern is common in C++. It is a programming tehnique
 which binds the lifetime of resources to an object's lifetime. Normally,
 C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
 This makes it easy to introduce bugs when there is an attempted access to an unallocated resource,
@@ -405,12 +348,21 @@ is safely deleted, providing a primitive (but very effective) form of automatic 
 When chaning the codebase to use C++ features I found various opportunities to apply the RAII pattern,
 when managing threads, shallow binding and garbage collection.
 
+Thread objects in C++ are not implemented in a RAII style in the standard library. When a thread object
+is destructed, it must be in an /unjoinable/ state. A thread is unjoinable if it either has joined or
+it has been detached. If an unjoinable thread is ever destructed it will cause the entire C++ program to
+terminate.
+
+I have wrapped all threads in a ~ThreadRAII~ class, so that whenever they go out of scope they are automatically
+joined (when still in a joinable state). This guarantess there will be no premature termination in the case the 
+user does not handle the thread correctly and that the ParVSL interpreter will exit cleanly.
+
 *** TODO wanted more robust code
 modern tehniques
 if there is an exception etc make sure it will always happen
 previous code spent time testing error flags
 
-** Memory allocation
+** Storage management
 All the memory is global and shared, and multiple threads will often try
 to allocate concurently, causing contention. A naive solution to this problem
 would have been to use a mutex lock on allocations. While this would be easy to
@@ -423,6 +375,7 @@ Each instruction is a list data structure, with each elements allocated.
 Serialising allocations is guaranteed to slow down the language enough to cancel 
 any advantage multi-threading brings to the language.
  
+*** Memory allocation
 I wanted to allow multiple threads in parallel without affecting the performance
 of allocations. To do this I had to use a lock-free approach. To do this, I further
 split the memory into regions, which I call /segments/. A segment is a thread-local region
@@ -859,38 +812,9 @@ LispObject lookup(std::string name) {
   return s;
 }
 #+END_SRC
-** TODO Thread data and garbage collection
-
-The garbage collector is stop-the-world and work by tracing reachable memory locations
-starting from a root set. There are two types of roots: ambiguous and unambigous. Unambiguous
-roots are the ones explicitly managed by the compiler, e.g the symbol table of variables.
-Since the compiler is written in C and memory is not tagged, we can also get ambigous pointer:
-values on the C stack which might be just values but could also be pointers to program storage.
-
-The handling of both of these root sets has to account for multiple running threads. All the new
-thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
-own stack so all the stacks has to be accounted for as the ambiguous root set. The latter is more complicated.
-All threads have to be paused before garbage collection can begin so that they do not interfere
-with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
-However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
-thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
-changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
-to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
-can proceed with the thread. This is still a work in progress.
-
-** TODO Saving state to disk and reloading
-
-One important feature of the language is the ability to preserve the state of the world at any
-time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
-preserving when some of the threads are running a computation is tricky to define properly. To simplify
-matter, I have decided that all threads have to be joined before preserving. This way, the state of
-the world is consistent and relatively easy to restore. I have modified parts of the code to write
-all the thread-local data back into global storage and then restore it when reloading. This way the same
-file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
-
 ** Threads
 
-To start a thread, you need to provide the code to run on that individual thread. To start a thread, the user
+To start a thread, the user
 simply needs to call the ~thread~ function. This function takes as arguments a function name and the argument list
 and a unique thread id is returned. The function is applied to the arguments in a new thread. The return value
 is stored until the user call ~thread_join~ on the thread id, when they can access the respective value. 
@@ -914,7 +838,7 @@ unjoined threads and their return values. I do this with a simple hashtable, map
 return values. When a thread returns from its function, I update the hashtable with the returned value.
 When the user joins a thread, I look up the value in the table, return it, then erase the mapping. All threads
 have unique ids for the lifetime of the program, so there will never be conflicts in the hashtable.
-This hashtable has to be thread-safe, and I have implemented it as described in [[Lock-free hashtable]].
+This hashtable has to be thread-safe, and I have implemented it as described in Lock-free hashtable.
 
 I must also be careful to prevent the garbage collector from collecting these parameters and return values.
 Starting a thread is GC-safe: garbage collection will not begin while a new thread is starting up. This ensures
@@ -923,12 +847,32 @@ At that point, function parameters are tracked just like regular variables so th
 However, return values are stored past the lifetime of their respective threads. To deal with them, I add them
 to the root set at the beginning of garbage collection. 
 
+The handling of both of these root sets has to account for multiple running threads. All the new
+thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
+own stack so all the stacks has to be accounted for as the ambiguous root set. The latter is more complicated.
+All threads have to be paused before garbage collection can begin so that they do not interfere
+with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
+However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
+thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
+changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
+to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
+can proceed with the thread. 
+** TODO Saving state to disk and reloading
+
+One important feature of the language is the ability to preserve the state of the world at any
+time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
+preserving when some of the threads are running a computation is tricky to define properly. To simplify
+matter, I have decided that all threads have to be joined before preserving. This way, the state of
+the world is consistent and relatively easy to restore. I have modified parts of the code to write
+all the thread-local data back into global storage and then restore it when reloading. This way the same
+file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
+
+
 ** TODO talk about undefined behaviour in C++?
 
 I must be careful to not collect the data during garbage
  collection, and I cover that in the [[Garbage collection]] section.
 
-** TODO Thread communication
 ** Bugs in REDUCE
 
 
@@ -946,8 +890,19 @@ busy spin.
 ParVSL is not strongly typed and has no algebraic data types. Please note the use of a lists
 to structure data.
 
-** Computing Groebner basis in parallel
+** Computing Groebner bases in parallel
 
+REDUCE comes with a large set of packages which cover different aspect of computer algebra.
+Gröbner basis is a package particularly useful for algebraic geometry. Any set of multi-variate
+polynomials has a Gröbner basis. The process is a generalisation of both Gaussian techniques for
+solving a system of linear equations and computing the greatest common divisor of multiple
+univariate polynomials. 
+
+Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
+A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
+1. $0 \in I$.
+2. If $a, b \in I$ then $a + b \in I$.
+3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
 
 * Evaluation
 ** TODO Single-threaded building of Reduce
@@ -1032,7 +987,6 @@ Chez scheme?
 
   
 
-*** TODO medium sized program. say no of lines
 *** TODO Concurrency stuff
 explain there was 
 *** TODO have a hard part
@@ -1041,8 +995,6 @@ explain there was
 *** TODO enough of the system has to work just to evalute RLISP
 *** TODO talk about planning
 *** TODO describe how I could have debugged it well
-*** TODO increase font size by 1pt
-*** TODO smaller margin
 *** TODO less code, pseudocode
 
 starting from a root, transfer the data into a new space
@@ -1052,3 +1004,71 @@ storage management bugs
 introduce lisp earlier
 use cormen pesudocode
 mentioning implementing thread early
+
+#+LATEX: \newpage
+
+* Appendix
+
+** Cheney's algorithm 
+
+#+BEGIN_SRC C++
+// LispObject is just a pointer type
+typedef uintptr_t LispObject;
+
+// LispObject is a pointer type
+uintptr_t fringe1, limit1; // heap1, where all allocations happen 
+uintptr_t fringe2, limit2; // heap2 used for copying GC
+
+LispObject allocate(size_t size) {
+  if (fringe1 + size > limit1) {
+    collect();
+  }
+
+  if (fringe1 + size > limit1) {
+     // We are out of memory. Try to increase memory
+     // ...
+  }
+
+  uintptr_t result = fringe1;
+  fringe1 += size;
+  return result;
+}
+
+// Two helper functions are needed
+LispObject copy(LispObject obj) {
+  size_t len = size(obj);
+
+  LispObject new_obj = static_cast<LispObject>(fringe2);
+  fringe2 += len;
+  return new_obj;
+}
+
+uintptr_t copycontent(LispObject obj) {
+  for (auto ref&: forward_references(obj)) {
+    ref = copy(ref);
+  }
+
+  return static_cast<uintptr_t>(obj) + size(obj);
+}
+
+void collect() {
+  // First we copy over the root set, which includes symbols.
+  for (LispObject& symbol: symbols_table) {
+    symbol = copy(symbol);
+  }
+
+  uintptr_t s = heap2;
+  while (fringe2 < fringe2) {
+    s = copycontent(static_cast<LispObject>(s));
+  }
+
+  swap(fringe1, fringe2);
+  swap(limit1, limit2);
+}
+#+END_SRC 
+
+** Gc_guard and Gc_lock
+
+** Lock free symbol lookup
+
+[[https://math.berkeley.edu/~bernd/what-is.pdf]]
