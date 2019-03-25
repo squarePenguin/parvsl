@@ -9,5 +9,13 @@ svn checkout https://svn.code.sf.net/p/reduce-algebra/code/trunk reduce-algebra-
 cd reduce-algebra
 git clone https://github.com/squarePenguin/parvsl.git
 make vsl
-./vsl -z
+make reduce
+./vsl -i reduce.img
+#+END_SRC
+
+To use the parallel version, simply prepend ~par~ to the commands above:
+#+BEGIN_SRC bash
+make parvsl
+make parreduce
+./parvsl -i parreduce.img
 #+END_SRC
