@@ -71,29 +71,95 @@ symbolic procedure safeq_empty(sq);
         return r;
     end;
 
+symbolic procedure future();
+    {mutex (), nil};
+
+% blocking call to wait for future result
+symbolic procedure future_get(fut);
+begin
+    scalar m, state, cv, res;
+    m := first fut;
+    mutexlock m;
+
+    print fut;
+
+    state := second fut;
+
+    if state = 'done then <<
+        res := third fut;
+        mutexunlock m;
+        return res >>;
+
+    if state = 'waiting then
+        cv := third fut
+    else <<
+        cv := condvar ();
+        rplacd(fut, {'waiting, cv}) >>;
+
+    print "waiting fut";
+    condvar_wait(cv, m);
+    print "waiting fut done";
+    % ASSERT: promise is fulfilled here
+
+    res := third fut;
+    mutexunlock m;
+
+    return res;
+end;
+
+symbolic procedure future_set(fut, value);
+begin
+    scalar m, state;
+    m := first fut;
+
+    mutexlock m;
+    state := second fut;
+
+    if state = 'done then
+        error("future already set");
+
+    if state = 'waiting then
+        condvar_notify_all third fut;
+
+    rplacd(fut, {'done, value});
+
+    mutexunlock m;
+end;
+
+
+
 symbolic procedure thread_pool_job(tp_q, status);
-    begin scalar task;
+    begin
+        scalar job, resfut, f, args, res;
         while not (first status = 'kill)
               and (first status = 'run or not (safeq_empty tp_q)) do <<
-            task := safeq_pop tp_q;
-            print("got job");
-            eval task; >>
+            job := safeq_pop tp_q;
+            print "got job";
+            resfut := first job;
+            f := second job;
+            args := third job;
+            res := apply(f, args);
+            future_set(resfut, res);
+            print "done job";
+        >>
     end;
 
-symbolic procedure thread_pool();
+symbolic procedure thread_pool(numthreads);
     begin scalar tp_q, status;
         tp_q := safeq();
         status := {'run};
-        nthreads := hardwarethreads() - 1;
-        for i := 1:nthreads do thread2('thread_pool_job, {tp_q, status});
+        for i := 1:numthreads do thread2('thread_pool_job, {tp_q, status});
         return {tp_q, status};
     end;
 
-symbolic procedure tp_addjob(tp, job);
+symbolic procedure tp_addjob(tp, f, args);
     if not (first (second tp) = 'run) then nil
-    else << 
-        safeq_push(first tp, job);
-        t >>;
+    else begin
+        scalar resfut;
+        resfut := future ();
+        safeq_push(first tp, {resfut, f, args});
+        return resfut;
+    end;
 
 symbolic procedure tp_stop(tp);
     rplaca(second tp, 'stop);
@@ -101,4 +167,6 @@ symbolic procedure tp_stop(tp);
 symbolic procedure tp_kill(tp);
     rplaca(second tp, 'kill);
 
-tp := thread_pool();
+% tp := thread_pool();
+
+end;
