@@ -896,13 +896,18 @@ REDUCE comes with a large set of packages which cover different aspect of comput
 Gröbner basis is a package particularly useful for algebraic geometry. Any set of multi-variate
 polynomials has a Gröbner basis. The process is a generalisation of both Gaussian techniques for
 solving a system of linear equations and computing the greatest common divisor of multiple
-univariate polynomials. 
+univariate polynomials.
+
+The Gröbner basis of a linear system will form a matrix in reduced echelon form. For example,
+a Gröbner basis of $\mathbb{F} = \{ \}
 
 Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
 A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
 1. $0 \in I$.
 2. If $a, b \in I$ then $a + b \in I$.
 3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
+
+
 
 * Evaluation
 ** TODO Single-threaded building of Reduce

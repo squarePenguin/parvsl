@@ -18,13 +18,13 @@ in REDUCE to implement parallel numerical algorithms.
 
 Looks like I am going to use VSL, the lightweight implementation.
 It is lighter(4k lines of code) and interpreted, but also slower.
-Still it allows benchmarks etc. 
+Still it allows benchmarks etc.
 
 It already provides a conservative GC. I will augment that to support
-multiple-threads, using a stop-the-world approach. 
+multiple-threads, using a stop-the-world approach.
 
 *** TODO talk about garbage collection
-*** TODO talk about 
+*** TODO talk about
 *** TODO talk about thread preemption
 *** TODO Use RAII for exception handling tyding
 
@@ -55,7 +55,7 @@ from a global scope right?
     CLOSED: [2018-12-20 Thu 08:42]
 *** DONE RAII shallow binding
     CLOSED: [2018-12-20 Thu 08:42]
-*** DONE modify interpreted and prof functions 
+*** DONE modify interpreted and prof functions
     CLOSED: [2018-12-20 Thu 08:43]
 *** DONE make sure index values don't trip GC
     CLOSED: [2018-12-20 Thu 08:43]
@@ -73,7 +73,7 @@ Need to be extra careful when reloading. How do we tell if a fluid was global or
 We care about local values on the main thread.
 
 Saving image and loading is problematic. Easiest is to put all the thread_local value back into
-the symbol ~qvalue~ and restore it back on loading. 
+the symbol ~qvalue~ and restore it back on loading.
 
 If the value was already global, nothign needs to be done.
 If it was local, we put it in global storage and just restore.
@@ -95,7 +95,7 @@ This approach does not really work for multiple threads as each one has their ow
 stack. We could stop all wait for all the threads to stop doing work and report
 their stack, but this could suffer from deadlock. We would want a safe way for threads
 to report they are clean, but how do we tell their stack at any point?
-C++ does not allow preemption so how do we terminate a really long computation, or 
+C++ does not allow preemption so how do we terminate a really long computation, or
 even an infinite loop?
 
 All threads need to be put in a nice waiting state for garbage collection to kick in.
@@ -103,7 +103,7 @@ We need to use a flag that tells all threads when they should stop working.
 They can simply go call the gc to do so. Thus, when they allocate they will be dealt
 with automatically. The ones that do not allocate, are either running some interpreted
 code or one of a few builtin functions. We need to treat each builtin separately
-and check the flag while running. 
+and check the flag while running.
 
 
 Add entry of fluid and global.
@@ -134,7 +134,7 @@ or some such.
 
 Hmm time to profile with "-pg"?? Or to wonder exactly what overheads std::vector imposes, eg by using gdb to step through instruction by instruction .
 
-Hmmm if I make vsl and then edit csl.cpp just to put thread_local ahead of a few of the variable declarations then under cygwin it slows down quite badly, and that is vsl not parvsl. I have not checked on Linux and not thought about ways to avoid the extra cost. But that can turn into another page of writeup for you!!!! 
+Hmmm if I make vsl and then edit csl.cpp just to put thread_local ahead of a few of the variable declarations then under cygwin it slows down quite badly, and that is vsl not parvsl. I have not checked on Linux and not thought about ways to avoid the extra cost. But that can turn into another page of writeup for you!!!!
 #+END_QUOTE
 
 I have tried running the optimised parvsl with ~make fastparvsl~, ~make fastparrcore~ etc and did not get those results.
@@ -158,10 +158,10 @@ macroexpanding dotimes and running that still fails:
 returns 'g002' etc/ prints them. these are generated symbols and should not be printed.
 
 
-even when having different names altoghether we still get a bug 
+even when having different names altoghether we still get a bug
 threads sometimes return the wrong value(g001 instead of nil)
 
-work1/work2 should be some way of threadlocal 
+work1/work2 should be some way of threadlocal
 look at prog/return/go
 explode
 
@@ -169,7 +169,7 @@ To synchronise threads:
 each thread has a gc_ready flag
 there is a global atomic counter: num_gc_ready
 first thread runs out of memory, calls reclaim
-they 
+they
 
 * lookup
 - TODO lookup function needs a lock
@@ -223,10 +223,10 @@ headings:
 - storage management + garbage collection
 - variable binding
 extra level of indirection when you access a fluid
-- shared memory, symbol table, 
+- shared memory, symbol table,
 atomics are not guaranteed to be lock-free
 use library call to determine if its lock free
-needed to make variables thread local 
+needed to make variables thread local
 and in reduce fix global variable with common naming
 and I put stuff in code to find top level value of variables
 
@@ -238,13 +238,16 @@ choose a variable at a time and eliminate it
 but if you have two polynomial equations
 e.g 2 single variate
 try to eliminate the leading term of one of them
-repeatedly do that until you end up with their gcd 
+repeatedly do that until you end up with their gcd
 and the roots of the gcd are the common roots of the polynomials
 successivley reducing by a degree (leading term)
 
 now if you have multiple equations polynomial in multiple terms
-simultaneusly a generalisation of gcd and gaussian 
+simultaneusly a generalisation of gcd and gaussian
 if they were linear the grobner base would be the triangular forms
-if they were the two polys it would be their gcd 
+if they were the two polys it would be their gcd
 
 not garbage collecting mutexes and condvars
+
+bug: thread pool when all workes are waiting causes deadlock. need to yield somehow.
+feature: need yield
