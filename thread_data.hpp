@@ -288,6 +288,11 @@ LispObject join_thread(int tid) {
     return value;
 }
 
+LispObject yield_thread() {
+    std::this_thread::yield();
+    return nil;
+}
+
 // we are keeping mutexes in a map, just like thread
 // unfortunately there are no finalisers maybe have function to clean up mutex?
 std::unordered_map<int, std::mutex> mutexes;
@@ -334,6 +339,25 @@ void condvar_wait(int cvid, int mid) {
 
     par::Gc_guard guard;
     condvar.wait(lock);
+}
+
+/**
+ * mutex must be locked when calling this function
+ * undefined behaviour otherwise
+ * [ms] specifies timeout duration in miliseconds
+ * returns true when signaled
+**/
+LispObject condvar_wait_for(int cvid, int mid, int ms) {
+    auto& m = mutexes[mid];
+    std::unique_lock<std::mutex> lock(m, std::adopt_lock);
+    auto& condvar = condvars[cvid];
+
+    par::Gc_guard guard;
+    if (condvar.wait_for(lock, std::chrono::milliseconds(ms)) == std::cv_status::timeout) {
+        return nil;
+    }
+
+    return lisptrue;
 }
 
 void condvar_notify_one(int cvid) {

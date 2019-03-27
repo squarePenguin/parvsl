@@ -1863,8 +1863,12 @@ static void fp_sprint(char *buff, double x, int prec, int xmark)
     else if (*buff == '0' && *(buff+2) != 0) char_del(buff);
 }
 
+std::recursive_mutex print_mutex;
+
 void internalprint(LispObject x)
-{   int sep = '(', esc;
+{
+    std::lock_guard<std::recursive_mutex> lock(print_mutex);
+    int sep = '(', esc;
     uintptr_t i, len;
     char *s;
     LispObject pn;
@@ -7230,7 +7234,14 @@ LispObject Lcondvar_wait(LispObject lits, LispObject cv, LispObject m) {
     int cvid = qfixnum(cv);
     int mid = qfixnum(m);
     par::condvar_wait(cvid, mid);
-    return nil;
+    return lisptrue;
+}
+
+LispObject Lcondvar_wait_for(LispObject lits, LispObject cv, LispObject m, LispObject timeout) {
+    int cvid = qfixnum(cv);
+    int mid = qfixnum(m);
+    int ms = qfixnum(timeout);
+    return par::condvar_wait_for(cvid, mid, ms);
 }
 
 LispObject Lcondvar_notify_one(LispObject lits, LispObject cv) {
@@ -7251,6 +7262,11 @@ LispObject Lhardware_threads(LispObject _data) {
 
 LispObject Lthread_id(LispObject _data) {
     return packfixnum(par::thread_data.id);
+}
+
+LispObject Lthread_yield(LispObject _data) {
+    par::yield_thread();
+    return nil;
 }
 
 // Here is a place where I use #define and exploit string concatenation
@@ -7309,6 +7325,7 @@ LispObject Lthread_id(LispObject _data) {
     SETUP_TABLE_SELECT("stop",              Lstop_0),           \
     SETUP_TABLE_SELECT("terpri",            Lterpri),           \
     SETUP_TABLE_SELECT("thread_id",         Lthread_id),        \
+    SETUP_TABLE_SELECT("thread_yield",      Lthread_yield),     \
     SETUP_TABLE_SELECT("time",              Ltime),             \
     SETUP_TABLE_SELECT("vector",            Lvector_0),
 
@@ -7644,6 +7661,7 @@ LispObject Lthread_id(LispObject _data) {
     SETUP_TABLE_SELECT("lor",               Llogor_3),          \
     SETUP_TABLE_SELECT("logxor",            Llogxor_3),         \
     SETUP_TABLE_SELECT("checkpoint",        Lpreserve_3),       \
+    SETUP_TABLE_SELECT("condvar_wait_for",  Lcondvar_wait_for), \
     SETUP_TABLE_SELECT("errorset",          Lerrorset_3),       \
     SETUP_TABLE_SELECT("imax",              Lmax_3),            \
     SETUP_TABLE_SELECT("imin",              Lmin_3),            \
@@ -9403,7 +9421,10 @@ void set_up_lispdir(int argc, const char *argv[])
 
 
 int main(int argc, char *argv[])
-{   set_up_lispdir(argc, (const char **)argv);
+{
+    rlimit stack_limit { RLIM_INFINITY, RLIM64_INFINITY };
+    setrlimit(RLIMIT_STACK, &stack_limit);
+    set_up_lispdir(argc, (const char **)argv);
     for (int i=0; i<MAX_LISPFILES; i++)
     {   filecurchar[i] = '\n';
         filesymtype[i] = '?';

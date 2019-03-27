@@ -7,6 +7,7 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <sys/resource.h>
 
 // There is a portability issue about MAP_ANONYMOUS: I hope that
 // the adjustments made here will leave everything workable

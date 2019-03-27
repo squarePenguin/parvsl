@@ -46,12 +46,17 @@ begin scalar n, ss, xs, ysfut, ys;
     n := length xs;
     return
         if n < 6 then insertionsort xs
-        % else if n < 1000 then mergesort xs
+        else if n < 1000 then mergesort xs
         else <<
             ss := split(xs, (n + 1) / 2);
             ysfut := tp_addjob(tp, 'parmergesort, {second ss});
             xs := parmergesort first ss;
-            ys := future_get ysfut;
+            ys := future_tryget(ysfut, 10); % wait max 10ms
+            while null ys do <<
+                tp_runjob(tp);
+                % print length first first tp;
+                ys := future_tryget(ysfut, 10) >>;
+            ys := first ys;
             mergesorted(xs, ys) >>
 end;
 
