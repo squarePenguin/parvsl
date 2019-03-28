@@ -47,6 +47,8 @@ using namespace arithlib;
 // The tests come in sections, and these preprocessor symbols can be used
 // to select which sections get run.
 
+//#define TUNE_KARATSUBA 1
+#define COMPARE_GMP 1
 #define TEST_SOME_BASICS 1
 #define TEST_RANDOM 1
 #define TEST_BITWISE 1
@@ -56,6 +58,11 @@ using namespace arithlib;
 #define TEST_GCD 1
 #define TEST_ISQRT 1
 #define TEST_FLOAT
+
+#ifdef COMPARE_GMP
+#include "gmp.h"
+#endif // COMPARE_GMP
+
 
 // This function is to test if the least significant bit in the representation
 // of a floating point value is zero. It is used when verifying the correct
@@ -69,6 +76,61 @@ bool evenfloat(double d)
     int64_t i = (int64_t)d;
     return (i&1) == 0;
 }
+
+// This is extracted from a slightly old arithlib.hpp and is a direct
+// classical implementation of multiplication that I have tested reasonably
+// thoroughly. It is used so that its results can be compared against the
+// ones that my more complicated code produce. Note that this does signed
+// multiplication and it trims its output to "proper" length.
+
+inline void referencemultiply(const uint64_t *a, size_t lena,
+                             const uint64_t *b, size_t lenb,
+                             uint64_t *c, size_t &lenc)
+{   for (size_t i=0; i<lena+lenb; i++) c[i] = 0;
+// If a and/or be are negative then I can treat their true values as
+//    a = sa + va      b = sb + vb
+// where sa and sb and the signs - represented here as 0 for a positive
+// number and -2^(64*len) for a negative one. va and vb are then the simple
+// bit-patterns for a and b but now interpreted as unsigned values. So if
+// instead of using 64-bit digits I was using 8 bit ones, the value -3
+// would be stored as 0xfd and that would be spit up as -128 + 253.
+// Then a*b = sa*sb + sa*vb + sb*va + va*vb.
+// The last item there is just the product of a and b when treated as
+// unsigned values, and so is what I compute first here rather simply.
+// If sa and/or sb is non-zero it is just the negative of a power of 2^64,
+// and so I can correct the unsigned product into a signed one by (sometimes)
+// subtracting a shifted version of a or b from it.
+    for (size_t i=0; i<lena; i++)
+    {   uint64_t hi = 0;
+        for (size_t j=0; j<lenb; j++)
+        {   uint64_t lo;
+// The largest possible value if (hi,lo) here is (0xffffffffffffffff, 0)
+// which arises if a[1], b[i] and prev_hi are all at their maximum. That
+// means that in all other cases (and in particular unless lo==0) hi ends
+// up LESS than the maximum, and so adding one to it can happen without
+// overflow.
+            multiply64(a[i], b[j], hi, hi, lo);
+            hi += add_with_carry(lo, c[i+j], c[i+j]);
+        }
+        c[i+lenb] = hi;
+    }
+    if (negative(a[lena-1]))
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lenb; i++)
+            carry = add_with_carry(c[i+lena], ~b[i], carry, c[i+lena]);
+    }
+    if (negative(b[lenb-1]))
+    {   uint64_t carry = 1;
+        for (size_t i=0; i<lena; i++)
+            carry = add_with_carry(c[i+lenb], ~a[i], carry, c[i+lenb]);
+    }
+    lenc = lena + lenb;
+// The actual value may be shorter than this.
+//  test top digit or c and if necessary reduce lenc.
+    truncate_positive(c, lenc);
+    truncate_negative(c, lenc);
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -91,6 +153,166 @@ int main(int argc, char *argv[])
 
     const int MILLION = 1000000;
 
+// The following are parameters for a plausible linear congruential generator.
+    const uint64_t MULT = 6364136223846793005U;
+    const uint64_t ADD  = 1442695040888963407U;
+
+
+#ifdef TUNE_KARATSUBA
+
+// See the separate file kara2.cpp (which may not be available by now!) for
+// code that runs timings for a range of values of KARATSUBA_CUTOFF so that
+// it can suggest the best one to use.
+
+#endif // TUNE_KARATSUBA
+
+#ifdef COMPARE_GMP
+
+    {   const size_t table_size = 300;
+
+        const int N = 30;
+        const int LEN = 1500;
+ 
+        uint64_t a[1000], b[10000], c[1000], c1[1000];
+        size_t lena, lenb, lenc, lenc1;
+
+        size_t size[table_size];
+        size_t testcount[table_size];
+        double mine[table_size];
+        double gmp[table_size];
+
+        uint64_t my_check = 1;
+        uint64_t gmp_check = 1;
+
+        size_t tests;
+
+        reseed(seed);
+        lena = 1;
+        for (size_t trial=0; trial<table_size; trial++)
+        {   lena = (21*lena+19)/20;
+            size[trial] = 0;
+            if (lena >= LEN) break;
+            lenb = lena;
+// I start by filling my input vectors with random data. I set the same
+// seed before trying my code and before trying gmp so that each get the
+// same set of test cases.
+            for (size_t i=0; i<lena; i++)
+            {   a[i] = mersenne_twister();
+                b[i] = mersenne_twister();
+            }
+            clock_t cl0 = clock();
+// When using Karatsuba the cost of a multiplication is expected to
+// grow as n^1.585, and so to arrange that I tke roughly the same
+// absolute time on each number-length I perform my tests a number of
+// times scaled inversely by that.
+            size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
+            for (size_t n = 0; n<tests; n++)
+            {
+// The gpm function mpn_mul multiplies unsigned integers, while my
+// bigmultiply is at a slightly higher level and deals with signed values.
+// I want to compare their results, and so forcing all inputs to be positive
+// (in my representation) by clearing most significant bits is necessary.
+// Note that this will almost always lead to numbers that have bits all the
+// way up to the limit and hence where the product is as long as it can be.
+// cases where multiplying m*n leads to a result of length m*n-1 will not
+// be exercised.
+                a[lena-1] &= 0x7fffffffffffffffU;
+                b[lena-1] &= 0x7fffffffffffffffU;
+// So that all the administration here does not corrupt my measurement
+// I do the actual multiplication of each test case 500 times.
+                for (size_t m=0; m<500; m++)
+                    bigmultiply(a, lena, b, lenb, c1, lenc1);
+// By accumulating a sort of checksum on all the products that I compute
+// I will be able to reassure myself that the output from gmp and from my
+// own code agrees.
+                for (size_t i=0; i<lena+lenb; i++)
+                    my_check = my_check*MULT + c1[i];
+// I alter the inputs using a linear congruential scheme (which is cheap)
+// so that for any length inputs I am doing test multiplications of a
+// range of varied cases. This is so that stray special cases are less liable
+// to corrupt my results.
+                for (size_t i=0; i<lena; i++)
+                    a[i] = MULT*a[i] + ADD;
+                for (size_t i=0; i<lenb; i++)
+                    b[i] = MULT*b[i] + ADD;
+            }
+            clock_t cl1 = clock();
+            double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
+// I store details of this test run in an array for display later on.
+            size[trial] = lena;
+            testcount[trial] = 500*tests;
+            mine[trial] = t;
+            std::cout << ".";
+            std::cout.flush();
+        }
+        std::cout << std::endl;
+// Now do just the same sort of thing but using gmp rather then my
+// own multiplication code. Note that I reseed the random number source
+// so I should use exactly the same set of cases.
+        reseed(seed);
+        lena = 1;
+        for (size_t trial=0; trial<table_size; trial++)
+        {   lena = (21*lena+19)/20;
+            if (lena >= LEN) break;
+            lenb = lena;
+            for (size_t i=0; i<lena; i++)
+            {   a[i] = mersenne_twister();
+                b[i] = mersenne_twister();
+            }
+            clock_t cl0 = clock();
+// somewhere around lena=1400 the fraction on the next line reduces
+// to zero. So for the last few cases I will take distinctly longer
+// than for each of the rest.
+            size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
+            for (size_t n = 0; n<tests; n++)
+            {   a[lena-1] &= 0x7fffffffffffffffU;
+                b[lena-1] &= 0x7fffffffffffffffU;
+                for (size_t m=0; m<500; m++)
+                    mpn_mul((mp_ptr)c, (mp_srcptr)a, lena, (mp_srcptr)b, lenb);
+                for (size_t i=0; i<lena+lenb; i++)
+                    gmp_check = gmp_check*MULT + c[i];
+                for (size_t i=0; i<lena; i++)
+                    a[i] = MULT*a[i] + ADD;
+                for (size_t i=0; i<lenb; i++)
+                    b[i] = MULT*b[i] + ADD;
+            }
+            clock_t cl1 = clock();
+            double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
+            gmp[trial] = t;
+            std::cout << ":";
+            std::cout.flush();
+        }
+// Display the checksum output. Note that this also ensures that the
+// result of the multiplication (well more pedantically the result of
+// the last of 500 multiplications!) is used so clever optimizing
+// compilers are not allowed to avoid computing it!
+        std::cout << std::endl;
+        std::cout << (my_check == gmp_check ? "checksums match" :
+                                              "checksums disagree")
+                  << std::endl;
+        std::cout << std::hex << "my checksum:  " << my_check << std::endl;
+        std::cout             << "gmp checksum: " << gmp_check << std::endl;
+        std::cout << std::dec;
+        std::cout << "Times are reported in microseconds per multiplication"
+                  << std::endl;
+        std::cout << std::setw(10) << "length"
+                  << std::setw(10) << "my time"
+                  << std::setw(10) << "gmp time"
+                  << std::setw(10) << "  ratio mine/gmp"
+                  << std::fixed << std::setprecision(3)
+                   << std::endl;
+// In the following table times are reported in microseconds per
+// multiplication. The ratio is > 1.0 when my code is slower than gmp.
+        for (size_t i=0; i<table_size; i++)
+        {   if (size[i] == 0) break;
+            std::cout << std::setw(10) << size[i]
+                      << std::setw(10) << (1.0e6*mine[i]/testcount[i])
+                      << std::setw(10) << (1.0e6*gmp[i]/testcount[i])
+                      << std::setw(10) << (mine[i]/gmp[i])
+                      << std::endl;
+        }
+    }
+#endif // COMPARE_GMP
 
 #ifdef TEST_SOME_BASICS
 
