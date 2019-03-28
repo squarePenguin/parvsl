@@ -296,7 +296,7 @@ inline void mul3x3S(uint64_t a2, uint64_t a1, uint64_t a0,
     multiply64(a2, b1, c3, c4, c3);
     carry = add_with_carry(c4, carry, c4);
     multiply64(a1, b2, c3, c4a, c3);
-    carry = add_with_carry(c4, c4a, c4);
+    carry += add_with_carry(c4, c4a, c4);
     signed_multiply64((int64_t)a2, (int64_t)b2, c4, c5, c4);
     c5 = (int64_t)((uint64_t)c5 + carry);
     if (negative(b2))
@@ -341,9 +341,7 @@ void mul4x4(uint64_t a3, uint64_t a2, uint64_t a1, uint64_t a0,
 // of these will be faster (or indeed if there will be measurable
 // pereformance difference between them.
 
-#ifdef NEWER
-
-// This version, activated via NEWER, forms a product digit by digit.
+// This forms a product digit by digit.
 
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
@@ -452,52 +450,6 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
     for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
         carry = add_with_carry(c[i], carry, c[i]);
 }
-
-#else // NEWER
-
-inline void classical_multiply(uint64_t *a, size_t lena,
-                               uint64_t *b, size_t lenb,
-                               uint64_t *c)
-{
-// Here I experimented with working with 2 or 3 digits at a time -
-// in effect unrolling the loops and rearranging the sequence of memory
-// accesses in case I could speed things up. With g++ on x86_64 the
-// changes hurt rather than benefitted me. So this has dropped back
-// to simple code. Note that this should work with lena==1 or lenb==1 so
-// I will not need to make those special cases.
-    uint64_t hi=0, lo;
-    for (size_t j=0; j<lenb; j++)
-        multiply64(a[0], b[j], hi, hi, c[j]);
-    c[lenb] = hi;
-    for (size_t i=1; i<lena; i++)
-    {   hi = 0;
-        for (size_t j=0; j<lenb; j++)
-        {   multiply64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, c[i+j], c[i+j]);
-        }
-        c[i+lenb] = hi;
-    }
-}
-
-// c = c + a*b. Potentially carry all the way up to lenc.
-
-inline void classical_multiply_and_add(uint64_t *a, size_t lena,
-                                       uint64_t *b, size_t lenb,
-                                       uint64_t *c, size_t lenc)
-{   uint64_t hi=0, lo, carry=0;
-    for (size_t i=0; i<lena; i++)
-    {   hi = 0;
-        for (size_t j=0; j<lenb; j++)
-        {   multiply64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, c[i+j], c[i+j]);
-        }
-        carry = add_with_carry(hi, c[i+lenb], carry, c[i+lenb]);
-    }
-    for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
-        carry = add_with_carry(c[i], carry, c[i]);
-}
-
-#endif // NEWER
 
 // Now variants that use just a single digit first argument. These may be seen
 // as optimized cases.
@@ -1305,34 +1257,6 @@ int main(int argc, char *argv[])
               << "  LEN = " << LEN << "  N = " << N
               << " seed = " << seed << std::endl;
 
-#ifdef PRE_TEST
-// This is a place where I can put in particular examples that are
-// causing trouble. It is not expected to be used other then during
-// heavy debugging sessions. If I activate this it forces subsequent
-// tests to use a cutoff of 4.
-
-    a[3] = 0x0010000000000000;
-    a[2] = 0x0100000000000000;
-    a[1] = 0x0000000004000000;
-    a[0] = 0x0000010000000000;
-    lena = 4;
-    b[4] = 0x0000000000010000;
-    b[3] = 0x0000000000000200;
-    b[2] = 0x0000000000000200;
-    b[1] = 0x0000000000004000;
-    b[0] = 0x0000000000004000;
-    lenb = 5;
-    display("a", a, lena);
-    display("b", b, lenb);
-    KARATSUBA_CUTOFF = 4;
-    bigmultiply(a, lena, b, lenb, c, lenc);
-    referencemultiply(a, lena, b, lenb, c1, lenc1);
-    display("mine  ", c, lenc);
-    display("theirs", c1, lenc1);
-    for (int i=0; i<9; i++) w[i] = c[i] ^ c1[i];
-    display("diff", w, 8);
-#endif
-
 #ifndef NO_EASY
 
 // Here I do "easy" tests on numbbers of length 4 and 5. THis is because
@@ -1676,4 +1600,4 @@ int main(int argc, char *argv[])
 
 #endif // NO_MAIN
 
-// end of kara.cpp
+// end of kara2.cpp
