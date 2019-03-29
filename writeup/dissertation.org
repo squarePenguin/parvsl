@@ -879,6 +879,11 @@ I must be careful to not collect the data during garbage
 *** The symbol `x`
 ** Thread pool
 
+Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
+simple tests for multi-threading, I was able to write more complex code using threads.
+
+Spawning hardware threads directly 
+
 One of the success criteria for the project was to implement a thread-pool. The thread pool
 is the smallest example of code using all the multi-threading features, but also of
 inter-thread communication and synchronisation. The thread pool is based on a simple
