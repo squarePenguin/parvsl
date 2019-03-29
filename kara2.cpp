@@ -46,19 +46,37 @@
 #include <ctime>
 #include <chrono>
 
-// The OLD option in arithlib.hpp replaces Karatsuba with just
-// classical multiplication. I want there here to avoid name clashes and
-// also because I want the simplest and most reliable code to compare
-// my new stuff with
-
-#define OLD 1
 #include "arithlib.hpp"
 
-// Avoid name-clashes...
+// I will be defining a lot of functions here that are copies (sometimes
+// updated) of things in arithlib.hpp. This would tend to lead to a LOT
+// of name-clashes, typically reported as ambiguity. So I use #define to
+// change names to keep myself slightly tidy and slightly safe.
+
 #define bigmultiply new_bigmultiply
 #define KARATSUBA_CUTOFF NEW_KARATSUBA_CUTOFF
 #define kadd new_kadd
 #define ksub new_ksub
+#define kneg new_kneg
+#define absdiff new_absdiff
+#define karatsuba new_karatsuba
+#define karatsuba_and_add new_karatsuba_and_add
+#define small_or_big_multiply new_small_or_big_multiply
+#define small_or_big_multiply_and_add new_small_or_big_multiply_and_add
+#define certainly_big_multiply new_certainly_big_multiply
+#define certainly_big_multiply_and_add new_certainly_big_multiply_and_add
+#define KARA_FIXED_WORKSPACE_SIZE NEW_KARA_FIXED_WORKSPACE_SIZE
+#define KARA_WORKSPACE_SIZE NEW_KARA_WORKSPACE_SIZE
+#define kara_workspace new_kara_workspace
+#define classical_multiply new_classical_multiply
+#define classical_multiply_and_add new_classical_multiply_and_add
+#define BY NEW_BY
+#define mul2x2 new_mul2x2
+#define mul3x3 new_mul3x3
+#define mul4x4 new_mul4x4
+#define mul2x2S new_mul2x2S
+#define mul3x3S new_mul3x3S
+#define mul4x4S new_mul4x4S
 
 using namespace arithlib;
 
@@ -148,26 +166,18 @@ inline uint64_t kadd(uint64_t *a, size_t lena,
     return carry;
 }
 
-// c = a - b. In the use I make of
-// this I may need to allow for either a or b to be longer than the other.
+// c = a - b.   must have length(a) >= length(b).
 
 inline uint64_t ksub(uint64_t *a, size_t lena,
                      uint64_t *b, size_t lenb,
-                     uint64_t *c, size_t lenc)
-{   size_t shorter = lena < lenb ? lena : lenb;
+                     uint64_t *c)
+{   assert(lena >= lenb);
     uint64_t borrow = 0;
     size_t i;
-    for (i=0; i<shorter; i++)
+    for (i=0; i<lenb; i++)
         borrow = subtract_with_borrow(a[i], b[i], borrow, c[i]);
-    while (i<lena)
-    {   borrow = subtract_with_borrow(a[i], borrow, c[i]);
-        i++;
-    }
-    while (i<lenb)
-    {   borrow = subtract_with_borrow(0, a[i], borrow, c[i]);
-        i++;
-    }
-    while (i < lenc) c[i++] = -borrow;
+    for (;i<lena; i++)
+        borrow = subtract_with_borrow(a[i], borrow, c[i]);
     return borrow;
 }
 
@@ -179,16 +189,18 @@ inline void kneg(uint64_t *a, size_t lena)
 
 // c = |a - b| and return an indication of which branch of the absolute
 // value function was used, ie whether we had a>=b or a<b. If a==b so
-// the result is zero the value is not terribly important.
+// the result is zero the value is not terribly important. Must be
+// called with the first argument at least as long as the second.
 
 inline bool absdiff(uint64_t *a, size_t lena,
                     uint64_t *b, size_t lenb,
-                    uint64_t *c, size_t lenc)
+                    uint64_t *c)
 {
 // I will do a cheap comparison of a and b first, based on an understanding
-// that lena <= lenb;
-    if (lena < lenb ||
-        a[lena-1]<=b[lenb-1])
+// that lena >= lenb. The result will be of length lena.
+    assert(lena >= lenb);
+    if (lenb < lena ||
+        b[lenb-1]<=a[lena-1])
     {
 // If my cheap test suggests that a is the smaller one then I form (b-a).
 // If that generates a borrow my "guess" was wrong, so I negate the
@@ -197,18 +209,18 @@ inline bool absdiff(uint64_t *a, size_t lena,
 // representation, eg values that are close to a power of 2 or ones that
 // have a large power of 2 as a factor, the fallback may be activated
 // more frequently.
-        if (ksub(b, lenb, a, lena, c, lenc) != 0)
-        {   kneg(c, lenc);
-            return true;     // Have computed a-b
+        if (ksub(a, lena, b, lenb, c) != 0)
+        {   kneg(c, lena);
+            return true;     // Have computed b-a
         }
-        else return false;   // have computed b-a
+        else return false;   // have computed a-b
     }
     else
-    {   if (ksub(a, lena, b, lenb, c, lenc) != 0)
-        {   kneg(c, lenc);
-            return false;    // b-a
+    {   if (ksub(b, lenb, a, lena, c) != 0)
+        {   kneg(c, lenb);
+            return false;    // a-b
         }
-        else return true;    // a-b
+        else return true;    // b-a
     }
 }
 
@@ -478,9 +490,10 @@ inline void classical_multiply_and_add(uint64_t a,
         carry = add_with_carry(c[i], carry, c[i]);
 }
 
-#ifndef K
+#if !defined K && !defined K_DEFINED
 // I provide a default here but can override it at compile time
 INLINE_VAR constexpr size_t K=18;
+#define K_DEFINED 1
 #endif
 
 // When I have completed and measured things I am liable to make this a
@@ -521,8 +534,9 @@ inline void karatsuba(uint64_t *a, size_t lena,
     assert(lena >= 2);
     size_t n = (lena+1)/2;    // size of a "half-number"
     size_t lenc = lena+lenb;
-    if (absdiff(a+n, lena-n, a, n, w, n) !=
-        absdiff(b+n, lenb-n, b, n, w+n, n))
+// lena-n and lenb-n will each be either n or n-1.
+    if (absdiff(a, n, a+n, lena-n, w) !=
+        absdiff(b, n, b+n, lenb-n, w+n))
     {
 // Here I will collect
 //    a1*b1    (a1*b0 + b1*a0 - a1*b1 - a0*b0)     a0*b0   
@@ -581,8 +595,8 @@ inline void karatsuba_and_add(uint64_t *a, size_t lena,
     assert(lena >= 2);
     size_t n = (lena+1)/2;    // size of a "half-number"
     size_t lenc1 = lena+lenb;
-    if (absdiff(a+n, lena-n, a, n, w, n) !=
-        absdiff(b+n, lenb-n, b, n, w+n, n))
+    if (absdiff(a, n, a+n, lena-n, w) !=
+        absdiff(b, n, b+n, lenb-n, w+n))
     {
 // Here I will collect
 //    a1*b1    (a1*b0 + b1*a0 - a1*b1 - a0*b0)     a0*b0   
@@ -1221,11 +1235,11 @@ INLINE_VAR const uint64_t ADD  = 1442695040888963407U;
 
 int main(int argc, char *argv[])
 {   uint64_t seed = 0;
-    int LEN = 500;
+    int LEN = 1600;
     int N = 30;
     std::cout << argv[0] << ": [options]" << std::endl;
     std::cout << "   -k={N:" << K << "}    Transition to use Karatsuba" << std::endl;
-    std::cout << "   -l={N:500}   For gmp comparison test up to N (64-bit word) case" << std::endl;
+    std::cout << "   -l={N:1600}  For gmp comparison test up to N (64-bit word) case" << std::endl;
     std::cout << "   -n={N:30}    For gmp comparison controls the number of tests per run" << std::endl;
     std::cout << "   {N:<random>} Initial seed for random number generator" << std::endl;
     std::cout << std::endl;
@@ -1451,144 +1465,138 @@ int main(int argc, char *argv[])
 
 
 #ifndef NO_GMP
-    const size_t table_size = 300;
 
-    size_t size[table_size];
-    size_t testcount[table_size];
-    double mine[table_size];
-    double gmp[table_size];
+    {   const size_t table_size = 300;
 
-    uint64_t my_check = 1;
-    uint64_t gmp_check = 1;
+        const int N = 30;
+        const int LEN = 1600;
+ 
+        uint64_t a[1000], b[10000], c[1000], c1[1000];
+        size_t lena, lenb, lenc, lenc1;
 
-    KARATSUBA_CUTOFF = 14;   // Use (at least close to) optimal value.
+        size_t size[table_size];
+        size_t testcount[table_size];
+        double mine[table_size];
+        double gmp[table_size];
 
-    size_t tests;
+        uint64_t my_check = 1;
+        uint64_t gmp_check = 1;
 
-    reseed(seed);
-    lena = 1;
-    for (size_t trial=0; trial<table_size; trial++)
-    {   lena = (21*lena+19)/20;
-        size[trial] = 0;
-        if (lena >= LEN) break;
-        lenb = lena;
+        size_t tests;
+
+        for (int method=0; method<2; method++)
+        {   reseed(seed);
+std::cout << std::hex << mersenne_twister() << std::endl;
+            lena = 1;
+            for (size_t trial=0; trial<table_size; trial++)
+            {   lena = (21*lena+19)/20;
+                size[trial] = 0;
+                if (lena >= LEN) break;
+                lenb = lena;
 // I start by filling my input vectors with random data. I set the same
 // seed before trying my code and before trying gmp so that each get the
 // same set of test cases.
-        for (size_t i=0; i<lena; i++)
-        {   a[i] = mersenne_twister();
-            b[i] = mersenne_twister();
-        }
-        clock_t cl0 = clock();
-
+                for (size_t i=0; i<lena; i++)
+                {   a[i] = mersenne_twister();
+                    b[i] = mersenne_twister();
+                }
+std::cout << std::hex << mersenne_twister() << std::endl;
+                clock_t cl0 = clock();
 // When using Karatsuba the cost of a multiplication is expected to
 // grow as n^1.585, and so to arrange that I tke roughly the same
 // absolute time on each number-length I perform my tests a number of
 // times scaled inversely by that.
-        size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
-        for (size_t n = 0; n<tests; n++)
-        {
+                size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
+                for (size_t n = 0; n<tests; n++)
+                {
 // The gpm function mpn_mul multiplies unsigned integers, while my
 // bigmultiply is at a slightly higher level and deals with signed values.
 // I want to compare their results, and so forcing all inputs to be positive
 // (in my representation) by clearing most significant bits is necessary.
 // Note that this will almost always lead to numbers that have bits all the
 // way up to the limit and hence where the product is as long as it can be.
-// cases where multiplying m*n leads to a result of length m*n-1 will not
+// cases where multiplying m*n leads to a result of length 1 less will not
 // be exercised.
-            a[lena-1] &= 0x7fffffffffffffffU;
-            b[lena-1] &= 0x7fffffffffffffffU;
+                    a[lena-1] &= 0x7fffffffffffffffU;
+                    b[lenb-1] &= 0x7fffffffffffffffU;
 // So that all the administration here does not corrupt my measurement
 // I do the actual multiplication of each test case 500 times.
-            for (size_t m=0; m<500; m++)
-                bigmultiply(a, lena, b, lenb, c1, lenc1);
+                    if (method == 0)
+                    {   for (size_t m=0; m<500; m++)
+                            bigmultiply(a, lena, b, lenb, c1, lenc1);
 // By accumulating a sort of checksum on all the products that I compute
 // I will be able to reassure myself that the output from gmp and from my
 // own code agrees.
-            for (size_t i=0; i<lena+lenb; i++)
-                my_check = my_check*MULT + c1[i];
+                        for (size_t i=0; i<lena+lenb; i++)
+                            my_check = my_check*MULT + c1[i];
+if (n == 1)
+std::cout << std::dec << lena << " " << std::hex << my_check << std::endl;
+                    }
+                    else
+                    {   for (size_t m=0; m<500; m++)
+                            mpn_mul((mp_ptr)c,
+                                    (mp_srcptr)a, lena,
+                                    (mp_srcptr)b, lenb);
+                        for (size_t i=0; i<lena+lenb; i++)
+                            gmp_check = gmp_check*MULT + c1[i];
+if (n == 1)
+std::cout << std::dec << lena << " " << std::hex << gmp_check << std::endl;
+                    }
 // I alter the inputs using a linear congruential scheme (which is cheap)
 // so that for any length inputs I am doing test multiplications of a
 // range of varied cases. This is so that stray special cases are less liable
 // to corrupt my results.
-            for (size_t i=0; i<lena; i++)
-                a[i] = MULT*a[i] + ADD;
-            for (size_t i=0; i<lenb; i++)
-                b[i] = MULT*b[i] + ADD;
-        }
-        clock_t cl1 = clock();
-        double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
+                    for (size_t i=0; i<lena; i++)
+                        a[i] = MULT*a[i] + ADD;
+                    for (size_t i=0; i<lenb; i++)
+                        b[i] = MULT*b[i] + ADD;
+                }
+                clock_t cl1 = clock();
+                double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
 // I store details of this test run in an array for display later on.
-        size[trial] = lena;
-        testcount[trial] = 500*tests;
-        mine[trial] = t;
-        std::cout << ".";
-        std::cout.flush();
-    }
-    std::cout << std::endl;
-// Now do just the same sort of thing but using gmp rather then my
-// own multiplication code.
-    reseed(seed);
-    lena = 1;
-    for (size_t trial=0; trial<table_size; trial++)
-    {   lena = (21*lena+19)/20;
-        if (lena >= LEN) break;
-        lenb = lena;
-        for (size_t i=0; i<lena; i++)
-        {   a[i] = mersenne_twister();
-            b[i] = mersenne_twister();
+                size[trial] = lena;
+                testcount[trial] = 500*tests;
+                if (method == 0)
+                {   mine[trial] = t;
+                    std::cout << ".";
+                }
+                else
+                {   gmp[trial] = t;
+                    std::cout << ":";
+                }
+                std::cout.flush();
+            }
+            std::cout << std::endl;
         }
-        clock_t cl0 = clock();
-// somewhere around lena=1400 the fraction on the next line reduces
-// to zero. So for the last few cases I will take distinctly longer
-// than for each of the rest.
-        size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
-        for (size_t n = 0; n<tests; n++)
-        {   a[lena-1] &= 0x7fffffffffffffffU;
-            b[lena-1] &= 0x7fffffffffffffffU;
-            for (size_t m=0; m<500; m++)
-                mpn_mul((mp_ptr)c, (mp_srcptr)a, lena, (mp_srcptr)b, lenb);
-            for (size_t i=0; i<lena+lenb; i++)
-                gmp_check = gmp_check*MULT + c[i];
-            for (size_t i=0; i<lena; i++)
-                a[i] = MULT*a[i] + ADD;
-            for (size_t i=0; i<lenb; i++)
-                b[i] = MULT*b[i] + ADD;
-        }
-        clock_t cl1 = clock();
-        double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
-        gmp[trial] = t;
-        std::cout << ":";
-        std::cout.flush();
-    }
-
 // Display the checksum output. Note that this also ensures that the
 // result of the multiplication (well more pedantically the result of
 // the last of 500 multiplications!) is used so clever optimizing
 // compilers are not allowed to avoid computing it!
-    std::cout << std::endl;
-    std::cout << (my_check == gmp_check ? "checksums match" :
-                                          "checksums disagree") << std::endl;
-    std::cout << std::hex << "my checksum:  " << my_check << std::endl; 
-    std::cout             << "gmp checksum: " << gmp_check << std::endl;
-    std::cout << std::dec;
-    std::cout << "Times are reported in microseconds per multiplication"
-              << std::endl;
-    std::cout << std::setw(10) << "length"
-              << std::setw(10) << "my time"
-              << std::setw(10) << "gmp time"
-              << std::setw(10) << "  ratio mine/gmp"
-              << std::fixed << std::setprecision(3)
-               << std::endl;
+        std::cout << std::endl;
+        std::cout << (my_check == gmp_check ? "checksums match" :
+                                              "checksums disagree")
+                  << std::endl;
+        std::cout << std::hex << "my checksum:  " << my_check << std::endl;
+        std::cout             << "gmp checksum: " << gmp_check << std::endl;
+        std::cout << std::dec;
+        std::cout << "Times are reported in microseconds per multiplication"
+                  << std::endl;
+        std::cout << std::setw(10) << "length"
+                  << std::setw(10) << "my time"
+                  << std::setw(10) << "gmp time"
+                  << std::setw(10) << "  ratio mine/gmp"
+                  << std::fixed << std::setprecision(3)
+                   << std::endl;
 // In the following table times are reported in microseconds per
 // multiplication. The ratio is > 1.0 when my code is slower than gmp.
-    for (size_t i=0; i<table_size; i++)
-    {   if (size[i] == 0) break;
-        std::cout << std::setw(10) << size[i]
-                  << std::setw(10) << (1.0e6*mine[i]/testcount[i])
-                  << std::setw(10) << (1.0e6*gmp[i]/testcount[i])
-                  << std::setw(10) << (mine[i]/gmp[i])
-                  << std::endl;
+        for (size_t i=0; i<table_size; i++)
+        {   if (size[i] == 0) break;
+            std::cout << std::setw(10) << size[i]
+                      << std::setw(10) << (1.0e6*mine[i]/testcount[i])
+                      << std::setw(10) << (1.0e6*gmp[i]/testcount[i])
+                      << std::setw(10) << (mine[i]/gmp[i])
+                      << std::endl;
+        }
     }
 
 

@@ -171,9 +171,9 @@ int main(int argc, char *argv[])
     {   const size_t table_size = 300;
 
         const int N = 30;
-        const int LEN = 1500;
+        const int LEN = 1600;
  
-        uint64_t a[1000], b[10000], c[1000], c1[1000];
+        uint64_t a[2000], b[2000], c[5000], c1[5000];
         size_t lena, lenb, lenc, lenc1;
 
         size_t size[table_size];
@@ -186,101 +186,113 @@ int main(int argc, char *argv[])
 
         size_t tests;
 
-        reseed(seed);
-        lena = 1;
-        for (size_t trial=0; trial<table_size; trial++)
-        {   lena = (21*lena+19)/20;
-            size[trial] = 0;
-            if (lena >= LEN) break;
-            lenb = lena;
+        for (int method=0; method<3; method++)
+        {   reseed(seed);
+            lena = 1;
+            for (size_t trial=0; trial<table_size; trial++)
+            {   lena = (21*lena+19)/20;
+                size[trial] = 0;
+                if (lena >= LEN) break;
+                lenb = lena;
 // I start by filling my input vectors with random data. I set the same
 // seed before trying my code and before trying gmp so that each get the
 // same set of test cases.
-            for (size_t i=0; i<lena; i++)
-            {   a[i] = mersenne_twister();
-                b[i] = mersenne_twister();
-            }
-            clock_t cl0 = clock();
+                for (size_t i=0; i<lena; i++)
+                {   a[i] = mersenne_twister();
+                    b[i] = mersenne_twister();
+                }
+                clock_t cl0 = clock();
 // When using Karatsuba the cost of a multiplication is expected to
 // grow as n^1.585, and so to arrange that I tke roughly the same
 // absolute time on each number-length I perform my tests a number of
 // times scaled inversely by that.
-            size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
-            for (size_t n = 0; n<tests; n++)
-            {
+                size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
+                for (size_t n = 0; n<tests; n++)
+                {
 // The gpm function mpn_mul multiplies unsigned integers, while my
 // bigmultiply is at a slightly higher level and deals with signed values.
 // I want to compare their results, and so forcing all inputs to be positive
 // (in my representation) by clearing most significant bits is necessary.
 // Note that this will almost always lead to numbers that have bits all the
 // way up to the limit and hence where the product is as long as it can be.
-// cases where multiplying m*n leads to a result of length m*n-1 will not
+// cases where multiplying m*n leads to a result of length 1 less will not
 // be exercised.
-                a[lena-1] &= 0x7fffffffffffffffU;
-                b[lena-1] &= 0x7fffffffffffffffU;
+                    a[lena-1] &= 0x7fffffffffffffffU;
+                    b[lenb-1] &= 0x7fffffffffffffffU;
 // So that all the administration here does not corrupt my measurement
 // I do the actual multiplication of each test case 500 times.
-                for (size_t m=0; m<500; m++)
-                    bigmultiply(a, lena, b, lenb, c1, lenc1);
+                    bool ok;
+                    switch (method)
+                    {
+                    case 0:
+                        bigmultiply(a, lena, b, lenb, c1, lenc1);
+                        mpn_mul((mp_ptr)c,
+                                (mp_srcptr)a, lena,
+                                (mp_srcptr)b, lenb);
+                        ok = true;
+                        for (size_t i=0; i<lena+lenb; i++)
+                        {   if (c[i] != c1[i])
+                            {   ok = false;
+                                std::cout << "Failed at " << std::dec << i << std::endl;
+                            }
+                        }
+                        if (!ok)
+                        {   display("a  ", a, lena);
+                            display("b  ", b, lenb);
+                            display("me ", c1, lenc1);
+                            display("gmp", c, lena+lenb);
+                            abort();
+                        }
+                        break;
+                    case 1:
+                        for (size_t m=0; m<500; m++)
+                            bigmultiply(a, lena, b, lenb, c1, lenc1);
 // By accumulating a sort of checksum on all the products that I compute
 // I will be able to reassure myself that the output from gmp and from my
 // own code agrees.
-                for (size_t i=0; i<lena+lenb; i++)
-                    my_check = my_check*MULT + c1[i];
+                        for (size_t i=0; i<lena+lenb; i++)
+                            my_check = my_check*MULT + c1[i];
+                        break;
+                    case 2:
+                        for (size_t m=0; m<500; m++)
+                            mpn_mul((mp_ptr)c,
+                                    (mp_srcptr)a, lena,
+                                    (mp_srcptr)b, lenb);
+                        for (size_t i=0; i<lena+lenb; i++)
+                            gmp_check = gmp_check*MULT + c[i];
+                        break;
+                    }
 // I alter the inputs using a linear congruential scheme (which is cheap)
 // so that for any length inputs I am doing test multiplications of a
 // range of varied cases. This is so that stray special cases are less liable
 // to corrupt my results.
-                for (size_t i=0; i<lena; i++)
-                    a[i] = MULT*a[i] + ADD;
-                for (size_t i=0; i<lenb; i++)
-                    b[i] = MULT*b[i] + ADD;
-            }
-            clock_t cl1 = clock();
-            double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
+                    for (size_t i=0; i<lena; i++)
+                        a[i] = MULT*a[i] + ADD;
+                    for (size_t i=0; i<lenb; i++)
+                        b[i] = MULT*b[i] + ADD;
+                }
+                clock_t cl1 = clock();
+                double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
 // I store details of this test run in an array for display later on.
-            size[trial] = lena;
-            testcount[trial] = 500*tests;
-            mine[trial] = t;
-            std::cout << ".";
-            std::cout.flush();
-        }
-        std::cout << std::endl;
-// Now do just the same sort of thing but using gmp rather then my
-// own multiplication code. Note that I reseed the random number source
-// so I should use exactly the same set of cases.
-        reseed(seed);
-        lena = 1;
-        for (size_t trial=0; trial<table_size; trial++)
-        {   lena = (21*lena+19)/20;
-            if (lena >= LEN) break;
-            lenb = lena;
-            for (size_t i=0; i<lena; i++)
-            {   a[i] = mersenne_twister();
-                b[i] = mersenne_twister();
+                size[trial] = lena;
+                testcount[trial] = 500*tests;
+                switch (method)
+                {
+                case 0:
+                    std::cout << ".";
+                    break;
+                case 1:
+                    mine[trial] = t;
+                    std::cout << ":";
+                    break;
+                case 2:
+                    gmp[trial] = t;
+                    std::cout << "|";
+                    break;
+                }
+                std::cout.flush();
             }
-            clock_t cl0 = clock();
-// somewhere around lena=1400 the fraction on the next line reduces
-// to zero. So for the last few cases I will take distinctly longer
-// than for each of the rest.
-            size_t tests = 2+(10000*N)/(int)std::pow((double)lena, 1.585);
-            for (size_t n = 0; n<tests; n++)
-            {   a[lena-1] &= 0x7fffffffffffffffU;
-                b[lena-1] &= 0x7fffffffffffffffU;
-                for (size_t m=0; m<500; m++)
-                    mpn_mul((mp_ptr)c, (mp_srcptr)a, lena, (mp_srcptr)b, lenb);
-                for (size_t i=0; i<lena+lenb; i++)
-                    gmp_check = gmp_check*MULT + c[i];
-                for (size_t i=0; i<lena; i++)
-                    a[i] = MULT*a[i] + ADD;
-                for (size_t i=0; i<lenb; i++)
-                    b[i] = MULT*b[i] + ADD;
-            }
-            clock_t cl1 = clock();
-            double t = (cl1-cl0)/(double)CLOCKS_PER_SEC;
-            gmp[trial] = t;
-            std::cout << ":";
-            std::cout.flush();
+            std::cout << std::endl;
         }
 // Display the checksum output. Note that this also ensures that the
 // result of the multiplication (well more pedantically the result of

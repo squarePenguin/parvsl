@@ -5336,57 +5336,6 @@ intptr_t Revdifference::op(uint64_t *a, int64_t b)
 //=========================================================================
 //=========================================================================
 
-#ifdef OLD
-
-inline void bigmultiply(const uint64_t *a, size_t lena,
-                        const uint64_t *b, size_t lenb,
-                        uint64_t *r, size_t &lenr)
-{   for (size_t i=0; i<lena+lenb; i++) r[i] = 0;
-// If a and/or be are negative then I can treat their true values as
-//    a = sa + va      b = sb + vb
-// where sa and sb and the signs - represented here as 0 for a positive
-// number and -2^(64*len) for a negative one. va and vb are then the simple
-// bit-patterns for a and b but now interpreted as unsigned values. So if
-// instead of using 64-bit digits I was using 8 bit ones, the value -3
-// would be stored as 0xfd and that would be spit up as -128 + 253.
-// Then a*b = sa*sb + sa*vb + sb*va + va*vb.
-// The last item there is just the product of a and b when treated as
-// unsigned values, and so is what I compute first here rather simply.
-// If sa and/or sb is non-zero it is just the negative of a power of 2^64,
-// and so I can correct the unsigned product into a signed one by (sometimes)
-// subtracting a shifted version of a or b from it.
-    for (size_t i=0; i<lena; i++)
-    {   uint64_t hi = 0;
-        for (size_t j=0; j<lenb; j++)
-        {   uint64_t lo;
-// The largest possible value if (hi,lo) here is (0xffffffffffffffff, 0)
-// which arises if a[1], b[i] and prev_hi are all at their maximum. That
-// means that in all other cases (and in particular unless lo==0) hi ends
-// up LESS than the maximum, and so adding one to it can happen without
-// overflow.
-            multiply64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, r[i+j], r[i+j]);
-        }
-        r[i+lenb] = hi;
-    }
-    if (negative(a[lena-1]))
-    {   uint64_t carry = 1;
-        for (size_t i=0; i<lenb; i++)
-            carry = add_with_carry(r[i+lena], ~b[i], carry, r[i+lena]);
-    }
-    if (negative(b[lenb-1]))
-    {   uint64_t carry = 1;
-        for (size_t i=0; i<lena; i++)
-            carry = add_with_carry(r[i+lenb], ~a[i], carry, r[i+lenb]);
-    }
-    lenr = lena + lenb;
-// The actual value may be 1 word shorter than this.
-//  test top digit or r and if necessary reduce lenr.
-    truncate_positive(r, lenr);
-    truncate_negative(r, lenr);
-}
-
-#else // OLD
 // This multiplication code took much longer to write and debug than I had
 // expected. Classical multiplication was straightforward to implement,
 // but then while Karatsuba is at its heart simple, fitting it into a
@@ -5616,19 +5565,7 @@ void mul4x4(uint64_t a3, uint64_t a2, uint64_t a1, uint64_t a0,
 
 // c = a*b;
 
-// There are two versions of the classical multiplication code. One
-// computes by scanning the two inputs in the order
-//    for i = 0:lena-1 do for j = 0:lenb-1 do c[i+j] += a[i]*b[j]
-// while the other arranges to collect all the partial products that
-// will go into each position in the output one at a time, in the
-// style of   c[i] = sum_{j+k=i} a[j]*b[k]
-// Until this code is finished and stable it is not clear to me which
-// of these will be faster (or indeed if there will be measurable
-// pereformance difference between them.
-
-#ifdef NEWER
-
-// This version, activated via NEWER, forms a product digit by digit.
+// This forms a product digit by digit.
 
 inline void classical_multiply(uint64_t *a, size_t lena,
                                uint64_t *b, size_t lenb,
@@ -5738,52 +5675,6 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
         carry = add_with_carry(c[i], carry, c[i]);
 }
 
-#else // NEWER
-
-inline void classical_multiply(uint64_t *a, size_t lena,
-                               uint64_t *b, size_t lenb,
-                               uint64_t *c)
-{
-// Here I experimented with working with 2 or 3 digits at a time -
-// in effect unrolling the loops and rearranging the sequence of memory
-// accesses in case I could speed things up. With g++ on x86_64 the
-// changes hurt rather than benefitted me. So this has dropped back
-// to simple code. Note that this should work with lena==1 or lenb==1 so
-// I will not need to make those special cases.
-    uint64_t hi=0, lo;
-    for (size_t j=0; j<lenb; j++)
-        multiply64(a[0], b[j], hi, hi, c[j]);
-    c[lenb] = hi;
-    for (size_t i=1; i<lena; i++)
-    {   hi = 0;
-        for (size_t j=0; j<lenb; j++)
-        {   multiply64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, c[i+j], c[i+j]);
-        }
-        c[i+lenb] = hi;
-    }
-}
-
-// c = c + a*b. Potentially carry all the way up to lenc.
-
-inline void classical_multiply_and_add(uint64_t *a, size_t lena,
-                                       uint64_t *b, size_t lenb,
-                                       uint64_t *c, size_t lenc)
-{   uint64_t hi=0, lo, carry=0;
-    for (size_t i=0; i<lena; i++)
-    {   hi = 0;
-        for (size_t j=0; j<lenb; j++)
-        {   multiply64(a[i], b[j], hi, hi, lo);
-            hi += add_with_carry(lo, c[i+j], c[i+j]);
-        }
-        carry = add_with_carry(hi, c[i+lenb], carry, c[i+lenb]);
-    }
-    for (size_t i=lena+lenb; carry!=0 && i<lenc; i++)
-        carry = add_with_carry(c[i], carry, c[i]);
-}
-
-#endif // NEWER
-
 // Now variants that use just a single digit first argument. These may be seen
 // as optimized cases.
 
@@ -5811,9 +5702,10 @@ inline void classical_multiply_and_add(uint64_t a,
         carry = add_with_carry(c[i], carry, c[i]);
 }
 
-#ifndef K
+#if !defined K && !defined K_DEFINED
 // I provide a default here but can override it at compile time
 INLINE_VAR constexpr size_t K=18;
+#define K_DEFINED 1
 #endif
 
 // When I have completed and measured things I am liable to make this a
@@ -6467,8 +6359,6 @@ inline void bigmultiply(uint64_t *a, size_t lena,
 
 //===========================================================================
 //===========================================================================
-
-#endif // OLD
 
 intptr_t Times::op(uint64_t *a, uint64_t *b)
 {   size_t lena = number_size(a);
