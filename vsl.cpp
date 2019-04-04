@@ -621,7 +621,7 @@ static inline bool isEQHASHX(LispObject x)
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-INLINE const size_t MEM = 6400;
+INLINE const size_t MEM = 4096;
 #endif // MEM
 
 INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);

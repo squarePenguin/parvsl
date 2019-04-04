@@ -80,10 +80,12 @@ public:
             locals.resize(num_symbols, undefined);
         }
 
+#ifdef DEBUG
         if (loc >= (int)locals.size()) {
             std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
             throw std::logic_error("bad thread_local index");
         }
+#endif // DEBUG
 
         return locals[loc];
     }
@@ -397,11 +399,13 @@ LispObject& local_symbol(int loc) {
         fluid_locals.resize(num_symbols, undefined);
     }
 
+#ifdef DEBUG
     if (loc >= (int)fluid_locals.size()) {
         // THis is basically an assert but I am printing a bit more information.
         std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
         throw std::logic_error("bad thread_local index");
     }
+#endif // DEBUG
 
     return fluid_locals[loc];
 }
@@ -421,7 +425,7 @@ bool is_fluid_bound(LispObject s) {
 * should be used to get the true symbol, instead of qvalue(s).
 */
 LispObject& symval(LispObject s) {
-    assert(isSYMBOL(s));
+    // assert(isSYMBOL(s));
     if (is_global(s)) {
         return qvalue(s);
     }
