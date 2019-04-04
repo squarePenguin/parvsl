@@ -1483,7 +1483,7 @@ top (cond ((atom a) (return (reversip r))))
 (put (quote faslend) (quote stat) (quote endstat))
 (flag '(faslend) 'eval)
 
-(setq !*backtrace t)
+(setq !*backtrace nil)
 (setq !*debug nil)
 
 (de s!:fasl_supervisor nil

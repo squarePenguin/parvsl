@@ -3367,9 +3367,7 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 }
 
 LispObject Lglobal(LispObject lits, LispObject x) {
-    // TODO: this is a hack to prevent variables being made global. FIX IT!
-    std::cerr << "WARNING! tried to make global but made fluid!" << std::endl;
-    return chflag(x, fluid_symbol);
+    return chflag(x, global_symbol);
 }
 
 LispObject Lfluid(LispObject lits, LispObject x) {

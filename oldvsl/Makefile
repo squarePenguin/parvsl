@@ -125,12 +125,12 @@ drcore:	dvsl
 		-Dnoinlines=t \
 		buildrcore.lsp | tee drcore.log
 
-dparrcore:	dparvsl parbuildrcore.lsp
+dparrcore:	dparvsl buildparrcore.lsp
 	mkdir -p dparrcore.img.modules
 	rm -f dparrcore.img.modules/* dparrcore.img inline-defs.dat
 	time ./dparvsl -z -idparrcore.img -D@srcdir=. -D@reduce=../.. \
 		-Dnoinlines=t \
-		parbuildrcore.lsp | tee dparrcore.log
+		buildparrcore.lsp | tee dparrcore.log
 
 rcore:	vsl
 	mkdir -p rcore.img.modules
@@ -139,12 +139,12 @@ rcore:	vsl
 		-Dnoinlines=t \
 		buildrcore.lsp | tee rcore.log
 
-parrcore:	parvsl parbuildrcore.lsp
+parrcore:	parvsl buildparrcore.lsp
 	mkdir -p parrcore.img.modules
 	rm -f parrcore.img.modules/* parrcore.img inline-defs.dat
 	time ./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=../.. \
 		-Dnoinlines=t \
-		parbuildrcore.lsp | tee parrcore.log
+		buildparrcore.lsp | tee parrcore.log
 
 # The target "step2" at one stage activated a script that started from
 # drcore and compiled additional parts of Reduce to bring it up to the
