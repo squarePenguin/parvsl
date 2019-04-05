@@ -32,7 +32,7 @@ std::set<std::string> debug_globals;
 void add_debug_global(LispObject s) {
     if (not debug_safe) return;
     LispObject name = qpname(s);
-    assert(isSTRING(name));
+    // assert(isSTRING(name));
     size_t len = veclength(qheader(name));
     assert(len < 100);
     std::string ns{qstring(name), len};

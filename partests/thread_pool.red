@@ -208,13 +208,16 @@ symbolic procedure thread_pool_job(tp_q, status);
         scalar job, resfut, f, args, res;
         while not (first status = 'kill)
               and (first status = 'run or not (safeq_empty tp_q)) do <<
-            job := safeq_pop tp_q;
-            resfut := first job;
-            f := second job;
-            args := third job;
-            res := apply(f, args);
-            future_set(resfut, res);
-            print "done job" >>
+            job := safeq_trypop tp_q;
+            if job then <<
+                job := first job;
+                resfut := first job;
+                f := second job;
+                args := third job;
+                res := apply(f, args);
+                future_set(resfut, res);
+                print "done job" >> >>;
+        print "shutting down thread";
     end;
 
 symbolic procedure thread_pool(numthreads);

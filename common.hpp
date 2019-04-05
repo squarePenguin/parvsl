@@ -2,6 +2,7 @@
 #define COMMON_HPP
 
 #include <cstdint>
+#include <cstdlib>
 
 #ifdef __WIN32__
 #include <windows.h>

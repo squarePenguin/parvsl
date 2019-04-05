@@ -106,6 +106,8 @@
 // a conservative garbage collector and will support a fuller and
 // higher performance Lisp.
 
+// #define DEBUG_GLOBALS
+
 #include "common.hpp"
 #include "thread_data.hpp"
 
@@ -3584,13 +3586,13 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 }
 
 LispObject Lglobal(LispObject lits, LispObject x) {
-    // TODO: this is a hack to prevent variables being made global. FIX IT!
-#ifdef DEBUG_GLOBALS
-    std::cerr << "WARNING! tried to make global but made fluid!" << std::endl;
+// #ifdef DEBUG_GLOBALS
+    // this is a hack to prevent variables being made global.
+    std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
     return chflag(x, fluid_symbol);
-#else
-    return chflag(x, global_symbol);
-#endif
+// #else
+    // return chflag(x, global_symbol);
+// #endif
 }
 
 LispObject Lfluid(LispObject lits, LispObject x) {
@@ -9419,11 +9421,24 @@ void set_up_lispdir(int argc, const char *argv[])
     printf("programDir = <%s>\n", programDir);
 }
 
+#ifdef DEBUG_GLOBALS
+void exit_print_globals() {
+    std::ofstream fout("global_syms.log", std::ios_base::app);
+    for (auto s: par::debug_globals) {
+        fout << s << " ";
+    }
+    fout << std::endl;
+}
+#endif // DEBUG_GLOBALS
 
 int main(int argc, char *argv[])
 {
+#ifdef DEBUG_GLOBALS
+    atexit(exit_print_globals);
     rlimit stack_limit { RLIM_INFINITY, RLIM64_INFINITY };
     setrlimit(RLIMIT_STACK, &stack_limit);
+#endif // DEBUG_GLOBALS
+
     set_up_lispdir(argc, (const char **)argv);
     for (int i=0; i<MAX_LISPFILES; i++)
     {   filecurchar[i] = '\n';
@@ -9595,18 +9610,6 @@ int main(int argc, char *argv[])
         }
     }
 
-#ifdef DEBUG_GLOBALS
-    std::ofstream fout("global_syms.log", std::ios_base::app);
-    fout << "global symbols for command: " << std::endl;
-    for (int i = 0; i < argc; i += 1) {
-        fout << argv[i] << ' ';
-    }
-    fout << std::endl;
-    for (auto s: par::debug_globals) {
-        fout << s << " ";
-    }
-    fout << std::endl << std::endl;
-#endif
     return 0;
 }
 
