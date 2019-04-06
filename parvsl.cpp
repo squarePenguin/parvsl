@@ -1862,13 +1862,13 @@ static void fp_sprint(char *buff, double x, int prec, int xmark)
 
 #ifdef DEBUG
 std::recursive_mutex print_mutex;
-#endif DEBUG
+#endif
 
 void internalprint(LispObject x)
 {
 #ifdef DEBUG
     std::lock_guard<std::recursive_mutex> lock(print_mutex);
-#endif DEBUG
+#endif
     int sep = '(', esc;
     uintptr_t i, len;
     char *s;
