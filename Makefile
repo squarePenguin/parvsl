@@ -11,7 +11,6 @@ CFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O0 -g -rdynamic -p
 FASTCFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O3 -Wall
 
 
-
 # The issue of just which libraries I need to link in seems to be
 # platform-specific so here are some particular cases...
 

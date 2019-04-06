@@ -41,7 +41,7 @@ void add_debug_global(LispObject s) {
 
 #endif // DEBUG_GLOBALS
 
-static std::atomic_int num_symbols(0);
+static int num_symbols(0);
 
 thread_local std::vector<LispObject> fluid_locals;
 std::vector<LispObject> fluid_globals; // the global values
@@ -50,7 +50,7 @@ std::vector<LispObject> fluid_globals; // the global values
 class Thread_data {
 public:
     // CR VB: Should this be defined in terms of LispObject?
-    static constexpr int SEGMENT_SIZE = 0x20000; // 128K 65536; // 64KB per segment
+    static constexpr int SEGMENT_SIZE = 0x40000; // 128K 65536; // 64KB per segment
     // VB: use these as the segment we can write on.
     uintptr_t segment_fringe = -1;
     uintptr_t segment_limit = 0;

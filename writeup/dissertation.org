@@ -882,7 +882,11 @@ I must be careful to not collect the data during garbage
 Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
 simple tests for multi-threading, I was able to write more complex code using threads.
 
-Spawning hardware threads directly 
+Spawning hardware threads directly to parallelise each task can be undesirable. The user has
+to manage the lifecycle of each thread, making sure to join it and also to manage the number
+of available threads on the current hardware directly. Failure to do so will quickly result in 
+oversubscribtion of threads. Each thread object comes with its own overhead including a local
+stack and operating system handle, 
 
 One of the success criteria for the project was to implement a thread-pool. The thread pool
 is the smallest example of code using all the multi-threading features, but also of
@@ -972,7 +976,12 @@ Indeed, we can easily see the impact when trying to build reduce:
 *** 
 ** TODO Parallel building of Reduce
 
-Building the entirety of REDUCE provided a good test for ParVSL.
+The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
+can simply run to build it. The process can be separated into two steps:
+building the core of REDUCE, and then building all the additional packages.
+The core satisfies most of the dependencies any of the additional packages
+need, and its build takes half the time of all the other. 
+
 
 ** TODO baby groebner base package
 ** TODO Thread-local performance on Windows

@@ -106,8 +106,6 @@
 // a conservative garbage collector and will support a fuller and
 // higher performance Lisp.
 
-// #define DEBUG_GLOBALS
-
 #include "common.hpp"
 #include "thread_data.hpp"
 
@@ -751,14 +749,11 @@ static LispObject lookup(const char *s, size_t n, int flags);
 
 static LispObject Lchar_upcase(LispObject data, LispObject arg)
 {   LispObject a = arg;
-    if (isSYMBOL(a))
-    {   if (qpname(a) == nil) return a; // gensym as arg.
-        a = qpname(a);
-    }
+    if (isSYMBOL(a)) a = qpname(a);
     int ch = 0;
     if (isSTRING(a))
     {   ch = qstring(a)[0] & 0xff;
-        size_t len = veclength(qheader(a)); // strlen(qstring(a));
+        size_t len = strlen(qstring(a));
         if (len==1 && (ch&0x80) == 0) ch = toupper(ch);
         else if (len==2 && (ch & 0xe0) == 0xc0) // 2-byte UTF8
         {   ch = ((ch & 0x1f)<<6) | (qstring(a)[1] & 0x3f);
@@ -1865,11 +1860,15 @@ static void fp_sprint(char *buff, double x, int prec, int xmark)
     else if (*buff == '0' && *(buff+2) != 0) char_del(buff);
 }
 
+#ifdef DEBUG
 std::recursive_mutex print_mutex;
+#endif DEBUG
 
 void internalprint(LispObject x)
 {
+#ifdef DEBUG
     std::lock_guard<std::recursive_mutex> lock(print_mutex);
+#endif DEBUG
     int sep = '(', esc;
     uintptr_t i, len;
     char *s;
@@ -3586,13 +3585,13 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 }
 
 LispObject Lglobal(LispObject lits, LispObject x) {
-// #ifdef DEBUG_GLOBALS
+#ifdef DEBUG_GLOBALS
     // this is a hack to prevent variables being made global.
     std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
     return chflag(x, fluid_symbol);
-// #else
-    // return chflag(x, global_symbol);
-// #endif
+#else
+    return chflag(x, global_symbol);
+#endif
 }
 
 LispObject Lfluid(LispObject lits, LispObject x) {
