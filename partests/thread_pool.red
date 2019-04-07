@@ -158,6 +158,7 @@ begin
     % ASSERT: promise is fulfilled here
 
     res := third fut;
+    % print "future get unlocking mutex";
     mutexunlock m;
 
     return res;
@@ -169,9 +170,9 @@ symbolic procedure future_tryget(fut, timeout);
 begin
     scalar m, state, cv, res;
     m := first fut;
-    %% print "future tryget getting mutex";
+    % print "future tryget getting mutex";
     mutexlock m;
-    %% print "future tryget got mutex";
+    % print "future tryget got mutex";
 
     state := second fut;
 
@@ -185,11 +186,13 @@ begin
         else <<
             cv := condvar ();
             rplacd(fut, {'waiting, cv}) >>;
+
         if condvar_wait_for(cv, m, timeout) then
             res := {third fut}
         else
             res := nil >>;
 
+    % print "future tryget unlocking mutex";
     mutexunlock m;
 
     return res;
@@ -213,6 +216,7 @@ begin
 
     rplacd(fut, {'done, value});
 
+    % print "future set unlocking mutex";
     mutexunlock m;
 end;
 
@@ -229,41 +233,46 @@ begin
         args := third job;
         res := apply(f, args);
         future_set(resfut, res);
-        % print "done job" >>
+        % print "done job" 
+    >>
 end;
 
 symbolic procedure thread_pool_job(tp_q, status);
-    begin
-        scalar job, resfut, f, args, res, stat;
-        % print "Started worker";
+begin
+    scalar job, resfut, f, args, res, stat;
+    print "Started worker";
+    job := safeq_trypop tp_q;
+    repeat <<
+        if job then <<
+            % print "got job";
+            job := first job;
+            resfut := first job;
+            f := second job;
+            args := third job;
+            % res := apply(f, args);
+            res := errorset({'apply, mkquote f, mkquote args}, t, nil);
+            future_set(resfut, res);
+            % print "done job"
+        >> else <<
+            % print "yielding";
+            thread_yield ();
+        >>;
         job := safeq_trypop tp_q;
-        repeat <<
-            if job then <<
-                % print "got job";
-                job := first job;
-                resfut := first job;
-                f := second job;
-                args := third job;
-                res := apply(f, args);
-                future_set(resfut, res);
-                % print "done job"
-            >> else <<
-                % print "yielding";
-                thread_yield ();
-            >>;
-            job := safeq_trypop tp_q;
-            stat := atomic_get status;
-        >> until (stat = 'kill) or (stat = 'stop and null job);
-        % print "shutting down thread_pool worker";
-    end;
+        stat := atomic_get status;
+    >> until (stat = 'kill) or (stat = 'stop and null job);
+    % print "shutting down thread_pool worker";
+
+    return nil
+end;
 
 symbolic procedure thread_pool(numthreads);
-    begin scalar tp_q, status;
+    begin scalar tp_q, status, threads;
         tp_q := safeq();
         status := atomic 'run;
+        threads := {};
         % print "starting workers";
-        for i := 1:numthreads do thread2('thread_pool_job, {tp_q, status});
-        return {tp_q, status};
+        for i := 1:numthreads do threads := thread2('thread_pool_job, {tp_q, status}) . threads;
+        return {tp_q, status, threads};
     end;
 
 symbolic procedure tp_addjob(tp, f, args);
@@ -283,10 +292,20 @@ begin
 end;
 
 symbolic procedure tp_stop(tp);
+begin
+    scalar threads;
+    threads := third tp;
     atomic_set(second tp, 'stop);
+    for each td in threads do jointhread td;
+end;
 
 symbolic procedure tp_kill(tp);
+begin
+    scalar threads;
+    threads := third tp;
     atomic_set(second tp, 'kill);
+    for each td in threads do jointhread td;
+end;
 
 % tp := thread_pool();
 

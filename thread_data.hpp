@@ -259,7 +259,6 @@ public:
     }
 
     ~Thread_manager() {
-        std::lock_guard<std::mutex> lock(thread_mutex);
         num_threads -= 1;
         thread_table.erase(thread_data.id);
     }
@@ -352,7 +351,6 @@ std::condition_variable& get_condvar(int id) {
  * undefined behaviour otherwise
 **/
 void condvar_wait(int cvid, int mid) {
-    // std::lock_guard<std::mutex> lock(condvar_mutex);
     auto& m = get_mutex(mid);
     std::unique_lock<std::mutex> lock(m, std::adopt_lock);
 

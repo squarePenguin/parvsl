@@ -6888,8 +6888,7 @@ LispObject Lrds(LispObject lits, LispObject x)
     if (x == nil) x = packfixnum(3);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
-        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
-            (file_direction & (1<<n)) == 0)
+        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL && (file_direction & (1<<n)) == 0)
         {   filecurchar[old] = curchar;
             filesymtype[old] = symtype;
             lispin = n;
