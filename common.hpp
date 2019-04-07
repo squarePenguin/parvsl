@@ -595,7 +595,7 @@ INLINE constexpr int MAX_LISPFILES = 30;
 #define comma      listbases[8]
 #define comma_at   listbases[9]
 #define eofsym     listbases[10]
-#define cursym     listbases[11]
+#define cursym_base     listbases[11]
 #define work1_base      listbases[12]
 #define work2_base      listbases[13]
 #define restartfn  listbases[14]
@@ -624,6 +624,7 @@ std::atomic<LispObject> obhash[OBHASH_SIZE];
 // with the others.
 static thread_local LispObject work1 = NULLATOM;
 static thread_local LispObject work2 = NULLATOM;
+static thread_local LispObject cursym = NULLATOM;
 
 static inline LispObject allocateatom(size_t n);
 
