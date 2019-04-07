@@ -877,28 +877,6 @@ I must be careful to not collect the data during garbage
 
 
 *** The symbol `x`
-** Thread pool
-
-Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
-simple tests for multi-threading, I was able to write more complex code using threads.
-
-Spawning hardware threads directly to parallelise each task can be undesirable. The user has
-to manage the lifecycle of each thread, making sure to join it and also to manage the number
-of available threads on the current hardware directly. Failure to do so will quickly result in 
-oversubscribtion of threads. Each thread object comes with its own overhead including a local
-stack and operating system handle, 
-
-One of the success criteria for the project was to implement a thread-pool. The thread pool
-is the smallest example of code using all the multi-threading features, but also of
-inter-thread communication and synchronisation. The thread pool is based on a simple
-safe queue implemented with a linked list, a condition variable and a mutex. It spawns
-the number of available hardware threads as workers which poll the queue for waiting
-jobs. The waiting is done using a condition variable, to allow the thread to sleep rather than
-busy spin.
-
-ParVSL is not strongly typed and has no algebraic data types. Please note the use of a lists
-to structure data.
-
 ** Computing Groebner bases in parallel
 
 REDUCE comes with a large set of packages which cover different aspect of computer algebra.
@@ -971,6 +949,91 @@ Indeed, we can easily see the impact when trying to build reduce:
 |   | 1m55s | 2m10s | 2m4s     |
 
 ** Stress tests
+** Thread pool
+
+Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
+simple tests for multi-threading, I was able to write more complex code using threads.
+
+Spawning hardware threads directly to parallelise each task can be undesirable. The user has
+to manage the lifecycle of each thread, making sure to join it and also to manage the number
+of available threads on the current hardware directly. Failure to do so will quickly result in 
+oversubscribtion of threads. Each thread object comes with its own overhead including a local
+stack and operating system handle, 
+
+A thread pool is a structure for simplifying parallelism by abstracting away the interaction
+with hardware threads. A thread pool consists of a work queue for pending jobs and a number
+of worker threads which execute those jobs as they become available. The number of workers
+can equal the number of hardware threads so that the program never has to spawn more threads
+than there available, and threads can be reused. Once a thread pool is created, the user simply 
+needs to submit jobs and they will be automatically parallelised.
+
+*** A thread-safe queue
+
+The main data structure behind the thread-pool is a thread-safe queue. All threads may push
+jobs to this queue and all working threads pop tasks from it to execute. Jobs can be executed
+in any order, and I a queue so that they would be executed in the order they are submitted, which
+seemed the most natural.
+
+We can implement such a queue easiliy in ParVSL using a mutex and a condition variable. We start
+from a simple queue, with the following functions: 
+
+- ~queue()~ creates a new queue
+- ~queue_push(q, x)~ pushes value ~x~ to queue ~q~
+- ~queue_pop(q)~ pops and returns the value at the front of the queue
+- ~queue_empty(q)~ checks if the queue is empty
+
+A thread_safe queue is simply a wrapper on top of the normal queue:
+#+BEGIN_SRC 
+procedure safe_queue();
+  {queue(), mutex(), condvar()};
+#+END_SRC
+
+We need two procedures: ~safe_queue_push(sq, x)~ and ~safe_queue_pop(sq)~. The latter will
+wait if the queue is empty until an element is enqueued. The waiting is done using the condition variable:
+
+#+BEGIN_SRC
+procedure safe_queue_pop(sq);
+begin
+  scalar q, m, cv, res;
+  % unpack the safe queue
+  q := first sq;
+  m := second sq;
+  cv := third sq;
+
+  mutex_lock m;
+
+  while queue_empty q do
+    % wait for another thread to push an element and notify
+    condvar_wait(cv, m);
+
+  res := queue_pop q;
+  mutex_unlock m;
+  return res;
+end;
+#+END_SRC
+
+Now, the push method must notify the condition variable if the queue was empty.
+#+BEGIN_SRC 
+procedure safe_queue_push(sq, x);
+begin 
+  scalar q, m, cv;
+  q := first sq;
+  m := second sq;
+  cv := third sq;
+
+  mutex_lock m;
+  queue_push(q, x);
+  condvar_notify_one cv;
+  mutex_unlock m;
+end;
+#+END_SRC
+
+*** Waiting for a job's result
+
+
+*** Dealing with tasks that wait for other tasks
+
+
 ** TODO Parallel implementation of common algorithms
 *** FFT
 *** 

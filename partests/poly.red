@@ -80,8 +80,19 @@ begin scalar a_unwind, b_unwind, a0, a1, b0, b1, t1, t2, t3;
   return interleave(add_polys(a0b0, 0 . a1b1), add_polys(a0b1, a1b0));
 end;
 
+symbolic procedure nrand(n);
+begin
+    scalar res;
+    res := nil;
+    for i := 1:n do
+        res := random 1000 . res;
+    return res;
+end;
+
 a := {21, 5, 0, -2, 3, 6};
 b := {-1, 3, 1, 4, -5};
 c := multiply_polys(a, b);
 % c2 := multiply_polys2(a, b);
-cp := multiply_polys_par(a, b);
+% cp := multiply_polys_par(a, b);
+
+end;

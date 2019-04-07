@@ -106,6 +106,10 @@
 // a conservative garbage collector and will support a fuller and
 // higher performance Lisp.
 
+// #define DEBUG
+// #define TRACEALL
+// #define DEBUG_GLOBALS
+
 #include "common.hpp"
 #include "thread_data.hpp"
 
@@ -849,8 +853,8 @@ static LispObject Lchar_downcase(LispObject data, LispObject arg)
 }
 
 INLINE constexpr size_t BOFFO_SIZE = 4096;
-char boffo[BOFFO_SIZE+4];
-size_t boffop;
+thread_local char boffo[BOFFO_SIZE+4];
+thread_local size_t boffop;
 
 using std::swap;
 
@@ -912,6 +916,7 @@ void par_reclaim() {
 
         *(td.work1) = copy(*(td.work1));
         *(td.work2) = copy(*(td.work2));
+        *(td.cursym) = copy(*(td.cursym));
     }
 
     for (auto& x: par::thread_returns) {
@@ -1608,7 +1613,7 @@ FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
 int32_t file_direction = 0, interactive = 0;
-int lispin = 0, lispout = 1;
+thread_local int lispin = 0, lispout = 1;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch1(int c)
@@ -1630,7 +1635,8 @@ void wrch1(int c)
     }
     else if (lispout == -2) boffo[boffop++] = c;
     else
-    {   putc(c, lispfiles[lispout]);
+    {
+        putc(c, lispfiles[lispout]);
 #ifdef DEBUG
         if (logfile != NULL)
         {   putc(c, logfile);
@@ -3585,13 +3591,13 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 }
 
 LispObject Lglobal(LispObject lits, LispObject x) {
-#ifdef DEBUG_GLOBALS
+// #ifdef DEBUG_GLOBALS
     // this is a hack to prevent variables being made global.
     std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
     return chflag(x, fluid_symbol);
-#else
-    return chflag(x, global_symbol);
-#endif
+// #else
+    // return chflag(x, global_symbol);
+// #endif
 }
 
 LispObject Lfluid(LispObject lits, LispObject x) {
@@ -6920,8 +6926,12 @@ LispObject Lget_lisp_directory(LispObject lits)
 {   return makestring(programDir, strlen(programDir));
 }
 
+std::mutex file_mutex;
+
 LispObject Lopen(LispObject lits, LispObject x, LispObject y)
-{   FILE *f;
+{
+    std::lock_guard<std::mutex> lock(file_mutex);
+    FILE *f;
     int n, how = 0;
     char *p;
     if (isSYMBOL(x)) x = qpname(x);
@@ -6970,7 +6980,9 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
 }
 
 LispObject Lfilep(LispObject lits, LispObject x)
-{   FILE *f;
+{
+    std::lock_guard<std::mutex> lock(file_mutex);
+    FILE *f;
     char *p;
     if (isSYMBOL(x)) x = qpname(x);
     if (!isSTRING(x))
@@ -7003,7 +7015,9 @@ LispObject Lfilep(LispObject lits, LispObject x)
 }
 
 LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
-{   FILE *f;
+{
+    std::lock_guard<std::mutex> lock(file_mutex);
+    FILE *f;
     int n, how = 0;
     if (isSYMBOL(x)) x = qpname(x);
     if (!isSTRING(x) ||
@@ -7036,6 +7050,7 @@ LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
 
 LispObject Lclose(LispObject lits, LispObject x)
 {
+    std::lock_guard<std::mutex> lock(file_mutex);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (n > 3 && n < MAX_LISPFILES)
@@ -8563,8 +8578,10 @@ int warm_start_1(gzFile f, int *errcode)
     // Restore the work bases to thread_local storage.
      work1 = work1_base;
      work2 = work2_base;
+     cursym = cursym_base;
      work1_base = NULLATOM;
      work2_base = NULLATOM;
+     cursym_base = NULLATOM;
 
 #ifdef DEBUG_GLOBALS
     par::debug_safe = true;
@@ -8794,6 +8811,7 @@ void write_image(gzFile f)
     // the work variables inside listbases for preservation
     work1_base = work1;
     work2_base = work2;
+    cursym_base = cursym;
 
     int errcode;
     inner_reclaim(C_stackbase); // To compact memory.

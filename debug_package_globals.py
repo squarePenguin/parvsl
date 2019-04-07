@@ -5,7 +5,7 @@ lisp_filename = "partests/buildpack.red"
 
 for pack in packs:
     pack = pack.strip()
-    
+
     lispcode = f"lisp; package!-remake '{pack}; bye;"
 
     outfile = open(lisp_filename, "w")

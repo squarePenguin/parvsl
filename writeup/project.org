@@ -249,5 +249,14 @@ if they were the two polys it would be their gcd
 
 not garbage collecting mutexes and condvars
 
-bug: thread pool when all workes are waiting causes deadlock. need to yield somehow.
+bug: thread pool when all works are waiting causes deadlock. need to yield somehow.
 feature: need yield
+
+bug: segmentation fault on fflush(stdout)
+prevents me from debugging
+
+bug: segfault on atomic int access
+
+almost bug: setheapstarts etc modify different segments
+
+datarace: on cursym (fix like work1/2)

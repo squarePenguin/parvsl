@@ -41,7 +41,7 @@ void add_debug_global(LispObject s) {
 
 #endif // DEBUG_GLOBALS
 
-static int num_symbols(0);
+static std::atomic_int num_symbols(0);
 
 thread_local std::vector<LispObject> fluid_locals;
 std::vector<LispObject> fluid_globals; // the global values
@@ -60,6 +60,7 @@ public:
 
     LispObject *work1;
     LispObject *work2;
+    LispObject *cursym;
 
     std::vector<LispObject> *fluid_locals;
 
@@ -100,11 +101,11 @@ public:
     void acquire_write() {
         int zero = 0;
         do {
-            if (l.load() == 0
-              && l.compare_exchange_weak(zero,
-                                         -1,
-                                         std::memory_order_acquire,
-                                         std::memory_order_relaxed))
+            if (l.load(std::memory_order_relaxed) == 0
+                && l.compare_exchange_weak(zero,
+                                           -1,
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_relaxed))
             {
                 break;
             }
@@ -121,7 +122,7 @@ public:
             if (old_val >= 0
                 && l.compare_exchange_weak(old_val,
                                            old_val + 1,
-                                           std::memory_order_acquire,
+                                           std::memory_order_acq_rel,
                                            std::memory_order_relaxed))
             {
                 break;
@@ -231,6 +232,8 @@ void reset_segments() {
     }
 }
 
+std::mutex thread_mutex;
+
 // For now, just make sure all threads are joined at some point
 std::unordered_map<int, Thread_RAII> active_threads;
 int tid = 0;
@@ -241,24 +244,27 @@ void init_thread_data(int id, LispObject *C_stackbase) {
     thread_data.fluid_locals = &fluid_locals;
     thread_data.work1 = &work1;
     thread_data.work2 = &work2;
-    thread_table.emplace(tid, par::thread_data);
+    cursym = nil;
+    thread_data.cursym = &cursym;
+    thread_table.emplace(id, par::thread_data);
     num_threads += 1;
 }
 
 class Thread_manager {
 public:
     Thread_manager(int id) {
+        std::lock_guard<std::mutex> lock(thread_mutex);
         int stack_var = 0;
         init_thread_data(id, (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject)));
     }
 
     ~Thread_manager() {
+        std::lock_guard<std::mutex> lock(thread_mutex);
         num_threads -= 1;
         thread_table.erase(thread_data.id);
     }
 };
 
-std::mutex thread_mutex;
 int start_thread(std::function<LispObject(void)> f) {
     std::lock_guard<std::mutex> lock(thread_mutex);
 
@@ -300,6 +306,7 @@ LispObject yield_thread() {
 std::unordered_map<int, std::mutex> mutexes;
 int mutex_id = 0;
 
+// TODO: use RW lock
 std::mutex mutex_mutex;
 int mutex() {
     std::lock_guard<std::mutex> lock(mutex_mutex);
@@ -309,13 +316,18 @@ int mutex() {
     return mutex_id;
 }
 
+std::mutex& get_mutex(int id) {
+    std::lock_guard<std::mutex> lock(mutex_mutex);
+    return mutexes[id];
+}
+
 void mutex_lock(int mid) {
     par::Gc_guard guard;
-    mutexes[mid].lock();
+    get_mutex(mid).lock();
 }
 
 void mutex_unlock(int mid) {
-    mutexes[mid].unlock();
+    get_mutex(mid).unlock();
 }
 
 std::unordered_map<int, std::condition_variable> condvars;
@@ -330,14 +342,21 @@ int condvar() {
     return condvar_id;
 }
 
+std::condition_variable& get_condvar(int id) {
+    std::lock_guard<std::mutex> lock(condvar_mutex);
+    return condvars[id];
+}
+
 /**
  * mutex must be locked when calling this function
  * undefined behaviour otherwise
 **/
 void condvar_wait(int cvid, int mid) {
-    auto& m = mutexes[mid];
+    // std::lock_guard<std::mutex> lock(condvar_mutex);
+    auto& m = get_mutex(mid);
     std::unique_lock<std::mutex> lock(m, std::adopt_lock);
-    auto& condvar = condvars[cvid];
+
+    auto& condvar = get_condvar(cvid);
 
     par::Gc_guard guard;
     condvar.wait(lock);
@@ -350,9 +369,10 @@ void condvar_wait(int cvid, int mid) {
  * returns true when signaled
 **/
 LispObject condvar_wait_for(int cvid, int mid, int ms) {
-    auto& m = mutexes[mid];
+    auto& m = get_mutex(mid);
     std::unique_lock<std::mutex> lock(m, std::adopt_lock);
-    auto& condvar = condvars[cvid];
+
+    auto& condvar = get_condvar(cvid);
 
     par::Gc_guard guard;
     if (condvar.wait_for(lock, std::chrono::milliseconds(ms)) == std::cv_status::timeout) {
@@ -363,11 +383,11 @@ LispObject condvar_wait_for(int cvid, int mid, int ms) {
 }
 
 void condvar_notify_one(int cvid) {
-    condvars[cvid].notify_one();
+    get_condvar(cvid).notify_one();
 }
 
 void condvar_notify_all(int cvid) {
-    condvars[cvid].notify_all();
+    get_condvar(cvid).notify_all();
 }
 
 static std::mutex alloc_symbol_mutex;
