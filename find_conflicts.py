@@ -57,14 +57,12 @@ def scalar_sym(names):
 def all_packs(packs):
     packs = ["'" + p for p in packs]
     groups = split_groups(packs)
-    return "packages := {\n" + ",\n".join(['  ' + ",".join(g) for g in groups]) + " };"
+    return "packages := {\n" + ",\n".join(['  ' + ",".join(g) for g in groups]) + "\n};"
 
 names = fix_synames(names)
 
-output = f"""
+output0 = f"""
 lisp;
-
-in "partests/thread_pool.red";
 
 {print_fluid(names)}
 
@@ -76,18 +74,23 @@ begin
 
     {restore_oldval(names)}
 
-    package!-remake(p);
+    package!-remake p;
 end;
 
-{all_packs(packs)}
+symbolic procedure build_packages(packages);
+    for each p in packages do package!-remake p;
+
+preserve('begin, "Rcore", nil);
 """
 
-output += """
+output = all_packs(packs) + """
+
+in "partests/thread_pool.red";
 fluid '(tp);
 tp := thread_pool(hardwarethreads() - 1);
 
 symbolic procedure build_packages_par(packages);
-begin 
+begin
     scalar fut, futs;
     futs := {};
 
@@ -99,15 +102,16 @@ begin
     for each fut in futs do future_get(fut);
 end;
 
-symbolic procedure build_packages(packages);
-    for each p in packages do buildpackage p;
-
 build_packages_par packages;
 
 tp_stop tp;
 
 end;
 """
+
+outfile = open(outname + "0", "w")
+outfile.write(output0)
+outfile.close()
 
 outfile = open(outname, "w")
 outfile.write(output)
