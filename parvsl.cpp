@@ -87,6 +87,7 @@
 #include <zlib.h>
 
 #include <atomic>
+#include <bitset>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -1612,8 +1613,9 @@ FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 #else // DEBUG
 FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
-int32_t file_direction = 0, interactive = 0;
+int32_t interactive = 0;
 thread_local int lispin = 0, lispout = 1;
+std::bitset<MAX_LISPFILES> file_direction;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
 void wrch1(int c)
@@ -1866,15 +1868,13 @@ static void fp_sprint(char *buff, double x, int prec, int xmark)
     else if (*buff == '0' && *(buff+2) != 0) char_del(buff);
 }
 
-#ifdef DEBUG
 std::recursive_mutex print_mutex;
-#endif
 
 void internalprint(LispObject x)
 {
-#ifdef DEBUG
+    // TODO: used for debugging. Remove for performance
     std::lock_guard<std::recursive_mutex> lock(print_mutex);
-#endif
+
     int sep = '(', esc;
     uintptr_t i, len;
     char *s;
@@ -6888,7 +6888,7 @@ LispObject Lrds(LispObject lits, LispObject x)
     if (x == nil) x = packfixnum(3);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
-        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL && (file_direction & (1<<n)) == 0)
+        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL && file_direction[n] == 0)
         {   filecurchar[old] = curchar;
             filesymtype[old] = symtype;
             lispin = n;
@@ -6907,8 +6907,7 @@ LispObject Lwrs(LispObject lits, LispObject x)
     if (x == nil) x = packfixnum(1);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
-        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL &&
-            (file_direction & (1<<n)) != 0)
+        if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL && file_direction[n] != 0)
         {   lispout = n;
             return packfixnum(old);
         }
@@ -6970,7 +6969,7 @@ LispObject Lopen(LispObject lits, LispObject x, LispObject y)
     for (n=4; n<MAX_LISPFILES && lispfiles[n]!=NULL; n++);
     if (n<MAX_LISPFILES)
     {   lispfiles[n] = f;
-        if (y != input) file_direction |= (1 << n);
+        if (y != input) file_direction.set(n);
         filecurchar[n] = '\n';
         filesymtype[n] = '?';
         return packfixnum(n);
@@ -7041,7 +7040,7 @@ LispObject Lopen_module(LispObject lits, LispObject x, LispObject y)
     for (n=4; n<MAX_LISPFILES && lispfiles[n]!=NULL; n++);
     if (n<MAX_LISPFILES)
     {   lispfiles[n] = f;
-        if (y != input) file_direction |= (1 << n);
+        if (y != input) file_direction.set(n);
         return packfixnum(n);
     }
     return error1("too many open files", x);
@@ -7057,7 +7056,7 @@ LispObject Lclose(LispObject lits, LispObject x)
             if (lispout == n) Lwrs(nil, packfixnum(1));
             if (lispfiles[n] != NULL) fclose(lispfiles[n]);
             lispfiles[n] = NULL;
-            file_direction &= ~(1<<n);
+            file_direction.reset(n);
         }
     }
     return nil;
@@ -9449,10 +9448,10 @@ void exit_print_globals() {
 
 int main(int argc, char *argv[])
 {
-#ifdef DEBUG_GLOBALS
-    atexit(exit_print_globals);
     rlimit stack_limit { RLIM_INFINITY, RLIM64_INFINITY };
     setrlimit(RLIMIT_STACK, &stack_limit);
+#ifdef DEBUG_GLOBALS
+    atexit(exit_print_globals);
 #endif // DEBUG_GLOBALS
 
     set_up_lispdir(argc, (const char **)argv);
@@ -9521,7 +9520,8 @@ int main(int argc, char *argv[])
     for (size_t i=0; i<MAX_LISPFILES; i++) lispfiles[i] = 0;
     lispfiles[0] = stdin;   lispfiles[1] = stdout;
     lispfiles[2] = stderr;  lispfiles[3] = stdin;
-    file_direction = (1<<1) | (1<<2); // 1 bits for writable files.
+    file_direction.set(1);
+    file_direction.set(2);
     lispin = 3; lispout = 1;
     if (inputfilename != NULL)
     {   FILE *in = fopen(inputfilename, "r");

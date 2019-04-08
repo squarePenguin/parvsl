@@ -46,7 +46,7 @@ begin scalar n, ss, xs, ysfut, ys;
     n := length xs;
     return
         if n < 6 then insertionsort xs
-        else if n < 1000 then mergesort xs
+        else if n < 10 then mergesort xs
         else <<
             ss := split(xs, (n + 1) / 2);
             ysfut := tp_addjob(tp, 'parmergesort, {second ss});
@@ -56,8 +56,9 @@ begin scalar n, ss, xs, ysfut, ys;
                 tp_runjob(tp);
                 % print length first first tp;
                 ys := future_tryget(ysfut, 10) >>;
-            ys := first ys;
-            mergesorted(xs, ys) >>
+            ys := caar ys;
+            mergesorted(xs, ys) 
+        >>
 end;
 
 symbolic procedure nrand(n);
@@ -69,4 +70,10 @@ begin
     return res;
 end;
 
-end;
+
+l := nrand 100;
+parmergesort l;
+
+tp_stop tp;
+
+bye;

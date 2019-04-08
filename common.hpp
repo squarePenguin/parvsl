@@ -555,7 +555,7 @@ LispObject *C_stackbase;
 // 40K distinct symbols...
 
 INLINE constexpr size_t OBHASH_SIZE   = 15013;
-INLINE constexpr int MAX_LISPFILES = 30;
+INLINE constexpr int MAX_LISPFILES = 100;
 
 // Some Lisp values that I will use frequently...
 // I am not quite clear that there would be any nice way to store all these

@@ -62,10 +62,10 @@ public:
     LispObject *work2;
 
     std::vector<LispObject> *fluid_locals;
-    
+
     /**
      * Whether the thread is in a safe state for GC.
-     * TODO VB: right now we say always true 
+     * TODO VB: right now we say always true
      * */
     bool safe_memory = true;
 
@@ -98,8 +98,8 @@ public:
     void acquire_write() {
         int zero = 0;
         do {
-            if (l.load() == 0 
-              && l.compare_exchange_weak(zero, 
+            if (l.load() == 0
+              && l.compare_exchange_weak(zero,
                                          -1,
                                          std::memory_order_acquire,
                                          std::memory_order_relaxed))
@@ -116,11 +116,11 @@ public:
     void acquire_read() {
         do {
             int old_val = l.load(std::memory_order_relaxed);
-            if (old_val >= 0 
-                && l.compare_exchange_weak(old_val, 
-                                           old_val + 1, 
+            if (old_val >= 0
+                && l.compare_exchange_weak(old_val,
+                                           old_val + 1,
                                            std::memory_order_acquire,
-                                           std::memory_order_relaxed)) 
+                                           std::memory_order_relaxed))
             {
                 break;
             }
@@ -185,7 +185,7 @@ public:
         std::unique_lock<std::mutex> lock(gc_guard_mutex);
         gc_cv.wait(lock, []() { return !gc_on; });
         paused_threads -= 1;
-        
+
         thread_data.C_stackhead = nullptr;
     }
 };
@@ -193,7 +193,7 @@ public:
 class Gc_lock {
 private:
     std::unique_lock<std::mutex> lock;
-    
+
 public:
     Gc_lock() : lock(gc_lock_mutex) {
         assert(gc_on);
@@ -203,7 +203,7 @@ public:
         thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
         paused_threads += 1;
-        gc_waitall.wait(lock, []() { 
+        gc_waitall.wait(lock, []() {
             // std::cerr << "paused: " << paused_threads << std::endl;
             // std::cerr << "total: " << num_threads << std::endl;
             return paused_threads == num_threads; });
@@ -323,7 +323,7 @@ int condvar() {
     return condvar_id;
 }
 
-/**  
+/**
  * mutex must be locked when calling this function
  * undefined behaviour otherwise
 **/
@@ -334,6 +334,7 @@ void condvar_wait(int cvid, int mid) {
 
     par::Gc_guard guard;
     condvar.wait(lock);
+    lock.release(); // prevent unlocking here
 }
 
 void condvar_notify_one(int cvid) {
@@ -363,7 +364,7 @@ int allocate_symbol() {
 }
 
 /**
-* [local_symbol] gets the thread local symbol. may return undefined. 
+* [local_symbol] gets the thread local symbol. may return undefined.
 * Note, thread_local symbols are only lazily resised. Accessing a local
 * symbol directly is dangerous. You need to use this function to ensure the
 * local symbol is at least allocated.
@@ -406,7 +407,7 @@ LispObject& symval(LispObject s) {
     LispObject& res = local_symbol(loc);
     // Here I assume undefined is a sort of "reserved value", meaning it can only exist
     // when the object is not shallow_bound. This helps me distinguish between fluids that
-    // are actually global and those that have been bound. 
+    // are actually global and those that have been bound.
     // When the local value is undefined, I refer to the global value.
     if (is_fluid(s) && res == undefined) {
         return fluid_globals[loc];

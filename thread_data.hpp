@@ -322,11 +322,15 @@ std::mutex& get_mutex(int id) {
 
 void mutex_lock(int mid) {
     par::Gc_guard guard;
-    get_mutex(mid).lock();
+    auto &m = get_mutex(mid);
+    // std::cerr << "Locking " << m.native_handle() << std::endl;
+    m.lock();
 }
 
 void mutex_unlock(int mid) {
-    get_mutex(mid).unlock();
+    auto &m = get_mutex(mid);
+    // std::cerr << "Unlocking " << m.native_handle() << std::endl;
+    m.unlock();
 }
 
 std::unordered_map<int, std::condition_variable> condvars;
@@ -356,8 +360,11 @@ void condvar_wait(int cvid, int mid) {
 
     auto& condvar = get_condvar(cvid);
 
+    // std::cerr << "Condvar wait " << condvar.native_handle() << " mutex=" << m.native_handle() << std::endl;
+
     par::Gc_guard guard;
     condvar.wait(lock);
+    lock.release(); // prevent unlocking mutex here
 }
 
 /**
@@ -376,6 +383,8 @@ LispObject condvar_wait_for(int cvid, int mid, int ms) {
     if (condvar.wait_for(lock, std::chrono::milliseconds(ms)) == std::cv_status::timeout) {
         return nil;
     }
+
+    lock.release(); // prevent unlocking mutex here
 
     return lisptrue;
 }

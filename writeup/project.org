@@ -262,3 +262,5 @@ almost bug: setheapstarts etc modify different segments
 datarace: on cursym (fix like work1/2)
 
 bug: if there's an error on a thread which owns some mutexes it deadlocks
+
+bug: lock_guard unlock mutex automatically on destructor

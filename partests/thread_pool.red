@@ -231,7 +231,7 @@ begin
         resfut := first job;
         f := second job;
         args := third job;
-        res := apply(f, args);
+        res := errorset({'apply, mkquote f, mkquote args}, t);
         future_set(resfut, res);
         % print "done job" 
     >>
@@ -250,9 +250,9 @@ begin
             f := second job;
             args := third job;
             % res := apply(f, args);
-            res := errorset({'apply, mkquote f, mkquote args}, t, nil);
+            res := errorset({'apply, mkquote f, mkquote args}, t);
             future_set(resfut, res);
-            % print "done job"
+            % print "done job";
         >> else <<
             % print "yielding";
             thread_yield ();
