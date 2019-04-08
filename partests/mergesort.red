@@ -13,19 +13,38 @@ symbolic procedure insertionsort(xs);
         insertsorted(car xs, insertionsort cdr xs);
 
 % reverses the first half but don't care here.
-symbolic procedure split0(all, k, xs);
-    if k = 0 then {xs, all}
-    else if null all then {xs, {}}
-    else split0(cdr all, k - 1, car all . xs);
-
 symbolic procedure split(all, k);
-    split0(all, k, {});
+begin
+    scalar xs, i;
+    xs := {};
+    i := 0;
+
+    while i < k and all do <<
+        xs := (car all) . xs;
+        all := cdr all;
+        i := i + 1;
+    >>;
+
+    return {xs, all};
+end;
 
 symbolic procedure mergesorted(xs, ys);
-    if null xs then ys
-    else if null ys then xs
-    else if car xs <= car ys then car xs . mergesorted(cdr xs, ys)
-    else car ys . mergesorted(xs, cdr ys);
+begin
+    scalar res;
+    res := {};
+
+    while xs or ys do
+        if null ys or (xs and car xs <= car ys) then <<
+            res := (car xs) . res;
+            xs := cdr xs;
+        >> else <<
+            res := (car ys) . res;
+            ys := cdr ys;
+        >>;
+
+    res := reverse res;
+    return res;
+end;
 
 symbolic procedure mergesort(xs);
 begin scalar n, ss, xs, ys;
@@ -46,18 +65,23 @@ begin scalar n, ss, xs, ysfut, ys;
     n := length xs;
     return
         if n < 6 then insertionsort xs
-        else if n < 10 then mergesort xs
+        else if n < 10000 then mergesort xs
         else <<
+            % print "started split";
             ss := split(xs, (n + 1) / 2);
+            % print "done split";
             ysfut := tp_addjob(tp, 'parmergesort, {second ss});
             xs := parmergesort first ss;
             ys := future_tryget(ysfut, 10); % wait max 10ms
             while null ys do <<
                 tp_runjob(tp);
                 % print length first first tp;
-                ys := future_tryget(ysfut, 10) >>;
+                ys := future_tryget(ysfut, 100) >>;
             ys := caar ys;
-            mergesorted(xs, ys) 
+            % print "got something";
+            res := mergesorted(xs, ys);
+            % print "done mergesorted";
+            res
         >>
 end;
 
@@ -70,9 +94,15 @@ begin
     return res;
 end;
 
+symbolic procedure test(n);
+begin
+    scalar l, sorted;
+    l := nrand n;
+    sorted := parmergesort l;
+    return nil;
+end;
 
-l := nrand 100;
-parmergesort l;
+test(500000);
 
 tp_stop tp;
 

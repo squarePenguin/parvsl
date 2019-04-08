@@ -2,6 +2,7 @@
 #define THREAD_DATA_HPP
 
 #include "common.hpp"
+#include "rw_lock.hpp"
 
 #include <cassert>
 
@@ -92,49 +93,6 @@ public:
     }
 };
 
-class Rw_lock {
-private:
-    std::atomic_int l;
-public:
-    Rw_lock() : l(0) {}
-
-    void acquire_write() {
-        int zero = 0;
-        do {
-            if (l.load(std::memory_order_relaxed) == 0
-                && l.compare_exchange_weak(zero,
-                                           -1,
-                                           std::memory_order_acq_rel,
-                                           std::memory_order_relaxed))
-            {
-                break;
-            }
-        } while (true);
-    }
-
-    void release_write() {
-        l.store(0, std::memory_order_release);
-    }
-
-    void acquire_read() {
-        do {
-            int old_val = l.load(std::memory_order_relaxed);
-            if (old_val >= 0
-                && l.compare_exchange_weak(old_val,
-                                           old_val + 1,
-                                           std::memory_order_acq_rel,
-                                           std::memory_order_relaxed))
-            {
-                break;
-            }
-        } while (true);
-    }
-
-    void release_read() {
-        l.fetch_add(-1, std::memory_order_release);
-    }
-};
-
 // joins the thread on destruction
 class Thread_RAII {
 private:
@@ -157,10 +115,13 @@ public:
 thread_local Thread_data thread_data;
 
 std::unordered_map<int, Thread_data&> thread_table;
+std::mutex thread_table_mutex;
 
 // these are values on threads waiting to be joined.
 // TODO: add to Garbage collector
 std::unordered_map<int, LispObject> thread_returns;
+std::mutex thread_returns_mutex;
+
 thread_local int thread_index = -1;
 
 std::atomic_int num_threads(0);
@@ -227,15 +188,16 @@ public:
  * Reset the limits of each thread's segment
  * */
 void reset_segments() {
+    std::lock_guard<std::mutex> lock{thread_table_mutex};
     for (auto kv: thread_table) {
         kv.second.segment_limit = 0;
     }
 }
 
-std::mutex thread_mutex;
 
 // For now, just make sure all threads are joined at some point
 std::unordered_map<int, Thread_RAII> active_threads;
+std::mutex active_threads_mutex;
 int tid = 0;
 
 void init_thread_data(int id, LispObject *C_stackbase) {
@@ -246,6 +208,8 @@ void init_thread_data(int id, LispObject *C_stackbase) {
     thread_data.work2 = &work2;
     cursym = nil;
     thread_data.cursym = &cursym;
+
+    std::lock_guard<std::mutex> lock{thread_table_mutex};
     thread_table.emplace(id, par::thread_data);
     num_threads += 1;
 }
@@ -253,19 +217,19 @@ void init_thread_data(int id, LispObject *C_stackbase) {
 class Thread_manager {
 public:
     Thread_manager(int id) {
-        std::lock_guard<std::mutex> lock(thread_mutex);
         int stack_var = 0;
         init_thread_data(id, (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject)));
     }
 
     ~Thread_manager() {
+        std::lock_guard<std::mutex> lock{thread_table_mutex};
         num_threads -= 1;
         thread_table.erase(thread_data.id);
     }
 };
 
 int start_thread(std::function<LispObject(void)> f) {
-    std::lock_guard<std::mutex> lock(thread_mutex);
+    std::lock_guard<std::mutex> lock(active_threads_mutex);
 
     tid += 1;
     int id = tid;
@@ -275,6 +239,7 @@ int start_thread(std::function<LispObject(void)> f) {
 
         // std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
         LispObject result = f();
+        std::lock_guard<std::mutex> lock{thread_returns_mutex};
         thread_returns[thread_data.id] = result;
     };
 
@@ -283,13 +248,14 @@ int start_thread(std::function<LispObject(void)> f) {
 }
 
 LispObject join_thread(int tid) {
-    std::lock_guard<std::mutex> lock(thread_mutex);
     {
+        std::lock_guard<std::mutex> lock{active_threads_mutex};
         // this will block if the thread is still running
         Gc_guard guard;
         active_threads.erase(tid);
     }
 
+    std::lock_guard<std::mutex> lock{thread_returns_mutex};
     LispObject value = thread_returns[tid];
     thread_returns.erase(tid);
     return value;
@@ -306,9 +272,11 @@ std::unordered_map<int, std::mutex> mutexes;
 int mutex_id = 0;
 
 // TODO: use RW lock
-std::mutex mutex_mutex;
+// std::mutex mutex_mutex;
+Rw_lock mutex_rwlock;
+
 int mutex() {
-    std::lock_guard<std::mutex> lock(mutex_mutex);
+    std::lock_guard<Rw_lock::Writer_lock> lock{mutex_rwlock.writer_lock()};
     mutex_id += 1;
 
     mutexes[mutex_id]; // easiest way to construct mutex in place
@@ -316,8 +284,8 @@ int mutex() {
 }
 
 std::mutex& get_mutex(int id) {
-    std::lock_guard<std::mutex> lock(mutex_mutex);
-    return mutexes[id];
+    std::lock_guard<Rw_lock::Reader_lock> lock{mutex_rwlock.reader_lock()};
+    return mutexes.find(id)->second; // will crash if not found
 }
 
 void mutex_lock(int mid) {
@@ -336,9 +304,11 @@ void mutex_unlock(int mid) {
 std::unordered_map<int, std::condition_variable> condvars;
 int condvar_id = 0;
 
-std::mutex condvar_mutex;
+// std::mutex condvar_mutex;
+Rw_lock condvar_rwlock;
+
 int condvar() {
-    std::lock_guard<std::mutex> lock(condvar_mutex);
+    std::lock_guard<Rw_lock::Writer_lock> lock(condvar_rwlock.writer_lock());
     condvar_id += 1;
 
     condvars[condvar_id]; // easiest way to construct condvar in place
@@ -346,8 +316,8 @@ int condvar() {
 }
 
 std::condition_variable& get_condvar(int id) {
-    std::lock_guard<std::mutex> lock(condvar_mutex);
-    return condvars[id];
+    std::lock_guard<Rw_lock::Reader_lock> lock(condvar_rwlock.reader_lock());
+    return condvars.find(id)->second; // will crash if not found
 }
 
 /**
@@ -379,14 +349,17 @@ LispObject condvar_wait_for(int cvid, int mid, int ms) {
 
     auto& condvar = get_condvar(cvid);
 
+    LispObject result;
     par::Gc_guard guard;
     if (condvar.wait_for(lock, std::chrono::milliseconds(ms)) == std::cv_status::timeout) {
-        return nil;
+        result = nil;
+    } else {
+        result = lisptrue;
     }
 
     lock.release(); // prevent unlocking mutex here
 
-    return lisptrue;
+    return result;
 }
 
 void condvar_notify_one(int cvid) {
@@ -422,6 +395,7 @@ int allocate_symbol() {
 * local symbol is at least allocated.
 */
 LispObject& local_symbol(int loc) {
+    // std::cerr << "local symbol at " << loc << " total=" << num_symbols << std::endl; 
     if (num_symbols > (int)fluid_locals.size()) {
         fluid_locals.resize(num_symbols, undefined);
     }

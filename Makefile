@@ -50,12 +50,12 @@ vsl:	vsl.cpp arithlib.hpp
 		vsl.cpp $(LIBS) -o vsl \
 		2>&1 | tee vsl.log
 
-dparvsl:	parvsl.cpp arithlib.hpp common.hpp thread_data.hpp
+dparvsl:	parvsl.cpp arithlib.hpp common.hpp thread_data.hpp rw_lock.hpp
 	g++ $(CFLAGS) -pthread \
 		parvsl.cpp $(LIBS) -o dparvsl \
 		2>&1 | tee dparvsl.log
 
-parvsl:	parvsl.cpp arithlib.hpp common.hpp thread_data.hpp
+parvsl:	parvsl.cpp arithlib.hpp common.hpp thread_data.hpp rw_lock.hpp
 	g++ $(FASTCFLAGS) -pthread \
 		parvsl.cpp $(LIBS) -o parvsl \
 		2>&1 | tee vsl.log

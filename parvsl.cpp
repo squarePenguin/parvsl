@@ -9446,10 +9446,13 @@ void exit_print_globals() {
 }
 #endif // DEBUG_GLOBALS
 
+// constexpr rlimit_t stack_limit = 0x10000; // 1GB
+
 int main(int argc, char *argv[])
 {
-    rlimit stack_limit { RLIM_INFINITY, RLIM64_INFINITY };
-    setrlimit(RLIMIT_STACK, &stack_limit);
+
+    // rlimit stack_limit { stack_limit, stack_limit };
+    // setrlimit(RLIMIT_STACK, &stack_limit);
 #ifdef DEBUG_GLOBALS
     atexit(exit_print_globals);
 #endif // DEBUG_GLOBALS
