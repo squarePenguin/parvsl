@@ -1028,22 +1028,159 @@ begin
 end;
 #+END_SRC
 
+
+*** Managing threads
+
+With the queue implemented we can design the worker threads. The starting thread
+initialises the queue and starts all the workers as individual threads. It can start
+either the maximum number of hardware threads (which can be determined using the
+~hardware_threads()~ function), or a custom count. Each thread is passed a reference to
+the thread pool, so it can access the queue. Once the threads are started, they will only
+be joined on exit or when the user manually stops the pool.
+
+The mechanism for stopping the queue is a simple atomic flag. Atomics are not offered as
+a primitive in ParVSL, but can be easily implemented with a mutex lock. There is no direct 
+mechanism for interrupting a thread running a task, but workers can check the flag every time
+before taking a new task from the queue.
+
+Using the blocking call to wait for the next job mean the worker get stuck and prevent
+stopping the thread-pool. When the the user tries to stop an empty pool, then all
+the workers will be in a sleeping state, waiting for the queue condition variable to be
+notified, causing a deadlock.
+
+#+BEGIN_SRC
+while atomic_get(run_flag) = 'run do
+  // The workers can get stuck here waiting on an empty queue
+  job := safe_queue_pop(sq)
+  run_job job;
+#+END_SRC
+
+Another idea is to not use a blocking call to pop from the queue, but rather spin:
+#+BEGIN_SRC
+while atomic_get(run_flag) = 'run do
+  job := safe_queue_trypop(sq)
+  if job then 
+    // trypop succeeded
+    run_job job
+  else
+    // important to yield here
+    thread_yield() 
+#+END_SRC
+
+This approach solves the issue, but it is important to note the ~thread_yield()~ call.
+I have implemented ~thread_yield()~ to directly call the C++ equivalent. This allows the
+system to schedule other threads, making sure a waiting worker does not spin the CPU
+core to 100% until forcefully preempted by the OS. It would also prevent other threads
+started by the user from doing work.
+
 *** Waiting for a job's result
 
+In ParVSL, the ~thread~ function takes another function to execute on the new thread,
+along with the arguments for that function. The return value of the function call is
+then recovered when joining the thread with ~join_thread~, enabling thread communication.
 
-*** Dealing with tasks that wait for other tasks
+When switching from threads to jobs in the thread pool, we want to maintain this functionality,
+otherwise the only way to communicate between parallel jobs would be through global state,
+which would severely limit its usefuleness. Passing argument for a job is trivial, as they are simply
+stored in the safe queue, along with the function to be called. However, returning the result of
+a job required extra book-keeping.
 
+Using the primitives in ParVSL, we can implement a ~future~ type. A future is a helpful mechanism
+that allows us to both wait for a task and obtain its return value. A future starts out as empty.
+It can have any number of readers but only one writer. The writer is usually the creator of the future
+and will set its value exactly once, at some point after creation. The readers can then try to get the
+value inside the future. If the future is fulfilled, the get call returns instantly. Otherwise, it
+becomes a blocking call, waiting until the future is set, then returning the respective value.
 
-** TODO Parallel implementation of common algorithms
-*** FFT
-*** 
-** TODO Parallel building of Reduce
+Implementing a future is similar to the safe queue, using a mutex and a condition variable.
+Getting and setting the future requires acquiring the lock. The getter has to wait on the condition
+variable if the future is not set. The setter notifies all the getters after setting the value.
+The full implementation can be found in the [[Appendix]].
+
+With the future implemented, we can finish the thread pool, having a mechanism for pushing a job:
+
+#+BEGIN_SRC
+procedure thread_pool_add_job(tp, fn, args):
+  fut := future()
+  safe_queue_push(tp.safe_queue, {fn, args, fut})
+  return fut
+#+END_SRC
+
+The caller can use the future to wait for the result of the job and the workers need to set the future
+when finishing a job. Finally, I note that the thread pool must deal with exception handling. The worker threads
+need to catch any error while running the job and report it through the future. Initially, I failed to include
+it meaning that worker threads unwinded unsafely. This lead to the the thread-pool being unable to signal the 
+thread and fail to terminate. Additionally, threads waiting for the result would also be stuck. 
+
+There are many aspect to be considered in the design of a thread pool. I have focused on the main ones, and
+this thread pool was sufficient for the rest of evaluation. I have successfully used to to parallelise the
+other experiments in this report. However, depending on the task it could be improved upon with more features.
+Currently, the number of threads is static, but it could dinamically start and stop threads to accommodate
+the workload. A more efficient safe queue could be implemented using granular locking. Furthermore, we could
+reduce contention on the queue by having each worker keep its own queue, and the main queue would act as a
+dispatcher.
+
+** Implementing Parallel Mergesort 
+
+To test the correctness and performance of ParVSL I implemented a few classic algorithms that are relatively
+easy to parallelise. Sorting is a particularly good example. Mergesort splits a list in two, sort each half
+recursively, then merges the results to obtain the sorted list. Sorting the individual halves can be done
+in parallel.
+
+#+BEGIN_SRC
+tp := thread_pool()
+ 
+procedure parallel_merge_sort(list):
+  if length(list) < 2:
+    return list
+  
+  xs, ys := split(list)
+  sorted_xs_future := thread_pool_add_job(tp, 'parallel_merge_sort, {xs})
+  sorted_ys := parallel_merge_sort(ys)
+  sortex_xs := future_get(sorted_xs_future)
+  
+  return merge(sorted_xs, sorted_ys) 
+#+END_SRC
+
+We use the thread pool implemented above to achieve parallelism. Without the thread pool, we would
+have to manually manage threads. Using threads here would have resulting in a new thread spawned for
+each element in the array. The function would already oversubscribe threads for lists as small as
+100 elements. The thread pool only uses a constant number of threads.
+
+*** Dealing with tasks waiting for other takss
+
+However, the naive implementation above is incorrect and it will deadlock as soon as the number of
+jobs exceeds the number of workers. This highlights a shortcoming of the thread pool. In its current
+state is does not handle tasks enqueing and then waiting for other tasks. In this case, all the workers
+will end up waiting for the future (~sorted_xs_future~) without doing any work.
+
+To fix this, I have added extra functionality to the thread pool. An extra procedure ~thread_pool_run_job~
+allows can be called by any thread to run on job on the queue. This procedure is implemented similarly
+to the worker function, except it only takes at most one job (or none if the queue is empty) from the
+queue instead of looping. 
+This function should be called by any job which is waiting for another job in the thread pool.
+
+I also needed to implement another function for futures ~futue_try_get~, which only returns the
+value in the future if it was fulfilled, without blocking, or indicates failure, without blocking.
+
+Subsequently, I have changed line ~10~ above to the following code:
+#+BEGIN_SRC
+while null (future_try_get(sorted_xs_future):
+  thread_pool_run_job(tp)
+#+END_SRC
+Now, workers can start (and finish) other jobs while waiting and will not deadlock.
+
+*** TODO Results
+
+** Parallel building of Reduce
 
 The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
 can simply run to build it. The process can be separated into two steps:
 building the core of REDUCE, and then building all the additional packages.
 The core satisfies most of the dependencies any of the additional packages
 need, and its build takes half the time of all the other. 
+
+
 
 
 ** TODO baby groebner base package
@@ -1152,5 +1289,6 @@ void collect() {
 ** Gc_guard and Gc_lock
 
 ** Lock free symbol lookup
+** Thread pool
 
 [[https://math.berkeley.edu/~bernd/what-is.pdf]]
