@@ -114,11 +114,16 @@
 #include "common.hpp"
 #include "thread_data.hpp"
 
+constexpr int STDIN = 0, STDOUT = 1, STDERR = 2;
+void flush(int);
+
 void my_exit(int n)
 {
     printf("\n+++++ Exit called %d\n", n);
-    fflush(stdout);
-    fflush(stderr);
+    // fflush(stdout);
+    // fflush(stderr);
+    flush(STDOUT);
+    flush(STDERR);
     *((int *)(-100)) = 0;
     abort();
 }
@@ -1191,7 +1196,8 @@ void inner_reclaim()
            " heap2_pads = %" PRIuPTR " total used = %" PRIuPTR "\n",
            npins, heap1_pads, heap2_pads, space_used);
     heap1_pads = 0;
-    fflush(stdout);
+    // fflush(stdout);
+    flush(STDOUT);
 }
 
 // This force sets the stackhead of the gc thread.
@@ -1614,9 +1620,22 @@ FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
 int32_t interactive = 0;
-thread_local int lispin = 0, lispout = 1;
+thread_local int lispin = STDIN, lispout = STDOUT;
 std::bitset<MAX_LISPFILES> file_direction;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
+
+thread_local std::string file_buffer[MAX_LISPFILES];
+std::mutex flush_mutex[MAX_LISPFILES];
+
+void flush(int file=-1) {
+    std::lock_guard<std::mutex> lock(flush_mutex[lispout]);
+    if (file == -1) file = lispout;
+    if (file_buffer[file].length() > 0) {
+        fwrite(file_buffer[file].c_str(), sizeof(char), file_buffer[file].length(), lispfiles[file]);
+        file_buffer[file].clear();
+        fflush(lispfiles[file]);
+    }
+}
 
 void wrch1(int c)
 {   //????if (c == '\r') return;
@@ -1638,10 +1657,13 @@ void wrch1(int c)
     else if (lispout == -2) boffo[boffop++] = c;
     else
     {
-        putc(c, lispfiles[lispout]);
+        // putc(c, lispfiles[lispout]);
+        file_buffer[lispout] += c;
 #ifdef DEBUG
         if (logfile != NULL)
-        {   putc(c, logfile);
+        {
+            // TODO: unsafe writing here
+            putc(c, logfile);
             if (c == '\n')
             {   fprintf(logfile, "%d]", lispout);
             }
@@ -1649,7 +1671,8 @@ void wrch1(int c)
 #endif // DEBUG
         if (c == '\n')
         {   linepos = 0;
-            fflush(lispfiles[lispout]);
+            flush();
+            // fflush(lispfiles[lispout]);
         }
         else if (c == '\t') linepos = (linepos + 8) & ~7;
         else linepos++;
@@ -1868,13 +1891,8 @@ static void fp_sprint(char *buff, double x, int prec, int xmark)
     else if (*buff == '0' && *(buff+2) != 0) char_del(buff);
 }
 
-std::recursive_mutex print_mutex;
-
 void internalprint(LispObject x)
 {
-    // TODO: used for debugging. Remove for performance
-    std::lock_guard<std::recursive_mutex> lock(print_mutex);
-
     int sep = '(', esc;
     uintptr_t i, len;
     char *s;
@@ -3593,10 +3611,10 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 LispObject Lglobal(LispObject lits, LispObject x) {
 // #ifdef DEBUG_GLOBALS
     // this is a hack to prevent variables being made global.
-    std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
-    return chflag(x, fluid_symbol);
+    // std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
+    // return chflag(x, fluid_symbol);
 // #else
-    // return chflag(x, global_symbol);
+    return chflag(x, global_symbol);
 // #endif
 }
 
@@ -7083,7 +7101,8 @@ void readevalprint(int loadp)
         {   printf("item read was: ");
             print(r);
         }
-        fflush(stdout);
+        // fflush(stdout);
+        flush(STDOUT); // stdout
         if (unwindflag != unwindNONE) /* Do nothing */ ;
         else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
@@ -7097,7 +7116,8 @@ void readevalprint(int loadp)
                 if (logfile != NULL) fprintf(logfile, "Value: ");
 #endif // DEBUG
                 print(r);
-                fflush(stdout);
+                flush(STDOUT);
+                // fflush(stdout);
             }
         }
         else
@@ -8601,7 +8621,8 @@ int warm_start(gzFile f, int *errcode)
     if (gzread(f, banner, 64) != 64) return 1;
     if (banner[0] != 0)
     {   printf("%.64s\n", banner);
-        fflush(stdout);
+        flush(STDOUT);
+        // fflush(stdout);
     }
 // The date and time of day that the image file was created, in textual
 // form as in "Sat Apr 15 12:03:52 1972" (whatever the ctime() function
@@ -9519,6 +9540,7 @@ int main(int argc, char *argv[])
     }
     printf("imagename = <%s>\n", imagename);
     printf("VSL version %d.%.3d\n", IVERSION, FVERSION); fflush(stdout);
+
     linepos = 0;
     for (size_t i=0; i<MAX_LISPFILES; i++) lispfiles[i] = 0;
     lispfiles[0] = stdin;   lispfiles[1] = stdout;

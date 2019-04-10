@@ -27,7 +27,7 @@ begin
   fluid '(save!-programl!* save!-promptexp!* save!-ps!:exp!-lim save!-ps!:max!-order save!-semic!* save!-sgn!* save!-simpcount!* save!-statcounter save!-subfg!* save!-switchlist!*);
   fluid '(save!-switchstring!* save!-switchtree!* save!-taylor!:date!* save!-taylor!:version save!-taylorprintterms save!-tex!-pointsize save!-tm_switches!* save!-tstack!* save!-ttype!* save!-varstack!*);
   fluid '(save!-xdegreelist!* save!-xpolylist!* save!-xtruncate!* save!-xvarlist!* save!-xvars!* save!-zerodivs!*);
-  
+
   save!-!*defn := !*defn;
   save!-!*display!-for!-copy := !*display!-for!-copy;
   save!-!*echo := !*echo;
