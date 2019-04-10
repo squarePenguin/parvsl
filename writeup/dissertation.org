@@ -471,7 +471,10 @@ when it is paused to wait for GC. All these stack ranges are scanned before I st
 void garbage_collection() {
   for (auto thread: thread_table) {
     // scan the stack from its head to base (the stack grows downwards)
-    for (uintptr_t s = thread.C_stackhead; s < thread.C_stackbase; s += sizeof(LispObject)) {
+    for (uintptr_t s = thread.C_stackhead;
+         s < thread.C_stackbase;
+         s += sizeof(LispObject)) 
+    {
       if (in_heap(s)) { // check if s points within our virtual heap
         // we found an ambiguous root
         set_pinned(s);
@@ -696,17 +699,19 @@ LispObject& symval(LispObject s) {
     return global_value(s);
   }
 
-  // If it is not a global value, then it is a location, represented as an integer.
+  // If it is not a global value, then it is a location,
+  // represented as an integer.
   size_t loc = get_int(global_value(s));
   LispObject& res = local_symbol(loc);
-  // Here I assume undefined is a sort of "reserved value", meaning it can only exist
-  // when the object is not shallow_bound. This helps me distinguish between fluids that
-  // are actually global and those that have been bound. 
-  // When the local value is undefined, I refer to the global value.
+  // Here I assume undefined is a sort of "reserved value",
+  // meaning it can only exist when the object is not shallow_bound. 
+  // This helps me distinguish between fluids that are actually global 
+  // and those that have been bound. When the local value is undefined, 
+  // I refer to the global value.
   if (is_fluid(s) && res == undefined) {
       return fluid_globals[loc];
   }
-  // THis is either local or locally bound fluid
+  // This is either local or locally bound fluid
   return res;
 }
 #+END_SRC
@@ -793,7 +798,9 @@ LispObject lookup(std::string name) {
 
   LispObject new_bucket = cons(s, bucket);
 
-  while (!symbols[loc].compare_exchange_strong(bucket, new_bucket, std::memory_order_release)) {
+  while (!symbols[loc].compare_exchange_strong(
+      bucket, new_bucket, std::memory_order_release)) 
+  {
     // search for stored value
     LispObject old_bucket = bucket;   
     bucket = symbols[loc].load(std::memory_order_acquire);
@@ -886,14 +893,13 @@ solving a system of linear equations and computing the greatest common divisor o
 univariate polynomials.
 
 The Gröbner basis of a linear system will form a matrix in reduced echelon form. For example,
-a Gröbner basis of $\mathbb{F} = \{ \}
+a Gröbner basis of $\mathbb{F} = \{ \}$
 
 Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
 A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
 1. $0 \in I$.
 2. If $a, b \in I$ then $a + b \in I$.
 3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
-
 
 
 * Evaluation
@@ -1177,9 +1183,14 @@ Now, workers can start (and finish) other jobs while waiting and will not deadlo
 The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
 can simply run to build it. The process can be separated into two steps:
 building the core of REDUCE, and then building all the additional packages.
-The core satisfies most of the dependencies any of the additional packages
-need, and its build takes half the time of all the other. 
+The core, which I will refer to as RCORE, satisfies most of the dependencies 
+any of the additional packages need, and only takes a fraction of the time 
+to build.
 
+|        | Time (s) |
+|--------+----------|
+| RCORE  |       18 |
+| REDUCE |     1:59 |
 
 
 
@@ -1199,7 +1210,6 @@ need, and its build takes half the time of all the other.
 
 *** TODO look at other thread-supporting lisps systems
 Chez scheme?
-
 
 
 * Conclusions
@@ -1286,9 +1296,9 @@ void collect() {
 }
 #+END_SRC 
 
-** Gc_guard and Gc_lock
-
+** ~Gc_guard~ and ~Gc_lock~
 ** Lock free symbol lookup
 ** Thread pool
 
 [[https://math.berkeley.edu/~bernd/what-is.pdf]]
+

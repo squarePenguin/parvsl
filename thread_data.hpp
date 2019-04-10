@@ -395,7 +395,7 @@ int allocate_symbol() {
 * local symbol is at least allocated.
 */
 LispObject& local_symbol(int loc) {
-    // std::cerr << "local symbol at " << loc << " total=" << num_symbols << std::endl; 
+    // std::cerr << "local symbol at " << loc << " total=" << num_symbols << std::endl;
     if (num_symbols > (int)fluid_locals.size()) {
         fluid_locals.resize(num_symbols, undefined);
     }

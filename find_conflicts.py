@@ -26,6 +26,9 @@ f.close()
 names = list(conflicts)
 names.sort()
 
+def indent(s):
+    return "\n".join(["  " + l for l in s.split("\n")])
+
 # sanitize names for rlisp
 def fix_synames(names: List[str]):
     return [name.replace("*", "!*").replace("-", "!-").replace(":", "!:") for name in names]
@@ -48,42 +51,43 @@ def store_oldval(names):
     return fluid_oldvals + "\n\n" + "\n".join([f"save!-{name} := {name};" for name in names])
 
 def restore_oldval(names):
-    return "\n\t".join([f"{name} := save!-{name};" for name in names])
+    return "\n".join([f"{name} := save!-{name};" for name in names])
 
 def scalar_sym(names):
     groups = split_groups(names)
-    return "scalar\n" + ",\n".join(["\t\t" + ",".join(g) for g in groups]) + ";"
+    return "scalar\n" + indent("\n,".join([",".join(g) for g in groups])) + ";"
 
 def all_packs(packs):
     packs = ["'" + p for p in packs]
     groups = split_groups(packs)
-    return "packages := {\n" + ",\n".join(['  ' + ",".join(g) for g in groups]) + "\n};"
+    return "packages := {\n" + indent("\n,".join([",".join(g) for g in groups])) + "\n};"
 
 names = fix_synames(names)
 
-output0 = f"""
+output = f"""
 lisp;
 
-{print_fluid(names)}
+procedure store_global_conflicts();
+begin
+{indent(print_fluid(names))}
+{indent(store_oldval(names))}
+end;
 
-{store_oldval(names)}
+store_global_conflicts();
 
 symbolic procedure buildpackage(p);
 begin
-    {scalar_sym(names)}
+{indent(scalar_sym(names))}
 
-    {restore_oldval(names)}
+{indent(restore_oldval(names))}
 
-    package!-remake p;
+  package!-remake p;
 end;
 
 symbolic procedure build_packages(packages);
-    for each p in packages do package!-remake p;
+  for each p in packages do package!-remake p;
 
-preserve('begin, "Rcore", nil);
-"""
-
-output = all_packs(packs) + """
+{all_packs(packs)}
 
 in "partests/thread_pool.red";
 fluid '(tp);
@@ -91,15 +95,15 @@ tp := thread_pool(hardwarethreads() - 1);
 
 symbolic procedure build_packages_par(packages);
 begin
-    scalar fut, futs;
-    futs := {};
+  scalar fut, futs;
+  futs := {{}};
 
-    for each p in packages do <<
-        fut := tp_addjob(tp, 'buildpackage, {p});
-        futs := fut . futs;
-    >>;
+  for each p in packages do <<
+    fut := tp_addjob(tp, 'buildpackage, {{p}});
+    futs := fut . futs;
+  >>;
 
-    for each fut in futs do future_get(fut);
+  for each fut in futs do future_get(fut);
 end;
 
 build_packages_par packages;
@@ -108,10 +112,6 @@ tp_stop tp;
 
 end;
 """
-
-outfile = open(outname + "0", "w")
-outfile.write(output0)
-outfile.close()
 
 outfile = open(outname, "w")
 outfile.write(output)

@@ -17,7 +17,6 @@ plot
 laplace
 pm
 scope
-qsum
 sparse
 spde
 specfn

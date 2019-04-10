@@ -28,6 +28,7 @@ physop
 qhull
 qqe
 qqe_ofsf
+qsum
 randpoly
 reacteqn
 redlog

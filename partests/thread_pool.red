@@ -233,7 +233,7 @@ begin
         args := third job;
         res := errorset({'apply, mkquote f, mkquote args}, t);
         future_set(resfut, res);
-        % print "done job" 
+        % print "done job"
     >>
 end;
 
@@ -294,17 +294,25 @@ end;
 symbolic procedure tp_stop(tp);
 begin
     scalar threads;
-    threads := third tp;
+    print "tp_stop";
     atomic_set(second tp, 'stop);
-    for each td in threads do jointhread td;
+    print "atomic set";
+    threads := third tp;
+    for each td in threads do <<
+        print "joining thread"; print td;
+        jointhread td;
+    >>;
 end;
 
 symbolic procedure tp_kill(tp);
 begin
     scalar threads;
-    threads := third tp;
     atomic_set(second tp, 'kill);
-    for each td in threads do jointhread td;
+    threads := third tp;
+    for each td in threads do <<
+        print "joining thread"; print td;
+        jointhread td;
+    >>;
 end;
 
 % tp := thread_pool();
