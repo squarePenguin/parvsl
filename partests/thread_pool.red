@@ -301,7 +301,10 @@ begin
     for each td in threads do <<
         print "joining thread"; print td;
         jointhread td;
+        print "joined thread";
     >>;
+    print "tp stopped";
+    return nil;
 end;
 
 symbolic procedure tp_kill(tp);
@@ -312,6 +315,7 @@ begin
     for each td in threads do <<
         print "joining thread"; print td;
         jointhread td;
+        print "joined thread";
     >>;
 end;
 

@@ -13,6 +13,7 @@ groebnr2
 gurobi
 ibalp
 ideals
+libreduce % causes infinite loop in main thread! (infinite loop)
 liepde
 limits
 mathmlom
@@ -28,9 +29,10 @@ physop
 qhull
 qqe
 qqe_ofsf
-qsum
+qsum  % causes infinite loop on main thread
 randpoly
 reacteqn
+redfront % causes hanging on the main thread (infinite loop)
 redlog
 rlfi
 rlsupport

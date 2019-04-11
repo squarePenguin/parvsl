@@ -26,7 +26,6 @@ trigint
 ratint
 mathml
 cgb
-redfront
 reduce4
 sum
 symmetry
@@ -43,7 +42,6 @@ ztrans
 rataprx
 rtrace
 tmprint
-libreduce
 utf8
 lpdo
 guardian

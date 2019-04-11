@@ -32,12 +32,17 @@ std::set<std::string> debug_globals;
 
 void add_debug_global(LispObject s) {
     if (not debug_safe) return;
-    LispObject name = qpname(s);
-    // assert(isSTRING(name));
-    size_t len = veclength(qheader(name));
-    assert(len < 100);
-    std::string ns{qstring(name), len};
-    debug_globals.insert(ns);
+    if (isSYMBOL(s)) {
+        LispObject name = qpname(s);
+        assert(isSTRING(name));
+        size_t len = veclength(qheader(name));
+        std::string ns{qstring(name), len};
+        debug_globals.insert(ns);
+    } else {
+        // TODO: What to do here?
+        // std::cout << "Property access of: ";
+        // print(s);
+    }
 }
 
 #endif // DEBUG_GLOBALS
@@ -214,6 +219,10 @@ void init_thread_data(int id, LispObject *C_stackbase) {
     num_threads += 1;
 }
 
+void thread_cleanup() {
+    flushall();
+}
+
 class Thread_manager {
 public:
     Thread_manager(int id) {
@@ -241,6 +250,7 @@ int start_thread(std::function<LispObject(void)> f) {
         LispObject result = f();
         std::lock_guard<std::mutex> lock{thread_returns_mutex};
         thread_returns[thread_data.id] = result;
+        thread_cleanup();
     };
 
     active_threads.emplace(tid, std::thread(twork));
@@ -400,13 +410,13 @@ LispObject& local_symbol(int loc) {
         fluid_locals.resize(num_symbols, undefined);
     }
 
-#ifdef DEBUG
+// #ifdef DEBUG
     if (loc >= (int)fluid_locals.size()) {
         // THis is basically an assert but I am printing a bit more information.
         std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
         throw std::logic_error("bad thread_local index");
     }
-#endif // DEBUG
+// #endif // DEBUG
 
     return fluid_locals[loc];
 }
@@ -426,7 +436,7 @@ bool is_fluid_bound(LispObject s) {
 * should be used to get the true symbol, instead of qvalue(s).
 */
 LispObject& symval(LispObject s) {
-    // assert(isSYMBOL(s));
+    assert(isSYMBOL(s));
     if (is_global(s)) {
         return qvalue(s);
     }

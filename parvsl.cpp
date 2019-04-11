@@ -114,9 +114,6 @@
 #include "common.hpp"
 #include "thread_data.hpp"
 
-constexpr int STDIN = 0, STDOUT = 1, STDERR = 2;
-void flush(int);
-
 void my_exit(int n)
 {
     printf("\n+++++ Exit called %d\n", n);
@@ -1631,9 +1628,23 @@ void flush(int file=-1) {
     std::lock_guard<std::mutex> lock(flush_mutex[lispout]);
     if (file == -1) file = lispout;
     if (file_buffer[file].length() > 0) {
+        // assert(file_direction[file]);
         fwrite(file_buffer[file].c_str(), sizeof(char), file_buffer[file].length(), lispfiles[file]);
         file_buffer[file].clear();
         fflush(lispfiles[file]);
+    }
+}
+
+void flushall() {
+    for (int i = 0; i < MAX_LISPFILES; i += 1) {
+        if (lispfiles[i] != nullptr && file_direction[i]) {
+            std::lock_guard<std::mutex> lock(flush_mutex[i]);
+            if (file_buffer[i].length() > 0) {
+                fwrite(file_buffer[i].c_str(), sizeof(char), file_buffer[i].length(), lispfiles[i]);
+                file_buffer[i].clear();
+                fflush(lispfiles[i]);
+            }
+        }
     }
 }
 
@@ -3609,13 +3620,13 @@ LispObject chflag(LispObject x, void (*f)(LispObject)) {
 }
 
 LispObject Lglobal(LispObject lits, LispObject x) {
-// #ifdef DEBUG_GLOBALS
+#ifdef DEBUG_GLOBALS
     // this is a hack to prevent variables being made global.
-    // std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
-    // return chflag(x, fluid_symbol);
-// #else
-    return chflag(x, global_symbol);
-// #endif
+    std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
+    return chflag(x, fluid_symbol);
+#else
+    // return chflag(x, global_symbol);
+#endif
 }
 
 LispObject Lfluid(LispObject lits, LispObject x) {
@@ -4709,7 +4720,12 @@ LispObject Lplist(LispObject lits, LispObject x)
 }
 
 LispObject Lput(LispObject lits, LispObject x, LispObject y, LispObject z)
-{   LispObject w;
+{
+#ifdef DEBUG_GLOBALS
+    par::add_debug_global(x);
+#endif
+
+    LispObject w;
     if (!isSYMBOL(x)) return error1("bad arg put", x);
     w = qplist(x);
     while (isCONS(w))
@@ -4727,6 +4743,10 @@ LispObject Lput(LispObject lits, LispObject x, LispObject y, LispObject z)
 
 LispObject Lget(LispObject lits, LispObject x, LispObject y)
 {
+#ifdef DEBUG_GLOBALS
+    par::add_debug_global(x);
+#endif
+
     if (!isSYMBOL(x)) return nil;
     x = qplist(x);
     while (isCONS(x))
@@ -4738,7 +4758,12 @@ LispObject Lget(LispObject lits, LispObject x, LispObject y)
 }
 
 LispObject Lremprop(LispObject lits, LispObject x, LispObject y)
-{   LispObject p, r, *prev;
+{
+#ifdef DEBUG_GLOBALS
+    par::add_debug_global(x);
+#endif
+
+    LispObject p, r, *prev;
     if (!isSYMBOL(x)) return nil;
     p = *(prev = &qplist(x));
     while (p != nil)
@@ -9459,7 +9484,7 @@ void set_up_lispdir(int argc, const char *argv[])
 
 #ifdef DEBUG_GLOBALS
 void exit_print_globals() {
-    std::ofstream fout("global_syms.log", std::ios_base::app);
+    std::ofstream fout("global_flags.log", std::ios_base::app);
     for (auto s: par::debug_globals) {
         fout << s << " ";
     }

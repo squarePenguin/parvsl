@@ -649,6 +649,10 @@ LispObject error0(const char *s);
 LispObject quiet_error();
 void check_space(int nbytes, int line);
 
+constexpr int STDIN = 0, STDOUT = 1, STDERR = 2;
+void flush(int);
+void flushall();
+
 inline bool is_global(LispObject x) {
     return ((qflags(x) & flagGLOBAL) != 0);
 }

@@ -265,4 +265,6 @@ bug: if there's an error on a thread which owns some mutexes it deadlocks
 
 bug: lock_guard unlock mutex automatically on destructor
 
-bug in reduce: qsum produces eof infinite loop
+bug in reduce: qsum produces eof infinite loop, same with libreduce and red
+
+BUG: symbols have propery lists, can cause conflicts

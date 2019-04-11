@@ -110,7 +110,7 @@ build_packages_par packages;
 
 tp_stop tp;
 
-end;
+bye;
 """
 
 outfile = open(outname, "w")

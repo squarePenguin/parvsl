@@ -874,6 +874,8 @@ the world is consistent and relatively easy to restore. I have modified parts of
 all the thread-local data back into global storage and then restore it when reloading. This way the same
 file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
 
+Implementing ParVSL, I introduced additional state and book-keeping to manage the extra complexity.
+
 
 ** TODO talk about undefined behaviour in C++?
 
@@ -900,7 +902,6 @@ A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
 1. $0 \in I$.
 2. If $a, b \in I$ then $a + b \in I$.
 3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
-
 
 * Evaluation
 ** TODO Single-threaded building of Reduce
@@ -1210,7 +1211,6 @@ to build.
 
 *** TODO look at other thread-supporting lisps systems
 Chez scheme?
-
 
 * Conclusions
 
