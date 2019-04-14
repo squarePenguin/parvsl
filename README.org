@@ -8,6 +8,7 @@ While this project can be compiled stand-alone
 svn checkout https://svn.code.sf.net/p/reduce-algebra/code/trunk reduce-algebra-code
 cd reduce-algebra
 git clone https://github.com/squarePenguin/parvsl.git
+cd parvsl
 make vsl
 make reduce
 ./vsl -i reduce.img
