@@ -3625,7 +3625,7 @@ LispObject Lglobal(LispObject lits, LispObject x) {
     std::cerr << "WARNING! made symbol fluid instead of global for debugging!" << std::endl;
     return chflag(x, fluid_symbol);
 #else
-    // return chflag(x, global_symbol);
+    return chflag(x, global_symbol);
 #endif
 }
 
