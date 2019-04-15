@@ -7,6 +7,7 @@
 #+LATEX_CLASS: article
 #+LATEX_CLASS_OPTIONS: [a4paper, 12pt]
 #+LATEX_HEADER: \usepackage[margin=3cm]{geometry}
+# #+LATEX_HEADER: \pagenumbering{roman}
 # #+LATEX_HEADER_EXTRA:
 #+DATE: \today
 
@@ -72,7 +73,7 @@ to a real-world application with a large, actively-developed body of code.
 
 ** REDUCE
 
-[[https://reduce-algebra.sourceforge.io/][REDUCE]] is a portable general-purpose algebra system (CAS). It enables symbolic
+[[https://reduce-algebra.sourceforge.io/][REDUCE]] cite:reduce is a portable general-purpose algebra system (CAS). It enables symbolic
 manipulation of mathematical expressions and provides a wide range of algorithms
 to solve problems spanning many fields, with arbitrary precision numerical approximation. 
 It has a friendly user interface and can display maths and generate graphics.
@@ -106,15 +107,16 @@ a limitation in speed gains from new hardware.
 
 To help explain the concepts I introduce, I will use code fragments showing the algorithms.
 These fragments will be a simplification of the original code, in order to remove the need
-for context within the rest of the codebase. I will use two programming languages in this review:
-C++ and OCaml. C++ code will be used where the original code is on the Lisp interpreter.
+for context within the rest of the codebase. To that end, the names and function interfaces 
+are different from the real implementation. More complete versions of the code fragments 
+I showcase can be found in the [[Appendix]].
 
-For concepts related to the target language, I will be using OCaml instead of Lisp for readability.
-Just like the original Lisp was only intended as an intermediate representation, Lisp is not used
-in REDUCE directly. An additional language called ~RLISP~ is used instead. RLISP is simply aiming
-to provide a more readable syntax, however this syntax is ALGOL inspired and unfamiliar to most
-programmers nowadays. I have decided to use an ML style syntax in this writeup, which should aid
-with brevity and readability.
+For examples relating to the implementation of the interpreter, I will be using C++.
+For work related to my evaluation, I will be showcasing the ParVSL language, which is a type
+of Lisp. Reduce implements an additional syntax on top of Lisp, called RLisp. 
+I have tried my best to keep RLisp examples short and as readable
+as possible. Where I think the syntax of the language get in the way of readability, I
+switch to pseudocode to aid my explanations.
 
 * Preparation
 ** ParVSL
@@ -864,7 +866,7 @@ thread B, but thread B is waiting for garbage collection). To solve such issues,
 changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
 to make all waiting calls put a thread into a /safe/ state before sleeping, so that the garbage collector
 can proceed with the thread. 
-** TODO Saving state to disk and reloading
+** Saving state to disk and reloading
 
 One important feature of the language is the ability to preserve the state of the world at any
 time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
@@ -875,7 +877,24 @@ all the thread-local data back into global storage and then restore it when relo
 file format is preserved, and I have not broken compatibility between single and multi-threaded images. 
 
 Implementing ParVSL, I introduced additional state and book-keeping to manage the extra complexity.
+When preserving in VSL, all this state is stored to a file by compressing a bit for bit copy of the 
+content. The main use for this is saving the results of computations and function definitions.
+The REDUCE build is stored in the same way. After building all the necessary files, 
+it preserves the current state inside an image. Loading the image on startup of VSL will effectively
+start REDUCE.
 
+I wanted to keep the VSL image format in ParVSL so that I would not break compatibility between the two.
+I note that preserving a running multi-threaded program would be impossible without making major changes 
+to the image format and major redesign of the code. Calling ~preserve~ also stops the pr
+
+ If a thread attempts to preserve while others
+are running, the contents of the final image would be non-deterministic and generally undesirable,
+even if I were to resolve all data races. At the same time, I found little benefit to implementing such
+a feature, as the ability to preserve useful to retain results of computations, not intermediate states.  
+Saving state to dis
+
+My implementation on preserve preservation only allows the operation on the main thread, and will wait
+for all spawned threads to finish running and join. 
 
 ** TODO talk about undefined behaviour in C++?
 
@@ -886,24 +905,11 @@ I must be careful to not collect the data during garbage
 
 
 *** The symbol `x`
-** Computing Groebner bases in parallel
-
-REDUCE comes with a large set of packages which cover different aspect of computer algebra.
-Gröbner basis is a package particularly useful for algebraic geometry. Any set of multi-variate
-polynomials has a Gröbner basis. The process is a generalisation of both Gaussian techniques for
-solving a system of linear equations and computing the greatest common divisor of multiple
-univariate polynomials.
-
-The Gröbner basis of a linear system will form a matrix in reduced echelon form. For example,
-a Gröbner basis of $\mathbb{F} = \{ \}$
-
-Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
-A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
-1. $0 \in I$.
-2. If $a, b \in I$ then $a + b \in I$.
-3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
-
 * Evaluation
+
+To evaluate the project, I worked with existing REDUCE code for regression testing
+but also wrote my own tests in both plain Lisp and REDUCE RLisp code.
+
 ** TODO Single-threaded building of Reduce
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
@@ -936,7 +942,10 @@ Most of the bugs I could have potentially introduced were data corruption bugs.
 I used asserts in various places to try to get the program to crash as soon as possible
 and find the issue early. Sometimes I had to introduce a system of binary searching the
 problem by trapping the program early and checking for the state of the computation.
-
+I tried to find small tests which would still reproduce the issue, then use the
+~gdb~ debugger to step through the code and try to find the errors. I have also used
+Valgrind, which offers a large set of tools for detecting undefined behaviour and memory
+corruption.
 
 In addition to helping me find issues in ParVSL, building REDUCE also provided for a
 good performance benchmark. The building process simply runs ParVSL code. 
@@ -1179,6 +1188,34 @@ Now, workers can start (and finish) other jobs while waiting and will not deadlo
 
 *** TODO Results
 
+To test the correctness, I simply generate a list of random numbers, then compare the output
+to that of the sorting function built in Reduce. Afterwards, I could test for performance.
+I first tuned the parallel version to use the sequential algorithm once if the list is too
+small. I found on my machine that around parrallelisation became useful once the size of
+the list was larger than 1000, and I tuned it to a threshold of 5000. Without this opimisation
+the parallel version would spawn too many jobs ($O(N)$ to be more exact) and the time book-keeping
+would completely eliminate any benefit of multi-threading. Indeed, it runs an order of magnitude
+slower on large lists (over 1000 elements).
+
+I have plotted the speedup boost offered for a number of array lengths, depending on the number
+of workers. 
+
+
+|    |   100 |   250 |    500 |   1000 |
+|----+-------+-------+--------+--------|
+|  1 | 2.351 | 5.282 | 11.152 | 22.840 |
+|  2 | 1.563 | 3.409 |  5.850 | 11.706 |
+|  3 |       |       |        |        |
+|  4 |       |       |        |        |
+|  5 |       |       |        |        |
+|  6 |       |       |        |        |
+|  7 | 1.319 | 2.554 |  4.906 |  9.054 |
+|  8 |       |       |        |        |
+| 16 | 1.071 | 2.137 |  3.995 |  7.514 |
+|    |       |       |        |        |
+
+
+
 ** Parallel building of Reduce
 
 The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
@@ -1194,20 +1231,60 @@ to build.
 | REDUCE |     1:59 |
 
 
+** Computing Groebner bases in parallel
+
+REDUCE comes with a large set of packages which cover different aspect of computer algebra.
+Gröbner basis is a package particularly useful for algebraic geometry. Any set of multi-variate
+polynomials has a Gröbner basis. The process is a generalisation of both Gaussian techniques for
+solving a system of linear equations and computing the greatest common divisor of multiple
+univariate polynomials.
+
+The Gröbner basis of a linear system will form a matrix in reduced echelon form. For example,
+a Gröbner basis of $\mathbb{F} = \{ \}$
+
+Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
+A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
+1. $0 \in I$.
+2. If $a, b \in I$ then $a + b \in I$.
+3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
 
 ** TODO baby groebner base package
-** TODO Thread-local performance on Windows
+** Testing ParVSL on different platforms
+
+My benchmarks so far have focused on x86 Linux, running
+up-to-date compilers.  VSL is a cross-platform language which should run on any system as long as the
+C++ compiler supports it. ParVSL further requires C++11 support, however at the
+time of this writing, the standard is already widely supported on all major platforms.
+I have also ran my test on different systems to verify this claim.
+
+I tested three major operating systems: Linux, MacOS, and Windows. I also
+ran the tests on a Raspberry PI to test it on the ARM platform. Compiling on the Raspberry PI
+posed problems even for the single-threaded VSL, as only older compilers are available
+there and they exhibiting some bugs in compiling the code and complained about valid code.
+The other systems successfully compiled and ran all the code.
+
+The more surprising result is the vast difference in performance between the platforms
+when running ParVSL vs VSL. 
+
+[[https://docs.microsoft.com/en-us/windows/desktop/ProcThread/thread-local-storage
+]]
 
 #+OPTIONS: :export none
 #+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
-| OS     | non-thread-local | thread-local |
-|--------+------------------+--------------|
-| Cygwin |            1.985 |       51.234 |
-| Linux  |            1.635 |        1.655 |
+| OS                        | non-thread-local | thread-local |
+|---------------------------+------------------+--------------|
+| x86 Windows (Cygwin)      |            1.985 |       51.234 |
+| x86 Linux                 |            1.635 |        1.655 |
+| x86 MacOS                 |             TODO |         TODO |
+| ARMv8 Linux (Raspberry Pi |            1.605 |        4.387 |
 
 #+CAPTION: Thread-local performance
 #+NAME:   fig:tls-plot.png
 [[./tls-plot.png]]
+
+
+As we can observe, simply using thread-local storage can have a big impact on performace.
+
 
 *** TODO look at other thread-supporting lisps systems
 Chez scheme?
@@ -1235,6 +1312,11 @@ use cormen pesudocode
 mentioning implementing thread early
 
 #+LATEX: \newpage
+
+* References
+
+bibliographystyle:unsrt
+bibliography:dissertation.bib
 
 * Appendix
 
@@ -1301,4 +1383,5 @@ void collect() {
 ** Thread pool
 
 [[https://math.berkeley.edu/~bernd/what-is.pdf]]
+
 
