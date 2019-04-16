@@ -900,7 +900,7 @@ for all spawned threads to finish running and join.
 To evaluate the project, I worked with existing REDUCE code for regression testing
 but also wrote my own tests in both plain Lisp and REDUCE RLisp code.
 
-** TODO Single-threaded building of Reduce
+** Single-threaded building of Reduce
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
 multi-paradigm programming language, it is not possible to guarantee to cover all
@@ -933,14 +933,35 @@ I used asserts in various places to try to get the program to crash as soon as p
 and find the issue early. Sometimes I had to introduce a system of binary searching the
 problem by trapping the program early and checking for the state of the computation.
 I tried to find small tests which would still reproduce the issue, then use the
-~gdb~ debugger to step through the code and try to find the errors. I have also used
-Valgrind, which offers a large set of tools for detecting undefined behaviour and memory
+~gdb~ cite:gdb debugger to step through the code and try to find the errors. I have also used
+Valgrind cite:valgrind, which offers a large set of tools for detecting undefined behaviour and memory
 corruption.
 
-In addition to helping me find issues in ParVSL, building REDUCE also provided for a
-good performance benchmark. The building process simply runs ParVSL code. 
+*** Bugs in VSL and REDUCE
 
-*** Coverage
+While debugging I found some discovered issues in VSL. The language hadn't been tested
+as extensively until I started working on it. These issues were mostly minor. Some functions
+were not present at all and needed to be reintroduced, for example system functions to get 
+working directory. There were subtle bugs such as wrong
+hard-coded strings and integers. There were multiple issues with floating point manipulation,
+again caused by simple human errors (e.g negated condition being checked). Switching between
+output files would lose buffer content. In one place, a value on the heap was not marked
+properly, meaning that if a garbage collection was triggered at the right time, it would
+be collected prematurely, causing corruption. All these bugs have since been fixed.
+
+Reduce itself showed multiple cases of sloppy code. Most of the time, the issue was using
+a global symbol with a very common name liberarly and then behaving wierdly
+on clashes. The most striking example was when the RLisp interpreter used the symbol ~x~
+parsing, meaning any tests using the variable ~x~ would have the value be a self-reference
+to code. Another instance was a name clash in the error handling function, leading to failure
+to contain exceptions. While these two cases have been manually fixed, there are many other
+such potential problems within the Reduce packages which will have to be cleaned up.
+
+*** Benchmarks
+
+In addition to helping me find issues in ParVSL, building REDUCE also provided for a
+good performance benchmark. The building process simply runs Lisp and RLisp code so 
+running it in VSL and ParVSL so running it  
 
 ** TODO Memory Allocation
 Indeed, we can easily see the impact when trying to build reduce:
@@ -1221,28 +1242,28 @@ to build.
 | REDUCE |     1:59 |
 
 
-** Computing Groebner bases in parallel
+# ** Computing Groebner bases in parallel
 
-REDUCE comes with a large set of packages which cover different aspect of computer algebra.
-Gröbner basis is a package particularly useful for algebraic geometry. Any set of multi-variate
-polynomials has a Gröbner basis. The process is a generalisation of both Gaussian techniques for
-solving a system of linear equations and computing the greatest common divisor of multiple
-univariate polynomials.
+# REDUCE comes with a large set of packages which cover different aspect of computer algebra.
+# Gröbner basis is a package particularly useful for algebraic geometry. Any set of multi-variate
+# polynomials has a Gröbner basis. The process is a generalisation of both Gaussian techniques for
+# solving a system of linear equations and computing the greatest common divisor of multiple
+# univariate polynomials.
 
-The Gröbner basis of a linear system will form a matrix in reduced echelon form. For example,
-a Gröbner basis of $\mathbb{F} = \{ \}$
+# The Gröbner basis of a linear system will form a matrix in reduced echelon form. For example,
+# a Gröbner basis of $\mathbb{F} = \{ \}$
 
-Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
-A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
-1. $0 \in I$.
-2. If $a, b \in I$ then $a + b \in I$.
-3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
+# Let $\mathbb{C}[\mathbf{x}]$ denote the polynomial ring in $n$ variables $\mathbb{C}[x_1, \dots, x_n]$.
+# A subset $I \subset \mathbb{C[\mathbf{x}]}$ is an \ideal\ if it satisfies:
+# 1. $0 \in I$.
+# 2. If $a, b \in I$ then $a + b \in I$.
+# 3. If $a \in I$ and $b \in \mathbb{C[\mathbf{x}]}$ then $a \cdot b \in \mathbb{C[\mathbf{x}]}$.
 
-** TODO baby groebner base package
+# ** TODO baby groebner base package
 ** Testing ParVSL on different platforms
 
 My benchmarks so far have focused on x86 Linux, running
-up-to-date compilers.  VSL is a cross-platform language which should run on any system as long as the
+up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the
 C++ compiler supports it. ParVSL further requires C++11 support, however at the
 time of this writing, the standard is already widely supported on all major platforms.
 I have also ran my test on different systems to verify this claim.
@@ -1256,23 +1277,20 @@ The other systems successfully compiled and ran all the code.
 The more surprising result is the vast difference in performance between the platforms
 when running ParVSL vs VSL. 
 
-[[https://docs.microsoft.com/en-us/windows/desktop/ProcThread/thread-local-storage
-]]
 
-#+OPTIONS: :export none
-# #+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
-| OS                        | non-thread-local | thread-local |
-|---------------------------+------------------+--------------|
-| x86 Windows (Visual C++)  |            2.547 |        2.653 |
-| x86 Windows (Cygwin)      |            1.985 |       51.234 |
-| x86 Linux                 |            1.635 |        1.655 |
-| x86 MacOS                 |            1.810 |        2.985 |
-| ARMv8 Linux (Raspberry Pi |            1.605 |        4.387 |
+# #+OPTIONS: :export none
+# # #+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
+# | OS                        | non-thread-local | thread-local |
+# |---------------------------+------------------+--------------|
+# | x86 Windows (Visual C++)  |            2.547 |        2.653 |
+# | x86 Windows (Cygwin)      |            1.985 |       51.234 |
+# | x86 Linux                 |            1.635 |        1.655 |
+# | x86 MacOS                 |            1.810 |        2.985 |
+# | ARMv8 Linux (Raspberry Pi |            1.605 |        4.387 |
 
 #+CAPTION: Thread-local performance
 #+NAME:   fig:thread_local_plot
-# #+attr_latex: :width 500px :height 200px
-#+attr_latex: :scale 1
+#+attr_latex: :width 500px :height 200px :left
 [[./thread_local.png]]
 
 
@@ -1317,6 +1335,8 @@ I must be careful to not collect the data during garbage
 
 bibliographystyle:unsrt
 bibliography:dissertation.bib
+
+[[https://docs.microsoft.com/en-us/windows/desktop/ProcThread/thread-local-storarage]]
 
 * Appendix
 
