@@ -95,7 +95,7 @@ of being interpreted.
 ** Benefits of multithreading
 
 The idea of using parallel computing to speed up computer algebra computing has come
-up in research papers for many years ~[TODO reference it]~, but much of the activity now
+up in research papers for many years cite:multithreading, but much of the activity now
 predates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
 they now provide. Moreover, advancements in single-core CPU performance has slowed down
 significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
@@ -828,12 +828,11 @@ simply needs to call the ~thread~ function. This function takes as arguments a f
 and a unique thread id is returned. The function is applied to the arguments in a new thread. The return value
 is stored until the user call ~thread_join~ on the thread id, when they can access the respective value. 
 
-#+BEGIN_SRC ocaml
-let add x y = x + y in 
-let tid = thread add (2, 3) in
-let result = thread_join tid in
-print result
-#+END_SRC 
+#+BEGIN_SRC 
+tid := thread('add, {2, 3});
+result := thread_join tid;
+print result;
+#+END_SRC
 #+RESULTS:
 : 5
 
@@ -896,15 +895,6 @@ Saving state to dis
 My implementation on preserve preservation only allows the operation on the main thread, and will wait
 for all spawned threads to finish running and join. 
 
-** TODO talk about undefined behaviour in C++?
-
-I must be careful to not collect the data during garbage
- collection, and I cover that in the [[Garbage collection]] section.
-
-** Bugs in REDUCE
-
-
-*** The symbol `x`
 * Evaluation
 
 To evaluate the project, I worked with existing REDUCE code for regression testing
@@ -1270,17 +1260,20 @@ when running ParVSL vs VSL.
 ]]
 
 #+OPTIONS: :export none
-#+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
+# #+PLOT: title:"Thread-local performance" ind:1 deps:(2 3) type:2d with:histograms set:"yrange [0:]" file:"tls-plot.png" :exports none
 | OS                        | non-thread-local | thread-local |
 |---------------------------+------------------+--------------|
+| x86 Windows (Visual C++)  |            2.547 |        2.653 |
 | x86 Windows (Cygwin)      |            1.985 |       51.234 |
 | x86 Linux                 |            1.635 |        1.655 |
-| x86 MacOS                 |             TODO |         TODO |
+| x86 MacOS                 |            1.810 |        2.985 |
 | ARMv8 Linux (Raspberry Pi |            1.605 |        4.387 |
 
 #+CAPTION: Thread-local performance
-#+NAME:   fig:tls-plot.png
-[[./tls-plot.png]]
+#+NAME:   fig:thread_local_plot
+# #+attr_latex: :width 500px :height 200px
+#+attr_latex: :scale 1
+[[./thread_local.png]]
 
 
 As we can observe, simply using thread-local storage can have a big impact on performace.
@@ -1289,6 +1282,8 @@ As we can observe, simply using thread-local storage can have a big impact on pe
 *** TODO look at other thread-supporting lisps systems
 Chez scheme?
 
+** Bugs in REDUCE
+*** The symbol `x`
 * Conclusions
 
   
@@ -1312,6 +1307,11 @@ use cormen pesudocode
 mentioning implementing thread early
 
 #+LATEX: \newpage
+
+*** TODO talk about undefined behaviour in C++?
+
+I must be careful to not collect the data during garbage
+ collection, and I cover that in the [[Garbage collection]] section.
 
 * References
 
