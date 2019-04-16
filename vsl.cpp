@@ -5605,7 +5605,7 @@ template <class R, class T>
 static inline R exptlike(const char *fname, LispObject a, LispObject b)
 {   using namespace number_dispatcher;
     if ((b & TAGBITS) == tagFIXNUM)
-    {   intptr_t n = qfixnum(b);
+    {   int64_t n = qfixnum(b);
         switch (a & TAGBITS)
         {
         case tagFIXNUM:
