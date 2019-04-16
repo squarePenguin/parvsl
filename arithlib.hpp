@@ -5457,7 +5457,7 @@ inline bool absdiff(uint64_t *a, size_t lena,
 inline void mul2x2(uint64_t a1, uint64_t a0,
                    uint64_t b1, uint64_t b0,
                    uint64_t &c3, uint64_t &c2, uint64_t &c1, uint64_t &c0)
-{   uint64_t c1a, c1b, c2a, c2b, c3a;
+{   uint64_t c1a, c2a, c2b, c3a;
     multiply64(a0, b0, c1a, c0);
     multiply64(a0, b1, c1a, c2a, c1a);
     multiply64(a1, b0, c1a, c2b, c1);
@@ -5471,7 +5471,7 @@ inline void mul2x2S(int64_t a1, uint64_t a0,
                     int64_t &c3, uint64_t &c2, uint64_t &c1, uint64_t &c0)
 {   uint64_t c1a;
     multiply64(a0, b0, c1a, c0);
-    uint64_t c1b, c2a;
+    uint64_t c2a;
     multiply64(a0, (uint64_t)b1, c1a, c2a, c1a);
     uint64_t c2b;
     multiply64((uint64_t)a1, b0, c1a, c2b, c1);
@@ -5491,7 +5491,7 @@ inline void mul3x2(uint64_t a2, uint64_t a1, uint64_t a0,
                    uint64_t b1, uint64_t b0,
                    uint64_t &c4, uint64_t &c3, uint64_t &c2,
                    uint64_t &c1, uint64_t &c0)
-{   uint64_t c4a, c3a;
+{   uint64_t c3a;
     mul2x2(a1, a0, b1, b0, c3, c2, c1, c0);
     multiply64(a2, b0, c2, c3a, c2);
     uint64_t carry = add_with_carry(c3, c3a, c3);
@@ -5681,7 +5681,7 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
 inline void classical_multiply(uint64_t a,
                                uint64_t *b, size_t lenb,
                                uint64_t *c)
-{   uint64_t hi=0, lo;
+{   uint64_t hi=0;
     for (size_t j=0; j<lenb; j++)
         multiply64(a, b[j], hi, hi, c[j]);
     c[lenb] = hi;

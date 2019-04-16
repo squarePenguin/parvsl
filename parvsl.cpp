@@ -1285,6 +1285,10 @@ void check_space(int len, int line)
     }
 }
 
+static int my_identity_function(int a)
+{   return a;
+}
+
 void middle_reclaim()
 {
 // This function is here to have a stack frame (containing w) that will
@@ -1293,7 +1297,7 @@ void middle_reclaim()
 // should not compile this procedure in-line or consolidate its stack
 // frame with either its caller or callee.
     int w;
-    if (volatile_variable != volatile_variable)
+    if (volatile_variable != my_identity_function(volatile_variable))
     {   inner_reclaim(NULL);  // never executed!
         middle_reclaim();     // never executed!
     }
@@ -1327,7 +1331,7 @@ void reclaim(int line)
 // may force it to be done!) but is modest in the large scheme of
 // things. On most machines I can think of there are a lot fewer
 // than 12 callee-save registers and so this is overkill!
-    register int a1 = volatile_variable,  a2 = volatile_variable,
+    int a1 = volatile_variable,  a2 = volatile_variable,
                  a3 = volatile_variable,  a4 = volatile_variable,
                  a5 = volatile_variable,  a6 = volatile_variable,
                  a7 = volatile_variable,  a8 = volatile_variable,
