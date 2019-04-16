@@ -60,7 +60,10 @@ end;
 
 % same as above but use threads
 symbolic procedure multiply_polys_par(a, b);
-begin scalar a_unwind, b_unwind, a0, a1, b0, b1, t1, t2, t3;
+begin
+  scalar a_unwind, b_unwind
+         , a0, a1, b0, b1, t1, t2, t3
+         , a0b0, a0b1, a1b0, a1b1;
   a_unwind := unwind(a);
   b_unwind := unwind(b);
   a0 := first a_unwind;
@@ -92,6 +95,9 @@ end;
 a := {21, 5, 0, -2, 3, 6};
 b := {-1, 3, 1, 4, -5};
 c := multiply_polys(a, b);
+a := nrand 4000;
+b := nrand 3900;
+c2 := multiply_polys_par(a, b);
 % c2 := multiply_polys2(a, b);
 % cp := multiply_polys_par(a, b);
 

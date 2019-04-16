@@ -34,6 +34,8 @@ Trinity College \\
 
 #+LATEX: \newpage
 
+\pagestyle{plain}
+
 \section*{Declaration of originality}
 
 I, Andrei-Vlad Bădeliță of Trinity College,
@@ -961,7 +963,21 @@ such potential problems within the Reduce packages which will have to be cleaned
 
 In addition to helping me find issues in ParVSL, building REDUCE also provided for a
 good performance benchmark. The building process simply runs Lisp and RLisp code so 
-running it in VSL and ParVSL so running it  
+running it in VSL and ParVSL will showcase the performance difference between the
+two in a single-threaded case.
+
+
+
+# |          |    VSL | PARVSL |        |
+# |----------+--------+--------+--------|
+# | RCORE    | 11.826 | 12.188 | 11.037 |
+# | REDUCE   | 58.932 | 68.476 | 64.592 |
+# | ALG TEST |  0.353 |  0.410 |  0.360 |
+# | INT TEST | 13.682 | 16.805 | 15.626 |
+
+
+#+CAPTION: Thread-local performance
+#+NAME:   fig:thread_local_plot
 
 ** TODO Memory Allocation
 Indeed, we can easily see the impact when trying to build reduce:
@@ -1290,7 +1306,7 @@ when running ParVSL vs VSL.
 
 #+CAPTION: Thread-local performance
 #+NAME:   fig:thread_local_plot
-#+attr_latex: :width 500px :height 200px :left
+# #+attr_latex: :width 500px :height 200px :left
 [[./thread_local.png]]
 
 
@@ -1404,4 +1420,5 @@ void collect() {
 
 [[https://math.berkeley.edu/~bernd/what-is.pdf]]
 
-
+bibliographystyle:unsrt
+bibliography:dissertation.bib

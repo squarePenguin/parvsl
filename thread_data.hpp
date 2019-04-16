@@ -56,7 +56,7 @@ std::vector<LispObject> fluid_globals; // the global values
 class Thread_data {
 public:
     // CR VB: Should this be defined in terms of LispObject?
-    static constexpr int SEGMENT_SIZE = 0x40000; // 128K 65536; // 64KB per segment
+    static constexpr int SEGMENT_SIZE = 0x10000; // 128K 65536; // 64KB per segment
     // VB: use these as the segment we can write on.
     uintptr_t segment_fringe = -1;
     uintptr_t segment_limit = 0;
@@ -410,13 +410,13 @@ LispObject& local_symbol(int loc) {
         fluid_locals.resize(num_symbols, undefined);
     }
 
-// #ifdef DEBUG
+#ifdef DEBUG
     if (loc >= (int)fluid_locals.size()) {
         // THis is basically an assert but I am printing a bit more information.
         std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
         throw std::logic_error("bad thread_local index");
     }
-// #endif // DEBUG
+#endif // DEBUG
 
     return fluid_locals[loc];
 }
@@ -436,7 +436,7 @@ bool is_fluid_bound(LispObject s) {
 * should be used to get the true symbol, instead of qvalue(s).
 */
 LispObject& symval(LispObject s) {
-    assert(isSYMBOL(s));
+//    assert(isSYMBOL(s));
     if (is_global(s)) {
         return qvalue(s);
     }
