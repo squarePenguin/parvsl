@@ -59,13 +59,14 @@ end;
 
 fluid '(tp);
 tp := thread_pool(hardwarethreads() - 1);
+% tp := thread_pool(32);
 
 symbolic procedure parmergesort(xs);
 begin scalar n, ss, xs, ysfut, ys;
     n := length xs;
     return
         if n < 6 then insertionsort xs
-        else if n < 10000 then mergesort xs
+        else if n < 5000 then mergesort xs
         else <<
             % print "started split";
             ss := split(xs, (n + 1) / 2);
@@ -102,7 +103,7 @@ begin
     return nil;
 end;
 
-test(500000);
+test(100000);
 
 tp_stop tp;
 

@@ -240,7 +240,7 @@ end;
 symbolic procedure thread_pool_job(tp_q, status);
 begin
     scalar job, resfut, f, args, res, stat;
-    print "Started worker";
+    % print "Started worker";
     job := safeq_trypop tp_q;
     repeat <<
         if job then <<
@@ -294,16 +294,16 @@ end;
 symbolic procedure tp_stop(tp);
 begin
     scalar threads;
-    print "tp_stop";
+    % print "tp_stop";
     atomic_set(second tp, 'stop);
-    print "atomic set";
+    % print "atomic set";
     threads := third tp;
     for each td in threads do <<
-        print "joining thread"; print td;
+        % print "joining thread"; print td;
         jointhread td;
-        print "joined thread";
+        % print "joined thread";
     >>;
-    print "tp stopped";
+    % print "tp stopped";
     return nil;
 end;
 
@@ -313,9 +313,9 @@ begin
     atomic_set(second tp, 'kill);
     threads := third tp;
     for each td in threads do <<
-        print "joining thread"; print td;
+        % print "joining thread"; print td;
         jointhread td;
-        print "joined thread";
+        % print "joined thread";
     >>;
 end;
 
