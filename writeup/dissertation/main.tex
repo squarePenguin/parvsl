@@ -11,6 +11,7 @@
 \usepackage[normalem]{ulem}
 \usepackage{amsmath}
 \usepackage{textcomp}
+\usepackage{biblatex}
 \usepackage{amssymb}
 \usepackage{capt-of}
 \usepackage[pdfborder={0 0 0}]{hyperref}    % turns references into hyperlinks
@@ -36,6 +37,9 @@
 
 
 \graphicspath{ {figures/} }
+
+\usepackage{biblatex}
+\addbibresource{references.bib}
 
 \begin{document}
 
@@ -87,11 +91,11 @@ to be made available to the students and staff of the University.
 
 {\large
 \begin{tabular}{ll}
-Candidate Number:   & \bf [Candidate No.]                       \\
-Project Title:      & \bf Implementing Parallelism in Lisp for REDUCE   \\
+Candidate Number:   & \bf [Candidate No.] \\
+Project Title:      & \bf Implementing Parallelism in Lisp for REDUCE \\
 Examination:        & \bf Computer Science Tripos -- Part II, 2019  \\
 Word Count:         & \bf 9830        \\
-Final code line count:   & \bf 8803        \\
+Final code line count: & \bf 8803        \\
 Project Originator: & Dr. Arthur C. Norman                    \\
 Supervisor:         & Dr. Arthur C. Norman                    \\
 \end{tabular}
@@ -144,11 +148,14 @@ There were no special difficulties encountered.
 \newpage
 
 \addcontentsline{toc}{chapter}{Bibliography}
-\bibliographystyle{plain}
-\bibliography{dissertation}
+% \bibliographystyle{plain}
+% \bibliography{references}
+\printbibliography
 
 \newpage
 
 \appendix
+\chapter{Appendix}
+\input{chapters/appendix}
 
 \end{document}

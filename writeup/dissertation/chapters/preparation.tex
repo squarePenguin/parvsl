@@ -1,5 +1,4 @@
 \section{ParVSL}
-\label{sec:orgff7e4ab}
 I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
 ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
 
@@ -10,8 +9,6 @@ myself with the code. This included spliting the project in more more files, fix
 to C++.
 
 \section{From C to C++}
-\label{sec:org29c9a35}
-
 The VSL language was written in the programming language C. C is a language with no standardised
 multi-threaded model and no native support for multi-core programming. Furthermore, it has no well-defined
 memory model, and no defined ordering of memory accesses. Multi-threaded programming
@@ -33,7 +30,6 @@ However, I have been slowly transitioning the code from idiomatic C++ as I analy
 and became confident those changes wouldn't affect the semantics of the program.
 
 \section{Throughput vs latency}
-\label{sec:org48e126b}
 When optimising for performance in a programming language, we have to analyse the tradeoff between
 total thoughput and latency. Optimising for latency means minimising the duration of any individual
 task in the program, and increasing availability. Optimising for throughput involves minimising the
@@ -44,10 +40,9 @@ In a CAS program the user is most likely to care about throughput, i.e. compute 
 problem sizes as quickly as possible. The program is single-user and has a simple interface. The only case
 for low latency is in the responsiveness of the graphical user interface. This is already provided by the
 operating system so our main goal is directed towards minimising throughput in the application.
-This is particularly important when designing the \ref{sec:org10be605}.
+This is particularly important when designing the garbage collector.
 
 \section{Memory allocation}
-\label{sec:org1af61e5}
 Memory is managed by the interpreter. It allocates a large block of memory at the beginning,
 which it then manages as a contiguous array. When running out of memory, an extra block of the
 same size as current available memory is malloced, doubling the amount available. These blocks are
@@ -56,7 +51,6 @@ and carefully \emph{joined} together to maintain the abstract model of continguo
 is used to identify the block containing a location.
 
 \section{Garbage collector}
-\label{sec:org8e2abcd}
 An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer
 to design code without having to worry about the lifecycle of their data, the internal memory model and
 managing pointers. This makes Lisp code significantly easier to write, leaving the burden of providing safety and
@@ -69,7 +63,6 @@ are also very difficult to spot and debug, as they can go undetected until the p
 is accessed again.
 
 \section{Cheaney's algorithm}
-\label{sec:org995855a}
 The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
 Before the first garbage collection cycle, memory can simply be allocated in a continuous fashion, making it
 compact and fast. When the garbage collector finds unreachable objects and eliminates them, they will leave \emph{gaps} behind
@@ -126,10 +119,8 @@ Please refer to the Appendix for a more detailed implementation of the algorithm
 
 \begin{enumerate}
 \item {\bfseries\sffamily TODO} reference cheney
-\label{sec:org583b477}
 \end{enumerate}
 \section{Conservative GC}
-\label{sec:org3723ce4}
 One important design aspect of calculating the root set is how to handle references on the stack. Garbage collection
 may start in the middle of a large computation and the references on the stack cannot be discarded. One safe, but slow
 approach of dealing with this is to keep a virtual stack. Such a stack could be well typed and easily scanned to find
@@ -152,7 +143,6 @@ larger than 300. Considering memory used is in the order of megabytes, these pin
 fragmentation.
 
 \section{Variable lifetime}
-\label{sec:orgf987c79}
 As the original language is decades old, its mechanism for variable lifecycle is not in line with that of modern languages.
 This mechanism was counter-intuitive at first, and is lacking in providing safety to the user of the language.
 
@@ -177,7 +167,6 @@ when implementing multithreading, fluids have a global value visible to all thre
 visible on their local thread. I will call these symbols \emph{unbound locals}.
 
 \section{Saving state to disk}
-\label{sec:org31b8a59}
 REDUCE has an important feature which allows the user to preserve the state to disk. A \texttt{preserve} instruction can be
 used to do so, and the user is able to specify a function to run on restart. Preserve saves the entire state of the
 program, including memory and symbols. The feature involves careful manipulation of the world state and it can maintaining

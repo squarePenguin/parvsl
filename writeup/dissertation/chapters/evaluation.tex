@@ -2,7 +2,7 @@ To evaluate the project, I worked with existing REDUCE code for regression testi
 but also wrote my own tests in both plain Lisp and REDUCE RLisp code.
 
 \section{Single-threaded building of Reduce}
-\label{sec:orgcc1be4d}
+
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
 multi-paradigm programming language, it is not possible to guarantee to cover all
@@ -40,7 +40,6 @@ Valgrind \cite{valgrind}, which offers a large set of tools for detecting undefi
 corruption.
 
 \section{Bugs in VSL and REDUCE}
-\label{sec:org40de48e}
 
 While debugging I found some discovered issues in VSL. The language hadn't been tested
 as extensively until I started working on it. These issues were mostly minor. Some functions
@@ -53,7 +52,7 @@ properly, meaning that if a garbage collection was triggered at the right time, 
 be collected prematurely, causing corruption. All these bugs have since been fixed.
 
 Reduce itself showed multiple cases of sloppy code. Most of the time, the issue was using
-a global symbol with a very common name liberarly and then behaving wierdly
+a global symbol with a very common name liberally and then behaving weirdly
 on clashes. The most striking example was when the RLisp interpreter used the symbol \texttt{x}
 parsing, meaning any tests using the variable \texttt{x} would have the value be a self-reference
 to code. Another instance was a name clash in the error handling function, leading to failure
@@ -61,7 +60,6 @@ to contain exceptions. While these two cases have been manually fixed, there are
 such potential problems within the Reduce packages which will have to be cleaned up.
 
 \section{Benchmarks}
-\label{sec:org7d34a06}
 
 In addition to helping me find issues in ParVSL, building REDUCE also provided for a
 good performance benchmark. The building process simply runs Lisp and RLisp code so
@@ -69,7 +67,6 @@ running it in VSL and ParVSL will showcase the performance difference between th
 two in a single-threaded case.
 
 \section{{\bfseries\sffamily TODO} Memory Allocation}
-\label{sec:org26ebea6}
 Indeed, we can easily see the impact when trying to build reduce:
 
 \begin{center}
@@ -90,9 +87,7 @@ Indeed, we can easily see the impact when trying to build reduce:
 \end{center}
 
 \section{Stress tests}
-\label{sec:orgafd076f}
 \section{Thread pool}
-\label{sec:org059227a}
 
 Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
 simple tests for multi-threading, I was able to write more complex code using threads.
@@ -100,7 +95,7 @@ simple tests for multi-threading, I was able to write more complex code using th
 Spawning hardware threads directly to parallelise each task can be undesirable. The user has
 to manage the lifecycle of each thread, making sure to join it and also to manage the number
 of available threads on the current hardware directly. Failure to do so will quickly result in
-oversubscribtion of threads. Each thread object comes with its own overhead including a local
+over-subscription of threads. Each thread object comes with its own overhead including a local
 stack and operating system handle,
 
 A thread pool is a structure for simplifying parallelism by abstracting away the interaction
@@ -111,14 +106,13 @@ than there available, and threads can be reused. Once a thread pool is created, 
 needs to submit jobs and they will be automatically parallelised.
 
 \section{A thread-safe queue}
-\label{sec:org3f3cf7a}
 
 The main data structure behind the thread-pool is a thread-safe queue. All threads may push
 jobs to this queue and all working threads pop tasks from it to execute. Jobs can be executed
 in any order, and I a queue so that they would be executed in the order they are submitted, which
 seemed the most natural.
 
-We can implement such a queue easiliy in ParVSL using a mutex and a condition variable. We start
+We can implement such a queue easily in ParVSL using a mutex and a condition variable. We start
 from a simple queue, with the following functions:
 
 \begin{itemize}
@@ -176,7 +170,6 @@ end;
 
 
 \section{Managing threads}
-\label{sec:orgb934c29}
 
 With the queue implemented we can design the worker threads. The starting thread
 initialises the queue and starts all the workers as individual threads. It can start
@@ -205,7 +198,7 @@ while atomic_get(run_flag) = 'run do
 Another idea is to not use a blocking call to pop from the queue, but rather spin:
 \begin{verbatim}
 while atomic_get(run_flag) = 'run do
-  job := safe_queue_trypop(sq)
+  job := safe_queue_try_pop(sq)
   if job then
     // trypop succeeded
     run_job job
@@ -221,7 +214,6 @@ core to 100\% until forcefully preempted by the OS. It would also prevent other 
 started by the user from doing work.
 
 \section{Waiting for a job's result}
-\label{sec:orgfd9d88a}
 
 In ParVSL, the \texttt{thread} function takes another function to execute on the new thread,
 along with the arguments for that function. The return value of the function call is
@@ -229,7 +221,7 @@ then recovered when joining the thread with \texttt{join\_thread}, enabling thre
 
 When switching from threads to jobs in the thread pool, we want to maintain this functionality,
 otherwise the only way to communicate between parallel jobs would be through global state,
-which would severely limit its usefuleness. Passing argument for a job is trivial, as they are simply
+which would severely limit its usefulness. Passing argument for a job is trivial, as they are simply
 stored in the safe queue, along with the function to be called. However, returning the result of
 a job required extra book-keeping.
 
@@ -257,19 +249,18 @@ procedure thread_pool_add_job(tp, fn, args):
 The caller can use the future to wait for the result of the job and the workers need to set the future
 when finishing a job. Finally, I note that the thread pool must deal with exception handling. The worker threads
 need to catch any error while running the job and report it through the future. Initially, I failed to include
-it meaning that worker threads unwinded unsafely. This lead to the the thread-pool being unable to signal the
+it meaning that worker threads unwounded unsafely. This lead to the the thread-pool being unable to signal the
 thread and fail to terminate. Additionally, threads waiting for the result would also be stuck.
 
 There are many aspect to be considered in the design of a thread pool. I have focused on the main ones, and
 this thread pool was sufficient for the rest of evaluation. I have successfully used to to parallelise the
 other experiments in this report. However, depending on the task it could be improved upon with more features.
-Currently, the number of threads is static, but it could dinamically start and stop threads to accommodate
+Currently, the number of threads is static, but it could dynamically start and stop threads to accommodate
 the workload. A more efficient safe queue could be implemented using granular locking. Furthermore, we could
 reduce contention on the queue by having each worker keep its own queue, and the main queue would act as a
 dispatcher.
 
 \section{Implementing Parallel Mergesort}
-\label{sec:orgafb467e}
 
 To test the correctness and performance of ParVSL I implemented a few classic algorithms that are relatively
 easy to parallelise. Sorting is a particularly good example. Mergesort splits a list in two, sort each half
@@ -286,7 +277,7 @@ procedure parallel_merge_sort(list):
   xs, ys := split(list)
   sorted_xs_future := thread_pool_add_job(tp, 'parallel_merge_sort, {xs})
   sorted_ys := parallel_merge_sort(ys)
-  sortex_xs := future_get(sorted_xs_future)
+  sorted_xs := future_get(sorted_xs_future)
 
   return merge(sorted_xs, sorted_ys)
 \end{verbatim}
@@ -296,12 +287,11 @@ have to manually manage threads. Using threads here would have resulting in a ne
 each element in the array. The function would already oversubscribe threads for lists as small as
 100 elements. The thread pool only uses a constant number of threads.
 
-\section{Dealing with tasks waiting for other takss}
-\label{sec:org9528c3b}
+\section{Dealing with tasks waiting for other tasks}
 
 However, the naive implementation above is incorrect and it will deadlock as soon as the number of
 jobs exceeds the number of workers. This highlights a shortcoming of the thread pool. In its current
-state is does not handle tasks enqueing and then waiting for other tasks. In this case, all the workers
+state is does not handle tasks enqueuing and then waiting for other tasks. In this case, all the workers
 will end up waiting for the future (\texttt{sorted\_xs\_future}) without doing any work.
 
 To fix this, I have added extra functionality to the thread pool. An extra procedure \texttt{thread\_pool\_run\_job}
@@ -310,7 +300,7 @@ to the worker function, except it only takes at most one job (or none if the que
 queue instead of looping.
 This function should be called by any job which is waiting for another job in the thread pool.
 
-I also needed to implement another function for futures \texttt{futue\_try\_get}, which only returns the
+I also needed to implement another function for futures \texttt{future\_try\_get}, which only returns the
 value in the future if it was fulfilled, without blocking, or indicates failure, without blocking.
 
 Subsequently, I have changed line \texttt{10} above to the following code:
@@ -321,18 +311,17 @@ while null (future_try_get(sorted_xs_future):
 Now, workers can start (and finish) other jobs while waiting and will not deadlock.
 
 \section{{\bfseries\sffamily TODO} Results}
-\label{sec:orgef780a7}
 
 To test the correctness, I simply generate a list of random numbers, then compare the output
 to that of the sorting function built in Reduce. Afterwards, I could test for performance.
 I first tuned the parallel version to use the sequential algorithm once if the list is too
-small. I found on my machine that around parrallelisation became useful once the size of
-the list was larger than 1000, and I tuned it to a threshold of 5000. Without this opimisation
+small. I found on my machine that around parallelisation became useful once the size of
+the list was larger than 1000, and I tuned it to a threshold of 5000. Without this optimisation
 the parallel version would spawn too many jobs (\(O(N)\) to be more exact) and the time book-keeping
 would completely eliminate any benefit of multi-threading. Indeed, it runs an order of magnitude
 slower on large lists (over 1000 elements).
 
-I have plotted the speedup boost offered for a number of array lengths, depending on the number
+I have plotted the speed-up boost offered for a number of array lengths, depending on the number
 of workers.
 
 
@@ -356,7 +345,6 @@ of workers.
 
 
 \section{Parallel building of Reduce}
-\label{sec:org52eaeb9}
 
 The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
 can simply run to build it. The process can be separated into two steps:
@@ -374,7 +362,6 @@ REDUCE & 1:59\\
 \end{tabular}
 \end{center}
 \section{Testing ParVSL on different platforms}
-\label{sec:orge62a399}
 
 My benchmarks so far have focused on x86 Linux, running
 up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the
@@ -397,4 +384,4 @@ when running ParVSL vs VSL.
 \end{center}
 
 
-As we can observe, simply using thread-local storage can have a big impact on performace.
+As we can observe, simply using thread-local storage can have a big impact on performance.
