@@ -1,0 +1,67 @@
+\begin{enumerate}
+\item Cheney's algorithm
+\label{sec:org9d148aa}
+
+\begin{verbatim}
+// LispObject is just a pointer type
+typedef uintptr_t LispObject;
+
+// LispObject is a pointer type
+uintptr_t fringe1, limit1; // heap1, where all allocations happen 
+uintptr_t fringe2, limit2; // heap2 used for copying GC
+
+LispObject allocate(size_t size) {
+  if (fringe1 + size > limit1) {
+    collect();
+  }
+
+  if (fringe1 + size > limit1) {
+     // We are out of memory. Try to increase memory
+     // ...
+  }
+
+  uintptr_t result = fringe1;
+  fringe1 += size;
+  return result;
+}
+
+// Two helper functions are needed
+LispObject copy(LispObject obj) {
+  size_t len = size(obj);
+
+  LispObject new_obj = static_cast<LispObject>(fringe2);
+  fringe2 += len;
+  return new_obj;
+}
+
+uintptr_t copycontent(LispObject obj) {
+  for (auto ref&: forward_references(obj)) {
+    ref = copy(ref);
+  }
+
+  return static_cast<uintptr_t>(obj) + size(obj);
+}
+
+void collect() {
+  // First we copy over the root set, which includes symbols.
+  for (LispObject& symbol: symbols_table) {
+    symbol = copy(symbol);
+  }
+
+  uintptr_t s = heap2;
+  while (fringe2 < fringe2) {
+    s = copycontent(static_cast<LispObject>(s));
+  }
+
+  swap(fringe1, fringe2);
+  swap(limit1, limit2);
+}
+\end{verbatim}
+
+\item \texttt{Gc\_guard} and \texttt{Gc\_lock}
+\label{sec:orgc9a1d3d}
+\item Lock free symbol lookup
+\label{sec:org0a6de58}
+\item Thread pool
+\label{sec:org504fab0}
+\end{enumerate}

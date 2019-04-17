@@ -1,0 +1,154 @@
+% Created 2019-04-17 Wed 12:42
+% Intended LaTeX compiler: pdflatex
+\documentclass[a4paper,12pt,twoside,openright]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{grffile}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage[pdfborder={0 0 0}]{hyperref}    % turns references into hyperlinks
+\usepackage{docmute}   % only needed to allow inclusion of proposal.tex
+\usepackage[margin=25mm]{geometry}
+\date{\today}
+\title{}
+\hypersetup{
+ pdfauthor={},
+ pdftitle={},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={Emacs 26.2 (Org mode 9.1.14)},
+ pdflang={English}}
+
+\raggedbottom                           % try to avoid widows and orphans
+\sloppy
+\clubpenalty1000%
+\widowpenalty1000%
+
+\renewcommand{\baselinestretch}{1.1}    % adjust line spacing to make
+% more readable
+
+
+\graphicspath{ {figures/} }
+
+\begin{document}
+
+% Title
+%==========================================================
+
+\hfill{\LARGE \bf Andrei-Vlad Bădeliță}
+
+\pagestyle{empty}
+
+\vspace*{60mm}
+\begin{center}
+\Huge{\bf Implementing Parallelism in Lisp for REDUCE} \\
+\vspace*{5mm}
+Part II Computer Science Dissertation \\
+\vspace*{5mm}
+Trinity College \\
+\vspace*{5mm}
+\today  % today's date
+\end{center}
+
+\cleardoublepage
+
+%==============================================
+
+\pagestyle{plain}
+\pagenumbering{roman}
+
+\section*{Declaration of originality}
+
+I, Andrei-Vlad Bădeliță of Trinity College, being a candidate for Part II of the
+Computer Science Tripos, hereby declare that this dissertation and the work described
+in it are my own work, unaided except as may be specified below, and that the
+dissertation does not contain material that has already been used to any
+substantial extent for a comparable purpose.
+
+\medskip
+\noindent
+I, Andrei-Vlad Bădeliță of Trinity College, am content for my dissertation
+to be made available to the students and staff of the University.
+
+\bigskip
+\leftline{Signed [signature]}
+
+\medskip
+\leftline{Date [date]}
+
+\section*{Proforma}
+
+{\large
+\begin{tabular}{ll}
+Candidate Number:   & \bf [Candidate No.]                       \\
+Project Title:      & \bf Implementing Parallelism in Lisp for REDUCE   \\
+Examination:        & \bf Computer Science Tripos -- Part II, 2019  \\
+Word Count:         & \bf 9830        \\
+Final code line count:   & \bf 8803        \\
+Project Originator: & Dr. Arthur C. Norman                    \\
+Supervisor:         & Dr. Arthur C. Norman                    \\
+\end{tabular}
+}
+
+\subsection*{Original Aims of the Project}
+
+To implement a multi-threaded version of a Lisp interpreter. It should
+allow the user to create threads and offer the primitives necessary to
+write parallel programs. The original language is able to build and
+run a complete computer algebra system, which the parallel version should
+be able replicate fully. Additionally, a number of tests and algorithms will
+be implemented to evaluate correctness and the potential benefits of parallelism.
+
+\subsection*{Work Completed}
+
+All of the original goals have been achieved. The multi-threaded Lisp
+is showing predictable speed-ups when executing tasks in parallel,
+while preserving full backwards compatibility with the original language.
+
+\subsection*{Special Difficulties}
+There were no special difficulties encountered.
+
+\newpage
+
+\setcounter{tocdepth}{2}
+\tableofcontents
+
+\newpage
+
+\setcounter{page}{0}
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+\input{chapters/introduction}
+
+\chapter{Preparation}
+\input{chapters/preparation}
+
+\chapter{Implementation}
+\input{chapters/implementation}
+
+\chapter{Evaluation}
+\input{chapters/evaluation}
+
+\chapter{Conclusion}
+\input{chapters/conclusion}
+
+
+\newpage
+
+\addcontentsline{toc}{chapter}{Bibliography}
+\bibliographystyle{plain}
+\bibliography{dissertation}
+
+\newpage
+
+\appendix
+
+\end{document}

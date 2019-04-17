@@ -1,0 +1,400 @@
+To evaluate the project, I worked with existing REDUCE code for regression testing
+but also wrote my own tests in both plain Lisp and REDUCE RLisp code.
+
+\section{Single-threaded building of Reduce}
+\label{sec:orgcc1be4d}
+My project involved modifying a large body of code and it was almost guaranteed
+that I would introduce bugs during development. Since the work involves a complex,
+multi-paradigm programming language, it is not possible to guarantee to cover all
+possible scenarios that might exhibit new bugs. Thankfully, the language and its
+direct application are well intertwined, so there is a vey large coverage test already
+available to demonstrate the most functionalities of the language: building REDUCE.
+
+REDUCE consists of around 400 thousand lines of code, and since VSL was built to
+run it, all functionality in VSL is being used in REDUCE. In addition to that,
+REDUCE comes with a comprehensive suite of regression tests, which were written over the
+years to detect bugs in new code. Finally, almost every library in REDUCE contains a
+set of tests. These tests involve a large amount of heavy computation, stress testing
+many different algorithms, using large amounts of memory and requiring multiple cycles
+of garbage collection.
+
+Between building REDUCE and passing its tests, I can be confident that ParVSL retains
+backwards compatibility and catch development bugs. Any error while running the code,
+or any difference in output between VSL is considered a bug. This approach helped me
+find most of the bugs in my code. The disadvantage was that when I had to debug there
+was too much code running and it was difficult to pinpoint to origin of the problem.
+
+To aid with this, I had multiple stages to build. The first stage was just building
+the core, while the second involved building the libraries. If an error showed up while
+building a library, most other libraries could be skipped to help pinpoint the problem.
+The problem was not completely fixed as just building the core involved running
+a very large amount of code, and libraries are also significant in size.
+
+Most of the bugs I could have potentially introduced were data corruption bugs.
+I used asserts in various places to try to get the program to crash as soon as possible
+and find the issue early. Sometimes I had to introduce a system of binary searching the
+problem by trapping the program early and checking for the state of the computation.
+I tried to find small tests which would still reproduce the issue, then use the
+\texttt{gdb} \cite{gdb} debugger to step through the code and try to find the errors. I have also used
+Valgrind \cite{valgrind}, which offers a large set of tools for detecting undefined behaviour and memory
+corruption.
+
+\section{Bugs in VSL and REDUCE}
+\label{sec:org40de48e}
+
+While debugging I found some discovered issues in VSL. The language hadn't been tested
+as extensively until I started working on it. These issues were mostly minor. Some functions
+were not present at all and needed to be reintroduced, for example system functions to get
+working directory. There were subtle bugs such as wrong
+hard-coded strings and integers. There were multiple issues with floating point manipulation,
+again caused by simple human errors (e.g negated condition being checked). Switching between
+output files would lose buffer content. In one place, a value on the heap was not marked
+properly, meaning that if a garbage collection was triggered at the right time, it would
+be collected prematurely, causing corruption. All these bugs have since been fixed.
+
+Reduce itself showed multiple cases of sloppy code. Most of the time, the issue was using
+a global symbol with a very common name liberarly and then behaving wierdly
+on clashes. The most striking example was when the RLisp interpreter used the symbol \texttt{x}
+parsing, meaning any tests using the variable \texttt{x} would have the value be a self-reference
+to code. Another instance was a name clash in the error handling function, leading to failure
+to contain exceptions. While these two cases have been manually fixed, there are many other
+such potential problems within the Reduce packages which will have to be cleaned up.
+
+\section{Benchmarks}
+\label{sec:org7d34a06}
+
+In addition to helping me find issues in ParVSL, building REDUCE also provided for a
+good performance benchmark. The building process simply runs Lisp and RLisp code so
+running it in VSL and ParVSL will showcase the performance difference between the
+two in a single-threaded case.
+
+\section{{\bfseries\sffamily TODO} Memory Allocation}
+\label{sec:org26ebea6}
+Indeed, we can easily see the impact when trying to build reduce:
+
+\begin{center}
+\begin{tabular}{llll}
+ & VSL & MUTEX & SEGMENT\\
+\hline
+ &  &  & 2m1s\\
+\end{tabular}
+\end{center}
+
+
+\begin{center}
+\begin{tabular}{llll}
+ & VSL & MUTEX & LOCK-free\\
+\hline
+ & 1m55s & 2m10s & 2m4s\\
+\end{tabular}
+\end{center}
+
+\section{Stress tests}
+\label{sec:orgafd076f}
+\section{Thread pool}
+\label{sec:org059227a}
+
+Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
+simple tests for multi-threading, I was able to write more complex code using threads.
+
+Spawning hardware threads directly to parallelise each task can be undesirable. The user has
+to manage the lifecycle of each thread, making sure to join it and also to manage the number
+of available threads on the current hardware directly. Failure to do so will quickly result in
+oversubscribtion of threads. Each thread object comes with its own overhead including a local
+stack and operating system handle,
+
+A thread pool is a structure for simplifying parallelism by abstracting away the interaction
+with hardware threads. A thread pool consists of a work queue for pending jobs and a number
+of worker threads which execute those jobs as they become available. The number of workers
+can equal the number of hardware threads so that the program never has to spawn more threads
+than there available, and threads can be reused. Once a thread pool is created, the user simply
+needs to submit jobs and they will be automatically parallelised.
+
+\section{A thread-safe queue}
+\label{sec:org3f3cf7a}
+
+The main data structure behind the thread-pool is a thread-safe queue. All threads may push
+jobs to this queue and all working threads pop tasks from it to execute. Jobs can be executed
+in any order, and I a queue so that they would be executed in the order they are submitted, which
+seemed the most natural.
+
+We can implement such a queue easiliy in ParVSL using a mutex and a condition variable. We start
+from a simple queue, with the following functions:
+
+\begin{itemize}
+\item \texttt{queue()} creates a new queue
+\item \texttt{queue\_push(q, x)} pushes value \texttt{x} to queue \texttt{q}
+\item \texttt{queue\_pop(q)} pops and returns the value at the front of the queue
+\item \texttt{queue\_empty(q)} checks if the queue is empty
+\end{itemize}
+
+A thread\(_{\text{safe}}\) queue is simply a wrapper on top of the normal queue:
+\begin{verbatim}
+procedure safe_queue();
+  {queue(), mutex(), condvar()};
+\end{verbatim}
+
+We need two procedures: \texttt{safe\_queue\_push(sq, x)} and \texttt{safe\_queue\_pop(sq)}. The latter will
+wait if the queue is empty until an element is enqueued. The waiting is done using the condition variable:
+
+\begin{verbatim}
+procedure safe_queue_pop(sq);
+begin
+  scalar q, m, cv, res;
+  % unpack the safe queue
+  q := first sq;
+  m := second sq;
+  cv := third sq;
+
+  mutex_lock m;
+
+  while queue_empty q do
+    % wait for another thread to push an element and notify
+    condvar_wait(cv, m);
+
+  res := queue_pop q;
+  mutex_unlock m;
+  return res;
+end;
+\end{verbatim}
+
+Now, the push method must notify the condition variable if the queue was empty.
+\begin{verbatim}
+procedure safe_queue_push(sq, x);
+begin
+  scalar q, m, cv;
+  q := first sq;
+  m := second sq;
+  cv := third sq;
+
+  mutex_lock m;
+  queue_push(q, x);
+  condvar_notify_one cv;
+  mutex_unlock m;
+end;
+\end{verbatim}
+
+
+\section{Managing threads}
+\label{sec:orgb934c29}
+
+With the queue implemented we can design the worker threads. The starting thread
+initialises the queue and starts all the workers as individual threads. It can start
+either the maximum number of hardware threads (which can be determined using the
+\texttt{hardware\_threads()} function), or a custom count. Each thread is passed a reference to
+the thread pool, so it can access the queue. Once the threads are started, they will only
+be joined on exit or when the user manually stops the pool.
+
+The mechanism for stopping the queue is a simple atomic flag. Atomics are not offered as
+a primitive in ParVSL, but can be easily implemented with a mutex lock. There is no direct
+mechanism for interrupting a thread running a task, but workers can check the flag every time
+before taking a new task from the queue.
+
+Using the blocking call to wait for the next job mean the worker get stuck and prevent
+stopping the thread-pool. When the the user tries to stop an empty pool, then all
+the workers will be in a sleeping state, waiting for the queue condition variable to be
+notified, causing a deadlock.
+
+\begin{verbatim}
+while atomic_get(run_flag) = 'run do
+  // The workers can get stuck here waiting on an empty queue
+  job := safe_queue_pop(sq)
+  run_job job;
+\end{verbatim}
+
+Another idea is to not use a blocking call to pop from the queue, but rather spin:
+\begin{verbatim}
+while atomic_get(run_flag) = 'run do
+  job := safe_queue_trypop(sq)
+  if job then
+    // trypop succeeded
+    run_job job
+  else
+    // important to yield here
+    thread_yield()
+\end{verbatim}
+
+This approach solves the issue, but it is important to note the \texttt{thread\_yield()} call.
+I have implemented \texttt{thread\_yield()} to directly call the C++ equivalent. This allows the
+system to schedule other threads, making sure a waiting worker does not spin the CPU
+core to 100\% until forcefully preempted by the OS. It would also prevent other threads
+started by the user from doing work.
+
+\section{Waiting for a job's result}
+\label{sec:orgfd9d88a}
+
+In ParVSL, the \texttt{thread} function takes another function to execute on the new thread,
+along with the arguments for that function. The return value of the function call is
+then recovered when joining the thread with \texttt{join\_thread}, enabling thread communication.
+
+When switching from threads to jobs in the thread pool, we want to maintain this functionality,
+otherwise the only way to communicate between parallel jobs would be through global state,
+which would severely limit its usefuleness. Passing argument for a job is trivial, as they are simply
+stored in the safe queue, along with the function to be called. However, returning the result of
+a job required extra book-keeping.
+
+Using the primitives in ParVSL, we can implement a \texttt{future} type. A future is a helpful mechanism
+that allows us to both wait for a task and obtain its return value. A future starts out as empty.
+It can have any number of readers but only one writer. The writer is usually the creator of the future
+and will set its value exactly once, at some point after creation. The readers can then try to get the
+value inside the future. If the future is fulfilled, the get call returns instantly. Otherwise, it
+becomes a blocking call, waiting until the future is set, then returning the respective value.
+
+Implementing a future is similar to the safe queue, using a mutex and a condition variable.
+Getting and setting the future requires acquiring the lock. The getter has to wait on the condition
+variable if the future is not set. The setter notifies all the getters after setting the value.
+The full implementation can be found in the Appendix.
+
+With the future implemented, we can finish the thread pool, having a mechanism for pushing a job:
+
+\begin{verbatim}
+procedure thread_pool_add_job(tp, fn, args):
+  fut := future()
+  safe_queue_push(tp.safe_queue, {fn, args, fut})
+  return fut
+\end{verbatim}
+
+The caller can use the future to wait for the result of the job and the workers need to set the future
+when finishing a job. Finally, I note that the thread pool must deal with exception handling. The worker threads
+need to catch any error while running the job and report it through the future. Initially, I failed to include
+it meaning that worker threads unwinded unsafely. This lead to the the thread-pool being unable to signal the
+thread and fail to terminate. Additionally, threads waiting for the result would also be stuck.
+
+There are many aspect to be considered in the design of a thread pool. I have focused on the main ones, and
+this thread pool was sufficient for the rest of evaluation. I have successfully used to to parallelise the
+other experiments in this report. However, depending on the task it could be improved upon with more features.
+Currently, the number of threads is static, but it could dinamically start and stop threads to accommodate
+the workload. A more efficient safe queue could be implemented using granular locking. Furthermore, we could
+reduce contention on the queue by having each worker keep its own queue, and the main queue would act as a
+dispatcher.
+
+\section{Implementing Parallel Mergesort}
+\label{sec:orgafb467e}
+
+To test the correctness and performance of ParVSL I implemented a few classic algorithms that are relatively
+easy to parallelise. Sorting is a particularly good example. Mergesort splits a list in two, sort each half
+recursively, then merges the results to obtain the sorted list. Sorting the individual halves can be done
+in parallel.
+
+\begin{verbatim}
+tp := thread_pool()
+
+procedure parallel_merge_sort(list):
+  if length(list) < 2:
+    return list
+
+  xs, ys := split(list)
+  sorted_xs_future := thread_pool_add_job(tp, 'parallel_merge_sort, {xs})
+  sorted_ys := parallel_merge_sort(ys)
+  sortex_xs := future_get(sorted_xs_future)
+
+  return merge(sorted_xs, sorted_ys)
+\end{verbatim}
+
+We use the thread pool implemented above to achieve parallelism. Without the thread pool, we would
+have to manually manage threads. Using threads here would have resulting in a new thread spawned for
+each element in the array. The function would already oversubscribe threads for lists as small as
+100 elements. The thread pool only uses a constant number of threads.
+
+\section{Dealing with tasks waiting for other takss}
+\label{sec:org9528c3b}
+
+However, the naive implementation above is incorrect and it will deadlock as soon as the number of
+jobs exceeds the number of workers. This highlights a shortcoming of the thread pool. In its current
+state is does not handle tasks enqueing and then waiting for other tasks. In this case, all the workers
+will end up waiting for the future (\texttt{sorted\_xs\_future}) without doing any work.
+
+To fix this, I have added extra functionality to the thread pool. An extra procedure \texttt{thread\_pool\_run\_job}
+allows can be called by any thread to run on job on the queue. This procedure is implemented similarly
+to the worker function, except it only takes at most one job (or none if the queue is empty) from the
+queue instead of looping.
+This function should be called by any job which is waiting for another job in the thread pool.
+
+I also needed to implement another function for futures \texttt{futue\_try\_get}, which only returns the
+value in the future if it was fulfilled, without blocking, or indicates failure, without blocking.
+
+Subsequently, I have changed line \texttt{10} above to the following code:
+\begin{verbatim}
+while null (future_try_get(sorted_xs_future):
+  thread_pool_run_job(tp)
+\end{verbatim}
+Now, workers can start (and finish) other jobs while waiting and will not deadlock.
+
+\section{{\bfseries\sffamily TODO} Results}
+\label{sec:orgef780a7}
+
+To test the correctness, I simply generate a list of random numbers, then compare the output
+to that of the sorting function built in Reduce. Afterwards, I could test for performance.
+I first tuned the parallel version to use the sequential algorithm once if the list is too
+small. I found on my machine that around parrallelisation became useful once the size of
+the list was larger than 1000, and I tuned it to a threshold of 5000. Without this opimisation
+the parallel version would spawn too many jobs (\(O(N)\) to be more exact) and the time book-keeping
+would completely eliminate any benefit of multi-threading. Indeed, it runs an order of magnitude
+slower on large lists (over 1000 elements).
+
+I have plotted the speedup boost offered for a number of array lengths, depending on the number
+of workers.
+
+
+\begin{center}
+\begin{tabular}{rrrrr}
+ & 100 & 250 & 500 & 1000\\
+\hline
+1 & 2.351 & 5.282 & 11.152 & 22.840\\
+2 & 1.563 & 3.409 & 5.850 & 11.706\\
+3 &  &  &  & \\
+4 &  &  &  & \\
+5 &  &  &  & \\
+6 &  &  &  & \\
+7 & 1.319 & 2.554 & 4.906 & 9.054\\
+8 &  &  &  & \\
+16 & 1.071 & 2.137 & 3.995 & 7.514\\
+ &  &  &  & \\
+\end{tabular}
+\end{center}
+
+
+
+\section{Parallel building of Reduce}
+\label{sec:org52eaeb9}
+
+The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
+can simply run to build it. The process can be separated into two steps:
+building the core of REDUCE, and then building all the additional packages.
+The core, which I will refer to as RCORE, satisfies most of the dependencies
+any of the additional packages need, and only takes a fraction of the time
+to build.
+
+\begin{center}
+\begin{tabular}{lr}
+ & Time (s)\\
+\hline
+RCORE & 18\\
+REDUCE & 1:59\\
+\end{tabular}
+\end{center}
+\section{Testing ParVSL on different platforms}
+\label{sec:orge62a399}
+
+My benchmarks so far have focused on x86 Linux, running
+up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the
+C++ compiler supports it. ParVSL further requires C++11 support, however at the
+time of this writing, the standard is already widely supported on all major platforms.
+I have also ran my test on different systems to verify this claim.
+
+I tested three major operating systems: Linux, MacOS, and Windows. I also
+ran the tests on a Raspberry PI to test it on the ARM platform. Compiling on the Raspberry PI
+posed problems even for the single-threaded VSL, as only older compilers are available
+there and they exhibiting some bugs in compiling the code and complained about valid code.
+The other systems successfully compiled and ran all the code.
+
+The more surprising result is the vast difference in performance between the platforms
+when running ParVSL vs VSL.
+
+
+\begin{center}
+\includegraphics[width=.9\linewidth]{thread_local.png}
+\end{center}
+
+
+As we can observe, simply using thread-local storage can have a big impact on performace.

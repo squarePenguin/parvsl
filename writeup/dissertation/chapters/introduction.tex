@@ -1,0 +1,54 @@
+The motivation for this project is to explore the implementation of multi-threading
+capabilities within a working compiler and assess the benefits and tradeoffs it brings
+to a real-world application with a large, actively-developed body of code.
+
+\section{REDUCE}
+\label{sec:orgf1701db}
+
+\href{https://reduce-algebra.sourceforge.io/}{REDUCE} \cite{reduce} is a portable general-purpose algebra system (CAS). It enables symbolic
+manipulation of mathematical expressions and provides a wide range of algorithms
+to solve problems spanning many fields, with arbitrary precision numerical approximation.
+It has a friendly user interface and can display maths and generate graphics.
+
+REDUCE is one of a few open-source general-purpose CAS programs, alongside Maxima and Axiom.
+The three projects are all built on top of different Lisp kernels. At the time of this writing,
+none of these projects have any multi-threaded capabilities. My aim is to remove this limitation
+for REDUCE. The project is using its own Lisp dialect which is similar to Common Lisp, but has its
+own design and set of capabilities.
+
+\section{VSL}
+\label{sec:org0f33bda}
+
+Over the years, there have been multiple implementations of the Lisp compiler REDUCE is using, with
+different goals: PSL, CSL and VSL. VSL is an interpreted language written in the programming
+language \texttt{C}. It is fully capable of building the entirety of REDUCE, supports all the major
+platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
+of being interpreted.
+
+\section{Benefits of multithreading}
+\label{sec:org5d57a0b}
+
+The idea of using parallel computing to speed up computer algebra computing has come
+up in research papers for many years \cite{multithreading}, but much of the activity now
+predates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
+they now provide. Moreover, advancements in single-core CPU performance has slowed down
+significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
+area of imrpovement in these new CPUs is their core count and number of hardware threads.
+Binding the performance of Reduce to single-threaded performance is likely to lead to
+a limitation in speed gains from new hardware.
+
+\section{Code examples}
+\label{sec:org2bbfd00}
+
+To help explain the concepts I introduce, I will use code fragments showing the algorithms.
+These fragments will be a simplification of the original code, in order to remove the need
+for context within the rest of the codebase. To that end, the names and function interfaces
+are different from the real implementation. More complete versions of the code fragments
+I showcase can be found in the Appendix.
+
+For examples relating to the implementation of the interpreter, I will be using C++.
+For work related to my evaluation, I will be showcasing the ParVSL language, which is a type
+of Lisp. Reduce implements an additional syntax on top of Lisp, called RLisp.
+I have tried my best to keep RLisp examples short and as readable
+as possible. Where I think the syntax of the language get in the way of readability, I
+switch to pseudocode to aid my explanations.
