@@ -4,69 +4,19 @@
 # #+EMAIL: avb40@cam.ac.uk
 
 #+OPTIONS: toc:nil
-#+LATEX_CLASS: article
-#+LATEX_CLASS_OPTIONS: [a4paper, 12pt]
-#+LATEX_HEADER: \usepackage[margin=3cm]{geometry}
+#+LATEX_CLASS: book
+#+LATEX_CLASS_OPTIONS: [a4paper,12pt,twoside,openright]
+#+LATEX_HEADER: \usepackage[margin=25mm]{geometry}
 # #+LATEX_HEADER: \pagenumbering{roman}
 # #+LATEX_HEADER_EXTRA:
 #+DATE: \today
 
-#+BEGIN_EXPORT latex
-% Title
-
-\pagestyle{empty}
-
-\hfill{\LARGE \bf Andrei-Vlad Bădeliță}
-
-\vspace*{60mm}
-\begin{center}
-\Huge{\bf Implementing Parallelism in Lisp for REDUCE} \\
-\vspace*{5mm}
-Part II Computer Science Dissertation \\
-\vspace*{5mm}
-Trinity College \\
-\vspace*{5mm}
-\today  % today's date
-\end{center}
-
-\cleardoublepage
-#+END_EXPORT
-
-#+LATEX: \newpage
-
-\pagestyle{plain}
-
-\section*{Declaration of originality}
-
-I, Andrei-Vlad Bădeliță of Trinity College,
-being a candidate for Part II of the Computer Science Tripos,
-hereby declare that this dissertation and the work described in it
-are my own work, unaided except as may be specified below, and
-that the dissertation does not contain material that has already
-been used to any substantial extent for a comparable purpose.
-
-Signed 
-
-Date
-
-\section*{Proforma}
-
-TODO Write proforma
-- Your candidate number.
-- The Title of your Project.
-- The Examination and Year.
-- Word-count for the dissertation.
-- Final line count: Number of lines written by the *student* in the final version of their software work.
-- Project Originator.
-- Project Supervisor.
-- At most 100 words describing the original aims of the project.
-- At most 100 words summarising the work completed.
-- At most 100 words describing any special difficulties that you faced. 
-
-
-#+LATEX: \newpage
+#+INCLUDE: "./headers.org" :only-contents t
 
 #+TOC: headlines 2
+
+#+LATEX: \setcounter{page}{0}
+#+LATEX: \pagenumbering{arabic}
 
 * Introduction
 The motivation for this project is to explore the implementation of multi-threading
@@ -111,7 +61,7 @@ To help explain the concepts I introduce, I will use code fragments showing the 
 These fragments will be a simplification of the original code, in order to remove the need
 for context within the rest of the codebase. To that end, the names and function interfaces 
 are different from the real implementation. More complete versions of the code fragments 
-I showcase can be found in the [[Appendix]].
+I showcase can be found in the Appendix.
 
 For examples relating to the implementation of the interpreter, I will be using C++.
 For work related to my evaluation, I will be showcasing the ParVSL language, which is a type
@@ -239,7 +189,7 @@ for a pointer type, it allows many different types of objects (integers, floats,
 in a unified way, while staying compact in memory. The disadvantage is that it is is difficult to track memory
 corruption, making debugging more difficult. This will become a problem if any bug in the code produces a data-race.
 
-Please refer to the [[Appendix]] for a more detailed implementation of the algorithm.
+Please refer to the Appendix for a more detailed implementation of the algorithm.
 
 **** TODO reference cheney
 *** Conservative GC
@@ -1138,7 +1088,7 @@ becomes a blocking call, waiting until the future is set, then returning the res
 Implementing a future is similar to the safe queue, using a mutex and a condition variable.
 Getting and setting the future requires acquiring the lock. The getter has to wait on the condition
 variable if the future is not set. The setter notifies all the getters after setting the value.
-The full implementation can be found in the [[Appendix]].
+The full implementation can be found in the Appendix.
 
 With the future implemented, we can finish the thread pool, having a mechanism for pushing a job:
 
@@ -1347,78 +1297,5 @@ mentioning implementing thread early
 I must be careful to not collect the data during garbage
  collection, and I cover that in the [[Garbage collection]] section.
 
-* References
 
-bibliographystyle:unsrt
-bibliography:dissertation.bib
-
-[[https://docs.microsoft.com/en-us/windows/desktop/ProcThread/thread-local-storarage]]
-
-* Appendix
-
-** Cheney's algorithm 
-
-#+BEGIN_SRC C++
-// LispObject is just a pointer type
-typedef uintptr_t LispObject;
-
-// LispObject is a pointer type
-uintptr_t fringe1, limit1; // heap1, where all allocations happen 
-uintptr_t fringe2, limit2; // heap2 used for copying GC
-
-LispObject allocate(size_t size) {
-  if (fringe1 + size > limit1) {
-    collect();
-  }
-
-  if (fringe1 + size > limit1) {
-     // We are out of memory. Try to increase memory
-     // ...
-  }
-
-  uintptr_t result = fringe1;
-  fringe1 += size;
-  return result;
-}
-
-// Two helper functions are needed
-LispObject copy(LispObject obj) {
-  size_t len = size(obj);
-
-  LispObject new_obj = static_cast<LispObject>(fringe2);
-  fringe2 += len;
-  return new_obj;
-}
-
-uintptr_t copycontent(LispObject obj) {
-  for (auto ref&: forward_references(obj)) {
-    ref = copy(ref);
-  }
-
-  return static_cast<uintptr_t>(obj) + size(obj);
-}
-
-void collect() {
-  // First we copy over the root set, which includes symbols.
-  for (LispObject& symbol: symbols_table) {
-    symbol = copy(symbol);
-  }
-
-  uintptr_t s = heap2;
-  while (fringe2 < fringe2) {
-    s = copycontent(static_cast<LispObject>(s));
-  }
-
-  swap(fringe1, fringe2);
-  swap(limit1, limit2);
-}
-#+END_SRC 
-
-** ~Gc_guard~ and ~Gc_lock~
-** Lock free symbol lookup
-** Thread pool
-
-[[https://math.berkeley.edu/~bernd/what-is.pdf]]
-
-bibliographystyle:unsrt
-bibliography:dissertation.bib
+#+INCLUDE: "./appendix.org"

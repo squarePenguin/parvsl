@@ -19,3 +19,12 @@ bad*
 vsl
 parvsl
 fastparvsl
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.xml
+*.gz
+*.toc

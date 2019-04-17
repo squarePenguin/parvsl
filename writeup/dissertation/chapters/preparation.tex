@@ -3,9 +3,9 @@ I have forked the the original VSL project into a new language which I call for 
 ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
 
 VSL was a good candidate for this project because it featured a complete, working Lisp implementation while being
-small enough to be a managable project. The entire VSL codebase consists of around 10000 lines of code, all of which
+small enough to be a manageable project. The entire VSL codebase consists of around 10000 lines of code, all of which
 was originally contained within a single file. Before making changes in critical areas, I spent some time familiarising
-myself with the code. This included spliting the project in more more files, fixing a few obvious bugs, and porting
+myself with the code. This included splitting the project in more more files, fixing a few obvious bugs, and porting
 to C++.
 
 \section{From C to C++}
@@ -18,7 +18,7 @@ and operating systems and can break between versions.
 
 C++ is a superset of C and can compile existing, standard C code easily. The C++11 standard addresses the
 above omissions, making C++ a multi-threaded language. While in some cases the implementation uses the same
-libraries as the C equivalend (e.g POSIX), we do not have to think about these details and the code
+libraries as the C equivalent (e.g POSIX), we do not have to think about these details and the code
 we write is fully portable. The only requirement is that a C++11 compliant compiler is used to compile the
 code and then which platforms these compilers can target. As of today, the C++11 standard has matured enough
 that all the large compiler vendors (i.e GCC, Clang, Visual C++, Mingw, etc.) fully support it on the
@@ -31,7 +31,7 @@ and became confident those changes wouldn't affect the semantics of the program.
 
 \section{Throughput vs latency}
 When optimising for performance in a programming language, we have to analyse the tradeoff between
-total thoughput and latency. Optimising for latency means minimising the duration of any individual
+total throughput and latency. Optimising for latency means minimising the duration of any individual
 task in the program, and increasing availability. Optimising for throughput involves minimising the
 total running time of the program. For example, a web server would benefit more from reducing latency
 of any individual request.
@@ -45,9 +45,9 @@ This is particularly important when designing the garbage collector.
 \section{Memory allocation}
 Memory is managed by the interpreter. It allocates a large block of memory at the beginning,
 which it then manages as a contiguous array. When running out of memory, an extra block of the
-same size as current available memory is malloced, doubling the amount available. These blocks are
+same size as current available memory is malloc-ed, doubling the amount available. These blocks are
 never freed until the end of the program. They are sorted by their pointer locations,
-and carefully \emph{joined} together to maintain the abstract model of continguous memory. Binary search
+and carefully \emph{joined} together to maintain the abstract model of contiguous memory. Binary search
 is used to identify the block containing a location.
 
 \section{Garbage collector}
@@ -62,7 +62,7 @@ an invalid state, corrupting the state of the program and leading to undefined b
 are also very difficult to spot and debug, as they can go undetected until the particular region of memory
 is accessed again.
 
-\section{Cheaney's algorithm}
+\section{Cheney's algorithm}
 The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
 Before the first garbage collection cycle, memory can simply be allocated in a continuous fashion, making it
 compact and fast. When the garbage collector finds unreachable objects and eliminates them, they will leave \emph{gaps} behind
@@ -86,7 +86,7 @@ solving large problems as fast as possible. A large compaction stage is more eff
 switching between running code and collecting garbage and minimises fragmentation.
 This makes the copying approach suitable for the language.
 
-Cheaney's algorithm is a method of stop-the-world copying garbage collection. The virtual \emph{heap} is divided into
+Cheney's algorithm \cite{cheney} is a method of stop-the-world copying garbage collection. The virtual \emph{heap} is divided into
 two halves, and only one half is in use for allocations. The other half is considered free and used during garbage
 collection. When the first half is full and garbage collection is triggered, all traceable objects are copied over
 to the second half. Then, the two halves are swapped.
@@ -94,15 +94,15 @@ to the second half. Then, the two halves are swapped.
 To start the tracing we need to consider a root set: a subset of object which are known to be accessible.
 One example of elements in the root set is the table of symbols which are defined at the start
 of the garbage collection. The stack will also contain pointers to objects and must be scanned when computing the root set.
-While these are the main compontents of the root set, the interpreter may contain others depending on language features
+While these are the main components of the root set, the interpreter may contain others depending on language features
 and implementation, all of which must be spotted and added. The root set must be conservative as missing any object which
 should be in the root set will result in collection of live objects, invalidating the program. It is always
-preferable to overapproximate the root set.
+preferable to over-approximate the root set.
 
 Once we have distinguished a root set, we can trace all references to build the reachable set. Objects may contain references
 to other objects, which are also considered reachable. For example, all elements of a list must be traced recursively.
 The reachable set is the transitive closure of the reachability relation. All objects in the reachable set must be kept
-during collection, while eveything else may be safely collected.
+during collection, while everything else may be safely collected.
 
 The algorithm presented above is a heavily simplified abstraction. The root set includes other
 locations apart from the symbol table, and all of them have to be handled carefully. This was an area
@@ -138,7 +138,7 @@ have to be careful when handling these values, and cannot manipulate them as \te
 \texttt{copy} or \texttt{copycontent} above on them, but they still need to be kept during garbage collection. The solution was
 to \emph{pin} them. Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
 Additionally, the \texttt{allocate} function will have to check for pinned items on the heap and skip over them. This
-additional book-keeping is managable, When building the entirety of REDUCE, the number of pinned items is never
+additional book-keeping is manageable, When building the entirety of REDUCE, the number of pinned items is never
 larger than 300. Considering memory used is in the order of megabytes, these pinned locations cause negligible
 fragmentation.
 
@@ -160,7 +160,7 @@ in other languages, allowing the name to be reused.
 it will result in an error. If it is a fluid and has a global value, that value will be shadowed for the lifetime
 of the binding.
 
-To make it easier to use it as a scripting language, REDUCE's Lisp allows using symbols that aren't global, fluid,
+To make it easier to use it as a scripting language, Reduce's Lisp allows using symbols that aren't global, fluid,
 or locally bound. These will act like local variables, except their lifetime will be defined for the duration of the
 program. For single-threaded programs, this distinction is not important: these variables would act like fluids. However,
 when implementing multithreading, fluids have a global value visible to all threads, while these symbols are only
@@ -170,5 +170,5 @@ visible on their local thread. I will call these symbols \emph{unbound locals}.
 REDUCE has an important feature which allows the user to preserve the state to disk. A \texttt{preserve} instruction can be
 used to do so, and the user is able to specify a function to run on restart. Preserve saves the entire state of the
 program, including memory and symbols. The feature involves careful manipulation of the world state and it can maintaining
-it unaffected when enabling multi-threaded programs is complicated. I ran into a few challanges when implementing ParVSL,
+it unaffected when enabling multi-threaded programs is complicated. I ran into a few challenges when implementing ParVSL,
 which I will discuss in the implementation section.
