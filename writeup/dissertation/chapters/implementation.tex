@@ -1,4 +1,4 @@
-\chapter{Integrating threads}
+\section{Integrating threads}
 \label{sec:orgc047512}
 After familiarising myself with the VSL codebase I tried to implement the simplest form of
 multi-threading and test out how the language would behave. I added a new function to VSL
@@ -21,7 +21,7 @@ To manage the threads, I made further use of the C++11 standard library. I creat
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
 identifier, which is returned to the user. The user can then use the identifier to join the thread.
 
-\chapter{RAII classes}
+\section{RAII classes}
 \label{sec:orgf5c3d69}
 The RAII (Resource Allocation Is Initialisation) design pattern is common in C++. It is a programming
 technique which binds the lifetime of resources to an object's lifetime. Normally,
@@ -64,7 +64,7 @@ user does not handle the thread correctly and that the ParVSL interpreter will e
 % if there is an exception etc make sure it will always happen
 % previous code spent time testing error flags
 
-\chapter{Storage management}
+\section{Storage management}
 \label{sec:org4a62cdf}
 All the memory is global and shared, and multiple threads will often try
 to allocate concurrently, causing contention. A naive solution to this problem
@@ -113,7 +113,7 @@ cycles. This is because reclaiming memory is requested when a new segment cannot
 regardless of how much free space there is in existing segments. While trade-off depends on the
 total memory, I have found a good compromise for segments of a few kilobytes each.
 
-\chapter{Garbage collection}
+\section{Garbage collection}
 \label{sec:org10be605}
 I will use the shortened form \emph{GC} to refer to garbage collection throughout the rest of this chapter for
 brevity.
@@ -288,7 +288,7 @@ reference java, etc. but what I have is good enough
 interlocks add overhead, but w do not need real-time performance
 not many threads
 
-\chapter{Data races in the interpreter}
+\section{Data races in the interpreter}
 \label{sec:org5c3f42d}
 The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
 
@@ -369,7 +369,7 @@ can do so safely, as they will each access their own versions. This eliminates d
 \section{{\bfseries\sffamily TODO} make diagram}
 \label{sec:orgf99baa4}
 
-\chapter{Shared memory and global variables}
+\section{Shared memory and global variables}
 \label{sec:orgf9ed80d}
 VSL has dynamic scoping and exhibits shallow binding. This means there is a global
 storage mapping each symbol to exactly one value. A variable is defined as long
@@ -440,7 +440,7 @@ LispObject& symval(LispObject s) {
 
 To implement shallow binding
 
-\chapter{Lock-free hash-table for symbol lookup}
+\section{Lock-free hash-table for symbol lookup}
 \label{sec:org93b6405}
 Just like allocations are a critical region of code in VSL, so are symbol lookups.
 Every occurrence of a symbol must be looked up in the symbol table. If the symbol does
@@ -539,7 +539,7 @@ LispObject lookup(std::string name) {
   return s;
 }
 \end{verbatim}
-\chapter{Threads}
+\section{Threads}
 \label{sec:orge88e4df}
 
 To start a thread, the user
@@ -582,7 +582,7 @@ thread B, but thread B is waiting for garbage collection). To solve such issues,
 changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
 to make all waiting calls put a thread into a \emph{safe} state before sleeping, so that the garbage collector
 can proceed with the thread.
-\chapter{Saving state to disk and reloading}
+\section{Saving state to disk and reloading}
 \label{sec:orgc59c619}
 
 One important feature of the language is the ability to preserve the state of the world at any

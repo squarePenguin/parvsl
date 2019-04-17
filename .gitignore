@@ -18,6 +18,8 @@ bad*
 .vscode
 vsl
 parvsl
+dvsl
+dparvsl
 fastparvsl
 *.bbl
 *.bcf

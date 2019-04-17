@@ -268,3 +268,7 @@ bug: lock_guard unlock mutex automatically on destructor
 bug in reduce: qsum produces eof infinite loop, same with libreduce and red
 
 BUG: symbols have propery lists, can cause conflicts
+
+diss questions:
+- list of figures/tables?
+- glossary?

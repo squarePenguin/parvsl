@@ -6,12 +6,13 @@
 \usepackage{graphicx}
 \usepackage{grffile}
 \usepackage{longtable}
+\usepackage[acronym]{glossaries}
 \usepackage{wrapfig}
 \usepackage{rotating}
 \usepackage[normalem]{ulem}
 \usepackage{amsmath}
 \usepackage{textcomp}
-\usepackage{biblatex}
+% \usepackage{biblatex}
 \usepackage{amssymb}
 \usepackage{verbatim}
 \usepackage{capt-of}
@@ -127,6 +128,11 @@ There were no special difficulties encountered.
 
 \newpage
 
+% Chapters
+%=============================================================
+
+\pagestyle{headings}
+
 \setcounter{page}{0}
 \pagenumbering{arabic}
 
@@ -145,18 +151,21 @@ There were no special difficulties encountered.
 \chapter{Conclusion}
 \input{chapters/conclusion}
 
-
-\newpage
+% Bibliography and Appendix
+%=============================================================
 
 \addcontentsline{toc}{chapter}{Bibliography}
-% \bibliographystyle{plain}
-% \bibliography{references}
 \printbibliography
 
-\newpage
-
 \appendix
-\chapter{Appendix}
-\input{chapters/appendix}
+
+% \chapter{Glossary}
+% \input{appendix/glossary}
+
+\chapter{Source Code Listings}
+\input{appendix/code}
+
+\chapter{Project Proposal}
+\input{appendix/proposal}
 
 \end{document}
