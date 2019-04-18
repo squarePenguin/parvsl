@@ -272,3 +272,12 @@ BUG: symbols have propery lists, can cause conflicts
 diss questions:
 - list of figures/tables?
 - glossary?
+
+could have hashmap for symbol flag put and get
+property lists can store anything about symbol, including types
+
+in introduction: running concurrent code right is always a challange
+in conclusion: I found that debugging was much more difficult
+things not likely to be be repeatable
+retrofitting concurrency to a an existing codebase shows hidden problems
+which other languages support threads? what's the difference?
