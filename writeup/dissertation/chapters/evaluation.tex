@@ -39,7 +39,7 @@ I tried to find small tests which would still reproduce the issue, then use the
 Valgrind \cite{valgrind}, which offers a large set of tools for detecting undefined behaviour and memory
 corruption.
 
-\section{Bugs in VSL and REDUCE}
+\subsection{Bugs in VSL and REDUCE}
 
 While debugging I found some discovered issues in VSL. The language hadn't been tested
 as extensively until I started working on it. These issues were mostly minor. Some functions
@@ -59,34 +59,97 @@ to code. Another instance was a name clash in the error handling function, leadi
 to contain exceptions. While these two cases have been manually fixed, there are many other
 such potential problems within the Reduce packages which will have to be cleaned up.
 
-\section{Benchmarks}
+\subsection{Benchmarks}
 
 In addition to helping me find issues in ParVSL, building REDUCE also provided for a
 good performance benchmark. The building process simply runs Lisp and RLisp code so
 running it in VSL and ParVSL will showcase the performance difference between the
 two in a single-threaded case.
 
-\section{{\bfseries\sffamily TODO} Memory Allocation}
-Indeed, we can easily see the impact when trying to build reduce:
+Figure \ref{fig:single-threaded} show the relative performance of ParVSL compared to VSL.
+RCORE is the core of REDUCE, skipping non-essential packages from the build. ALG TEST is
+a set of regression tests normally used to check for bugs in the code. INT TEST tests the
+symbolic integration package, and provides a good performance benchmark.
 
-\begin{center}
-\begin{tabular}{llll}
- & VSL & MUTEX & SEGMENT\\
-\hline
- &  &  & 2m1s\\
-\end{tabular}
-\end{center}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=1\linewidth]{single_threaded.png}
+  \caption{Relative performance of ParVSL on single-threaded tests.}
+  \label{fig:single-threaded}
+\end{figure}
 
 
-\begin{center}
-\begin{tabular}{llll}
- & VSL & MUTEX & LOCK-free\\
-\hline
- & 1m55s & 2m10s & 2m4s\\
-\end{tabular}
-\end{center}
+A slow-down between 5 and 20 percent can be observed. I have used the GProf \cite{gprof}
+tool to profile the code and found the biggest cause of the time difference is the
+symbol value extraction mechanism described in \ref{sec:symbols}. In VSL all symbol
+values are stored globally with the symbol, whereas ParVSL adds extra book-keeping.
+The symbol access function is on the critical path, and slows the code by at least
+five percent. This penalty would easily be eliminated in a compiled language, where the
+checks for global and fluid variables could be performed statically and optimised away
+from the runtime. Other causes of the slowdown are thread-local variables in the interpreter,
+which I discuss in section \ref{sec:crossplatform}.
 
-\section{Stress tests}
+\section{Multi-threading unit tests}
+
+While REDUCE provides a large suite of tests for single-threaded behaviour, I had to come
+up with new tests for multi-threading. Before going into larger examples, I started with a small
+suite of unit tests in Lisp.
+
+The following test shows multiple threads sharing a variable. They have to acquire
+a mutex to prevent a data race. All they do is increment it by one, so the final
+value should be equal to the number of calls.
+
+\label{lst:shared-global}
+\begin{verbatim}
+(global '(x x_mutex))
+(setq x 0)
+(setq x_mutex (mutex))
+
+(de incr_x ()
+  (mutex_lock x_mutex)
+  (setq x (add1 x))
+  (mutex_unlock x_mutex))
+
+(dotimes (i 10000) (thread '(incr_x)))
+(print x) % 10000
+\end{verbatim}
+
+When modifying the garbage collector, I had issues when multiple
+threads were initiating it, for example I discovered a deadlock
+with my original GC locks (section \ref{sec:gclock}), which I then
+quickly fixed. It was easily reproduced with the following test:
+
+\label{lst:multi-gc}
+\begin{verbatim}
+% reclaim forces garbage collection
+(dotimes (i 16) (thread '(reclaim)))
+\end{verbatim}
+
+Big numbers use continuous areas of memory and can easily
+fill in entire segments all at ones. The code below simply
+raises a running counter to itself in parallel. It helped me discover
+a that my code was not handling an allocation request being
+larger than the segment size.
+
+\label{lst:number-crunch}
+\begin{verbatim}
+% a naive recursive power function
+(de pow (a b)
+  (cond
+    ((zerop b) 1)                  % if b = 0: return 1
+    (t (times a (pow a (sub1 b)))) % else: return a * pow(a, b - 1)
+  ))
+
+(dotimes (i 1000)
+  % raise i^i for really large numbers
+  (thread 'pow (list i i)))
+\end{verbatim}
+
+These tests, among others, were very helpful in finding bugs in the original
+during development. They were added when testing new functionality,
+sometimes as a result of finding a bug in a larger example.
+They now act as regression tests for ParVSL.
+
 \section{Thread pool}
 
 Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
@@ -362,6 +425,7 @@ REDUCE & 1:59\\
 \end{tabular}
 \end{center}
 \section{Testing ParVSL on different platforms}
+\label{sec:crossplatform}
 
 My benchmarks so far have focused on x86 Linux, running
 up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the

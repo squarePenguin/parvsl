@@ -1,13 +1,13 @@
 \begin{enumerate}
 \item Cheney's algorithm
-\label{sec:org9d148aa}
+\label{sec:cheneycode}
 
 \begin{verbatim}
 // LispObject is just a pointer type
 typedef uintptr_t LispObject;
 
 // LispObject is a pointer type
-uintptr_t fringe1, limit1; // heap1, where all allocations happen 
+uintptr_t fringe1, limit1; // heap1, where all allocations happen
 uintptr_t fringe2, limit2; // heap2 used for copying GC
 
 LispObject allocate(size_t size) {
