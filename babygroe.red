@@ -394,35 +394,29 @@ on time;
 % First S-poly should start off as -x^2+y^2 and that reduces to y^2-y
 % When we have added that to the set all the rest of the S-polys we compute
 % reduce to 0, so we are finished.
+
+lisp << !*noisy := t >>;
+
 babygroe {x*y-x, x^2-y};
 
 babygroe {x^3 - 2*x*y,
           x^2*y - 2*y^2 + x};
 
+lisp << !*noisy := nil >>;
 
 lisp << varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8) >>;
 
-babygroe {
-  a0^4 - a4,
-  a1^3 - a5,
-  a8 - a0 - a1};
-
-lisp << !*noisy := t >>;
+lisp verbos t;
 
 babygroe {
-  a0^5 - a4,
-  a1^3 - a5,
-  a8 - a0 - a1};
-
-%babygroe {
-%  a0^2 - a4,
-%  a1^2 - a5,
-%  a2^2 - a6,
-%  a8 - a0 - a1 - a2};
-
-
-
-quit;
+  a1^2 - 1,
+  a2^2 - a1 - 1,
+  a3^2 - a2 - 1,
+  a4^2 - a3 - 1,
+  a5^2 - a4 - 1,
+  a6^2 - a5 - 1,
+  a7^2 - a6 - 1
+  };
 
 
 quit;
