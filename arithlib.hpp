@@ -2492,6 +2492,16 @@ inline void signed_multiply64(int64_t a, int64_t b,
     lo = l;
 }
 
+inline void signed_multiply64(int64_t a, int64_t b, uint64_t c,
+                              int64_t &hi, uint64_t &lo)
+{   uint64_t h, l;
+    multiply64((uint64_t)a, (uint64_t)b, c, h, l);
+    if (a < 0) h -= (uint64_t)b;
+    if (b < 0) h -= (uint64_t)a;
+    hi = (int64_t)h;
+    lo = l;
+}
+
 inline void divide64(uint64_t hi, uint64_t lo, uint64_t divisor,
                      uint64_t &q, uint64_t &r)
 {   assert(divisor != 0 && hi < divisor);
@@ -5580,9 +5590,9 @@ inline void classical_multiply(uint64_t *a, size_t lena,
 // Now a sequence of stages where at each the number of terms to
 // be combined grows. 
     hi = 0;
-    for (int i=1; i<lenb; i++)
+    for (size_t i=1; i<lenb; i++)
     {   carry = 0;
-        for (int j=0; j<=i; j++)
+        for (size_t j=0; j<=i; j++)
         {   multiply64(b[j], a[i-j], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
@@ -5593,9 +5603,9 @@ inline void classical_multiply(uint64_t *a, size_t lena,
 // If the two inputs are not the same size I demand that lena>=lenb and
 // there may be some slices to compute in the middle here.
 // if lena==lenb the following loop does not get executed at all.
-    for (int i=lenb; i<lena; i++)
+    for (size_t i=lenb; i<lena; i++)
     {   carry = 0;  
-        for (int j=0; j<lenb; j++)
+        for (size_t j=0; j<lenb; j++)
         {   multiply64(b[j], a[i-j], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
@@ -5605,9 +5615,9 @@ inline void classical_multiply(uint64_t *a, size_t lena,
     }
 // Now I will have some stages where the number of terms to be combined
 // gradually decreases. If lenb==2 the following loop is not executed.
-    for (int i=1; i<lenb-1; i++)
+    for (size_t i=1; i<lenb-1; i++)
     {   carry = 0;
-        for (int j=0; j<lenb-i; j++)
+        for (size_t j=0; j<lenb-i; j++)
         {   multiply64(b[i+j], a[lena-j-1], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
@@ -5636,9 +5646,9 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
 // Now a sequence of stages where at each the number of terms to
 // be combined grows. 
     hi = 0;
-    for (int i=1; i<lenb; i++)
+    for (size_t i=1; i<lenb; i++)
     {   carry = 0;
-        for (int j=0; j<=i; j++)
+        for (size_t j=0; j<=i; j++)
         {   multiply64(b[j], a[i-j], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
@@ -5647,9 +5657,9 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
     }
 // If the two inputs are not the same size I demand that lena>=lenb and
 // there may be some slices to compute in the middle here.
-    for (int i=lenb; i<lena; i++)  //  If lenb==lena this loop is not executed
+    for (size_t i=lenb; i<lena; i++)  //  If lenb==lena this loop is not executed
     {   carry = 0;  
-        for (int j=0; j<lenb; j++)
+        for (size_t j=0; j<lenb; j++)
         {   multiply64(b[j], a[i-j], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
@@ -5658,9 +5668,9 @@ inline void classical_multiply_and_add(uint64_t *a, size_t lena,
     }
 // Now I will have some stages where the number of terms to be combined
 // gradually decreases.
-    for (int i=1; i<lenb-1; i++) //  If lenb==2 this loop is not executed
+    for (size_t i=1; i<lenb-1; i++) //  If lenb==2 this loop is not executed
     {   carry = 0;
-        for (int j=0; j<lenb-i; j++)
+        for (size_t j=0; j<lenb-i; j++)
         {   multiply64(b[i+j], a[lena-j-1], lo, hi1, lo);
             carry += add_with_carry(hi, hi1, hi);
         }
