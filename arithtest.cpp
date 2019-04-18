@@ -174,7 +174,7 @@ int main(int argc, char *argv[])
         const int LEN = 1600;
  
         uint64_t a[2000], b[2000], c[5000], c1[5000];
-        size_t lena, lenb, lenc, lenc1;
+        size_t lena, lenb, lenc1;
 
         size_t size[table_size];
         size_t testcount[table_size];
@@ -183,8 +183,6 @@ int main(int argc, char *argv[])
 
         uint64_t my_check = 1;
         uint64_t gmp_check = 1;
-
-        size_t tests;
 
         for (int method=0; method<3; method++)
         {   reseed(seed);
@@ -217,8 +215,14 @@ int main(int argc, char *argv[])
 // way up to the limit and hence where the product is as long as it can be.
 // cases where multiplying m*n leads to a result of length 1 less will not
 // be exercised.
-                    a[lena-1] &= 0x7fffffffffffffffU;
-                    b[lenb-1] &= 0x7fffffffffffffffU;
+                    a[lena-1] &= 0x7fffffff7fffffffU;
+                    b[lenb-1] &= 0x7fffffff7fffffffU;
+// For the benefit of gmp on 32-bit platforms I will ensure that the numbers
+// always have at least one bit set within the top 32-bits. For the beneit of
+// my code I will arrange that the most significant bit of the top digit is 0
+// so that the value is treated as positive.
+                    a[lena-1] |= 0x0010000000000000U;
+                    b[lenb-1] |= 0x0000001000000000U;
 // So that all the administration here does not corrupt my measurement
 // I do the actual multiplication of each test case 500 times.
                     bool ok;
@@ -226,9 +230,12 @@ int main(int argc, char *argv[])
                     {
                     case 0:
                         bigmultiply(a, lena, b, lenb, c1, lenc1);
+                        c[lena+lenb-1] = 0;
                         mpn_mul((mp_ptr)c,
-                                (mp_srcptr)a, lena,
-                                (mp_srcptr)b, lenb);
+                                (mp_srcptr)a,
+                                sizeof(uint64_t)/sizeof(mp_limb_t)*lena,
+                                (mp_srcptr)b,
+                                sizeof(uint64_t)/sizeof(mp_limb_t)*lenb);
                         ok = true;
                         for (size_t i=0; i<lena+lenb; i++)
                         {   if (c[i] != c1[i])

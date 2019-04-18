@@ -161,10 +161,10 @@ step2:	dvsl
 # "arithtest" tests the C++ bignum arithmetic code.
 
 arithtest:	arithtest.cpp arithlib.hpp
-	g++ $(FASTCFLAGS) arithtest.cpp -o arithtest
+	g++ $(FASTCFLAGS) arithtest.cpp -lgmp -o arithtest
 
 arithtest-g:	arithtest.cpp arithlib.hpp
-	g++ $(CFLAGS) arithtest.cpp -o arithtest-g
+	g++ $(CFLAGS) arithtest.cpp -lgmp -o arithtest-g
 
 # Once Reduce is built it becomes possible to try its various test
 # scripts. The shell script "test.sh" does the work, and leaves its
