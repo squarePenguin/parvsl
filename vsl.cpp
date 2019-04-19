@@ -8390,6 +8390,7 @@ void *setuphashlookup(void *k)
     while (setuphash2k[i] != NULL &&
            memcmp(setuphash2k[i], p, MAX_NAMESIZE) != 0)
         i = (i + 1) % SETUPHASHSIZE;
+    return setuphash2v[i];
 }
 
 uint32_t image_nblocks;

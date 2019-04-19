@@ -1141,7 +1141,8 @@ inline intptr_t confirm_size(uint64_t *p, size_t n, size_t final)
         return r;
     }
     ((LispObject *)&p[-1])[0] =
-        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t));
+        tagHDR + typeBIGNUM + packlength(final*sizeof(uint64_t) +
+                                         (sizeof(LispObject)==4 ? 4 : 0));
 // If I am on a 32-bit system the data for a bignum is 8 bit aligned and
 // that leaves a 4-byte gat after the header. In such a case I will write
 // in a zero just to keep memory tidy.
@@ -1179,8 +1180,12 @@ inline size_t number_size(uint64_t *p)
     size_t r = veclength(h);
 // On 32-bit systems a bignum will have a wasted 32-bit word after the
 // header and before the digits, so that the digits are properly aligned
-// in memory.
-    if (sizeof(LispObject) == 4) r -= 4;
+// in memory. The result will be that the bignum is laid out as follows
+//      |     hdr64     | digit64 | gigit64 | ... |    (64-bit world)
+//      | hdr32 | gap32 | digit64 | digit64 | ... |    (32-bit world)
+// The length value packed into the header is the length of the vector
+// excluding its header.
+//  if (sizeof(LispObject) == 4) r -= 4; { the remaindering does all I need! }
     r = r/sizeof(uint64_t);
     assert(r>0);
     return r;
@@ -1223,6 +1228,8 @@ inline char *reserve_string(size_t n)
 
 inline LispObject confirm_size_string(char *p, size_t n, size_t final)
 {   LispObject *a = (LispObject *)(p - sizeof(LispObject));
+// On 32-bit platforms I do not have a padder word before string data
+// so things are simpler here than when confirming the size of a number.
     *a = tagHDR + typeSTRING + packlength(final);
     return (LispObject)a +tagATOM;
 }
