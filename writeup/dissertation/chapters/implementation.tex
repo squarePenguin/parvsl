@@ -21,8 +21,8 @@ To manage the threads, I made further use of the C++11 standard library. I creat
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
 identifier, which is returned to the user. The user can then use the identifier to join the thread.
 
-\section{RAII classes}
-\label{sec:orgf5c3d69}
+\subsection{RAII classes}
+\label{sec:raii}
 The RAII (Resource Allocation Is Initialisation) design pattern is common in C++. It is a programming
 technique which binds the lifetime of resources to an object's lifetime. Normally,
 C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
@@ -65,7 +65,7 @@ user does not handle the thread correctly and that the ParVSL interpreter will e
 % previous code spent time testing error flags
 
 \section{Storage management}
-\label{sec:org4a62cdf}
+\label{sec:storage}
 All the memory is global and shared, and multiple threads will often try
 to allocate concurrently, causing contention. A naive solution to this problem
 would have been to use a mutex lock on allocations. While this would be easy to
@@ -78,8 +78,29 @@ Each instruction is a list data structure, with each elements allocated.
 Serialising allocations is guaranteed to slow down the language enough to cancel
 any advantage multi-threading brings to the language.
 
-\section{Memory allocation}
-\label{sec:orge715076}
+% \section{{\bfseries\sffamily TODO} Memory Allocation}
+% Indeed, we can easily see the impact when trying to build reduce:
+
+% \begin{center}
+% \begin{tabular}{llll}
+%  & VSL & MUTEX & SEGMENT\\
+% \hline
+%  &  &  & 2m1s\\
+% \end{tabular}
+% \end{center}
+
+
+% \begin{center}
+% \begin{tabular}{llll}
+%  & VSL & MUTEX & LOCK-free\\
+% \hline
+%  & 1m55s & 2m10s & 2m4s\\
+% \end{tabular}
+% \end{center}
+
+
+\subsection{Memory allocation}
+\label{sec:malloc}
 I wanted to allow multiple threads in parallel without affecting the performance
 of allocations. To do this I had to use a lock-free approach. To do this, I further
 split the memory into regions, which I call \emph{segments}. A segment is a thread-local region
@@ -114,7 +135,7 @@ regardless of how much free space there is in existing segments. While trade-off
 total memory, I have found a good compromise for segments of a few kilobytes each.
 
 \section{Garbage collection}
-\label{sec:org10be605}
+\label{sec:gc}
 I will use the shortened form \emph{GC} to refer to garbage collection throughout the rest of this chapter for
 brevity.
 
@@ -191,8 +212,9 @@ void garbage_collection() {
 }
 \end{verbatim}
 
-\section{{\bfseries\sffamily TODO} Garbage collection locks and safety}
-\label{sec:orgc09e182}
+% TODO
+\subsection{Garbage collection locks and safety}
+\label{sec:gclock}
 The garbage collector is \emph{stop-the-world}. The thread initiating garbage collection must wait for all
 threads to be ready. Similarly, all threads must regularly check whether a garbage collection cycle was
 initiated and act accordingly.
@@ -282,14 +304,15 @@ public:
 };
 \end{verbatim}
 
-\section{{\bfseries\sffamily TODO} just having a non-stop gc would be its own project}
-\label{sec:org55eb9ba}
-reference java, etc. but what I have is good enough
-interlocks add overhead, but w do not need real-time performance
-not many threads
+% \section{{\bfseries\sffamily TODO} just having a non-stop gc would be its own project}
+% \label{sec:org55eb9ba}
+% reference java, etc. but what I have is good enough
+% interlocks add overhead, but w do not need real-time performance
+% not many threads
 
+\label{sec:symbols}
 \section{Data races in the interpreter}
-\label{sec:org5c3f42d}
+\label{sec:datarace}
 The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
 
 All named objects in the lifecycle of the program are \emph{symbols}. All global and local variables, including
@@ -366,11 +389,11 @@ LispObject par_value(LispObject symbol) {
 I carefully replaced all calls to \texttt{value} to \texttt{par\_value}. Now, multiple threads accessing the same symbol
 can do so safely, as they will each access their own versions. This eliminates data races entirely.
 
-\section{{\bfseries\sffamily TODO} make diagram}
-\label{sec:orgf99baa4}
+% \section{{\bfseries\sffamily TODO} make diagram}
+% \label{sec:orgf99baa4}
 
-\section{Shared memory and global variables}
-\label{sec:orgf9ed80d}
+% \section{Shared memory and global variables}
+% \label{sec:sharedmem}
 VSL has dynamic scoping and exhibits shallow binding. This means there is a global
 storage mapping each symbol to exactly one value. A variable is defined as long
 as the symbol is assigned a value. The user can explicitly mark a symbol as global
@@ -393,8 +416,8 @@ hold its own version of the symbol and modify it safely. For fluids, there will 
 shared value. Since I already used the global storage for the pointer, I added one more global
 array, where the pointer indicates the global value.
 
-\section{{\bfseries\sffamily TODO} more comments}
-\label{sec:org0d92ab1}
+% \section{{\bfseries\sffamily TODO} more comments}
+% \label{sec:org0d92ab1}
 \begin{verbatim}
 std::atomic_int num_symbols(0);
 
@@ -432,16 +455,16 @@ LispObject& symval(LispObject s) {
   return res;
 }
 \end{verbatim}
-\section{{\bfseries\sffamily TODO} draw diagram}
-\label{sec:org3c36132}
+% \section{{\bfseries\sffamily TODO} draw diagram}
+% \label{sec:org3c36132}
 
-\section{Shallow binding}
-\label{sec:orgfdc4c3d}
+\subsection{Shallow binding}
+\label{sec:shallow}
 
 To implement shallow binding
 
-\section{Lock-free hash-table for symbol lookup}
-\label{sec:org93b6405}
+\subsection{Lock-free hashtable for symbol lookup}
+\label{sec:hashtable}
 Just like allocations are a critical region of code in VSL, so are symbol lookups.
 Every occurrence of a symbol must be looked up in the symbol table. If the symbol does
 not exist, it will be created. Multiple threads looking up symbols will cause contention.
@@ -472,7 +495,6 @@ LispObject lookup(std::string name) {
 
   return s;
 }
-
 \end{verbatim}
 
 As before, the naive solution would be to implement a mutex lock on the entire
@@ -540,7 +562,7 @@ LispObject lookup(std::string name) {
 }
 \end{verbatim}
 \section{Threads}
-\label{sec:orge88e4df}
+\label{sec:threads}
 
 To start a thread, the user
 simply needs to call the \texttt{thread} function. This function takes as arguments a function name and the argument list
@@ -583,7 +605,7 @@ changes. First, I must modify the functions in the interpreter to poll the globa
 to make all waiting calls put a thread into a \emph{safe} state before sleeping, so that the garbage collector
 can proceed with the thread.
 \section{Saving state to disk and reloading}
-\label{sec:orgc59c619}
+\label{sec:preserve}
 
 One important feature of the language is the ability to preserve the state of the world at any
 time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:

@@ -39,7 +39,7 @@ I tried to find small tests which would still reproduce the issue, then use the
 Valgrind \cite{valgrind}, which offers a large set of tools for detecting undefined behaviour and memory
 corruption.
 
-\section{Bugs in VSL and REDUCE}
+\subsection{Bugs in VSL and REDUCE}
 
 While debugging I found some discovered issues in VSL. The language hadn't been tested
 as extensively until I started working on it. These issues were mostly minor. Some functions
@@ -59,34 +59,97 @@ to code. Another instance was a name clash in the error handling function, leadi
 to contain exceptions. While these two cases have been manually fixed, there are many other
 such potential problems within the Reduce packages which will have to be cleaned up.
 
-\section{Benchmarks}
+\subsection{Benchmarks}
 
 In addition to helping me find issues in ParVSL, building REDUCE also provided for a
 good performance benchmark. The building process simply runs Lisp and RLisp code so
 running it in VSL and ParVSL will showcase the performance difference between the
 two in a single-threaded case.
 
-\section{{\bfseries\sffamily TODO} Memory Allocation}
-Indeed, we can easily see the impact when trying to build reduce:
+Figure \ref{fig:single-threaded} show the relative performance of ParVSL compared to VSL.
+RCORE is the core of REDUCE, skipping non-essential packages from the build. ALG TEST is
+a set of regression tests normally used to check for bugs in the code. INT TEST tests the
+symbolic integration package, and provides a good performance benchmark.
 
-\begin{center}
-\begin{tabular}{llll}
- & VSL & MUTEX & SEGMENT\\
-\hline
- &  &  & 2m1s\\
-\end{tabular}
-\end{center}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=1\linewidth]{single_threaded.png}
+  \caption{Relative performance of ParVSL on single-threaded tests.}
+  \label{fig:single-threaded}
+\end{figure}
 
 
-\begin{center}
-\begin{tabular}{llll}
- & VSL & MUTEX & LOCK-free\\
-\hline
- & 1m55s & 2m10s & 2m4s\\
-\end{tabular}
-\end{center}
+A slow-down between 5 and 20 percent can be observed. I have used the GProf \cite{gprof}
+tool to profile the code and found the biggest cause of the time difference is the
+symbol value extraction mechanism described in \ref{sec:symbols}. In VSL all symbol
+values are stored globally with the symbol, whereas ParVSL adds extra book-keeping.
+The symbol access function is on the critical path, and slows the code by at least
+five percent. This penalty would easily be eliminated in a compiled language, where the
+checks for global and fluid variables could be performed statically and optimised away
+from the runtime. Other causes of the slowdown are thread-local variables in the interpreter,
+which I discuss in section \ref{sec:crossplatform}.
 
-\section{Stress tests}
+\section{Multi-threading unit tests}
+
+While REDUCE provides a large suite of tests for single-threaded behaviour, I had to come
+up with new tests for multi-threading. Before going into larger examples, I started with a small
+suite of unit tests in Lisp.
+
+The following test shows multiple threads sharing a variable. They have to acquire
+a mutex to prevent a data race. All they do is increment it by one, so the final
+value should be equal to the number of calls.
+
+\label{lst:shared-global}
+\begin{verbatim}
+(global '(x x_mutex))
+(setq x 0)
+(setq x_mutex (mutex))
+
+(de incr_x ()
+  (mutex_lock x_mutex)
+  (setq x (add1 x))
+  (mutex_unlock x_mutex))
+
+(dotimes (i 10000) (thread '(incr_x)))
+(print x) % 10000
+\end{verbatim}
+
+When modifying the garbage collector, I had issues when multiple
+threads were initiating it, for example I discovered a deadlock
+with my original GC locks (section \ref{sec:gclock}), which I then
+quickly fixed. It was easily reproduced with the following test:
+
+\label{lst:multi-gc}
+\begin{verbatim}
+% reclaim forces garbage collection
+(dotimes (i 16) (thread '(reclaim)))
+\end{verbatim}
+
+Big numbers use continuous areas of memory and can easily
+fill in entire segments all at ones. The code below simply
+raises a running counter to itself in parallel. It helped me discover
+a that my code was not handling an allocation request being
+larger than the segment size.
+
+\label{lst:number-crunch}
+\begin{verbatim}
+% a naive recursive power function
+(de pow (a b)
+  (cond
+    ((zerop b) 1)                  % if b = 0: return 1
+    (t (times a (pow a (sub1 b)))) % else: return a * pow(a, b - 1)
+  ))
+
+(dotimes (i 1000)
+  % raise i^i for really large numbers
+  (thread 'pow (list i i)))
+\end{verbatim}
+
+These tests, among others, were very helpful in finding bugs in the original
+during development. They were added when testing new functionality,
+sometimes as a result of finding a bug in a larger example.
+They now act as regression tests for ParVSL.
+
 \section{Thread pool}
 
 Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
@@ -105,7 +168,7 @@ can equal the number of hardware threads so that the program never has to spawn 
 than there available, and threads can be reused. Once a thread pool is created, the user simply
 needs to submit jobs and they will be automatically parallelised.
 
-\section{A thread-safe queue}
+\subsection{A thread-safe queue}
 
 The main data structure behind the thread-pool is a thread-safe queue. All threads may push
 jobs to this queue and all working threads pop tasks from it to execute. Jobs can be executed
@@ -169,7 +232,7 @@ end;
 \end{verbatim}
 
 
-\section{Managing threads}
+\subsection{Managing threads}
 
 With the queue implemented we can design the worker threads. The starting thread
 initialises the queue and starts all the workers as individual threads. It can start
@@ -213,7 +276,7 @@ system to schedule other threads, making sure a waiting worker does not spin the
 core to 100\% until forcefully preempted by the OS. It would also prevent other threads
 started by the user from doing work.
 
-\section{Waiting for a job's result}
+\subsection{Waiting for a job's result}
 
 In ParVSL, the \texttt{thread} function takes another function to execute on the new thread,
 along with the arguments for that function. The return value of the function call is
@@ -252,7 +315,7 @@ need to catch any error while running the job and report it through the future. 
 it meaning that worker threads unwounded unsafely. This lead to the the thread-pool being unable to signal the
 thread and fail to terminate. Additionally, threads waiting for the result would also be stuck.
 
-There are many aspect to be considered in the design of a thread pool. I have focused on the main ones, and
+There are many aspects to be considered in the design of a thread pool. I have focused on the main ones, and
 this thread pool was sufficient for the rest of evaluation. I have successfully used to to parallelise the
 other experiments in this report. However, depending on the task it could be improved upon with more features.
 Currently, the number of threads is static, but it could dynamically start and stop threads to accommodate
@@ -287,7 +350,7 @@ have to manually manage threads. Using threads here would have resulting in a ne
 each element in the array. The function would already oversubscribe threads for lists as small as
 100 elements. The thread pool only uses a constant number of threads.
 
-\section{Dealing with tasks waiting for other tasks}
+\subsection{Dealing with tasks waiting for other tasks}
 
 However, the naive implementation above is incorrect and it will deadlock as soon as the number of
 jobs exceeds the number of workers. This highlights a shortcoming of the thread pool. In its current
@@ -310,7 +373,8 @@ while null (future_try_get(sorted_xs_future):
 \end{verbatim}
 Now, workers can start (and finish) other jobs while waiting and will not deadlock.
 
-\section{{\bfseries\sffamily TODO} Results}
+% \section{{\bfseries\sffamily TODO} Results}
+\subsection{Results}
 
 To test the correctness, I simply generate a list of random numbers, then compare the output
 to that of the sorting function built in Reduce. Afterwards, I could test for performance.
@@ -342,8 +406,6 @@ of workers.
 \end{tabular}
 \end{center}
 
-
-
 \section{Parallel building of Reduce}
 
 The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
@@ -357,11 +419,107 @@ to build.
 \begin{tabular}{lr}
  & Time (s)\\
 \hline
-RCORE & 18\\
-REDUCE & 1:59\\
+RCORE & 11.83s\\
+REDUCE & 59:93s\\
 \end{tabular}
 \end{center}
+
+Once good use of multi-threading would be to speed up this build time by
+arranging to build individual REDUCE packages in parallel. The RCORE base
+should still be built sequentially, as it is much more difficult to
+separate independent tasks. However, the rest of the packages mostly
+only have RCORE as a dependency.
+
+I extracted a list of 64 packages to build. The starting point was the
+RCORE image. On VSL, I simply ran the building sequentially:
+
+\begin{verbatim}
+for package_name in packages do
+  build_package package_name;
+\end{verbatim}
+
+The total running time was \texttt{14.190}. Then, I used the thread pool
+to run these builds in parallel:
+
+\begin{verbatim}
+tp := thread_pool(hardware_threads());
+
+pack_futures := {};
+for package_name in packages do <<
+  pack_future := thread_pool_add_job 'build_package {package_name};
+  pack_futures := pack_future . pack_futures;
+>>;
+
+% We need to ensure all jobs are finished.
+for pack_future in pack_futures do
+  if (future_get pack_future) != nil do
+    print "error building package";
+\end{verbatim}
+
+Running this code will initially fail building any package. This is caused
+by global side-effects of building the packages. The first issue is that all
+packages use global symbols with common names for storage. Any global
+symbol used by a package should use a globally unique name, usually by prepending
+the package name to the symbol name. Unfortunately, the writers of these packages
+didn't always follow good practices. It is outside the scope of this project to
+fix all Reduce packages, however I tried to work my way around that.
+
+I modified the ParVSL code so that when I enable a compilation flag it tracks all
+reads and writes to global values of fluid or global symbols. Then, I wrote a python
+script which builds each package individually with the build flag on and saved those
+accessed to a file. The script then computed all conflicts between packages. The script
+then generated a Reduce test file which would remove all global access on building the packages:
+
+\begin{verbatim}
+% Force conflicting symbols to be fluid.
+% Here, global1, global2, etc. are the names of those conflicting symbols
+fluid '(global1 global2 ...)
+fluid '(store!-global1 store!-global2 ...)
+
+store!-global1 := global1;
+store!-global2 := global2;
+...
+
+procedure build_package_safe(name);
+begin
+  % we bind the conflicting variables locally
+  scalar global1, global2 ...;
+
+  % restore their original global values inside the local scope
+  global1 := store!-global1;
+  global2 := store!-global2;
+  ...
+
+  build_package(name);
+end;
+\end{verbatim}
+
+The generated file makes use of the dynamic scoping mechanism in Lisp. When building the package
+with \texttt{build\_package\_safe}, all accesses to those global symbols will instead access locally
+bound ones. This removes all conflicts between symbol accesses, without needing to modify code in
+the Reduce packages themselves.
+
+The second issue I found was that any package can change the access specifier of a global symbol.
+One package could make a symbol global, while another tries to bind it locally causing an error.
+This issue could not be solve at the Lisp level, so I had to add another temporary flag to the
+ParVSL interpreter. Effectively, I disabled globals altogether, and made every global symbol
+fluid instead. Fluids allow all the functionality of globals, plus they will allow other threads
+to locally bind the name.
+
+Finally, I discovered an inherent design flaw in the Lisp language used by Reduce which I could not
+fix. A feature in Reduce allows the user to set flags to a symbol. These flags always affect the global
+symbol. Many Reduce packages use this feature, adding, retrieving and removing flags from shared
+global symbol names. I could not find a way to around this issue without modifying all of Reduce.
+This meant I was not able to parallelise the building of most Reduce packages.
+
+Luckily, I did manage to find at least 20 packages which would not conflict in modifying symbol flags.
+I parallelised the building of those, the built the other packages sequentially. The resulting
+running time was \texttt{8.771s}. This showed a 40\% improvement, which is very promising.
+I believe that fixing the issue of shared global names in Reduce could lead to a big improvement
+of build time when using multi-threading.
+
 \section{Testing ParVSL on different platforms}
+\label{sec:crossplatform}
 
 My benchmarks so far have focused on x86 Linux, running
 up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the
@@ -376,12 +534,29 @@ there and they exhibiting some bugs in compiling the code and complained about v
 The other systems successfully compiled and ran all the code.
 
 The more surprising result is the vast difference in performance between the platforms
-when running ParVSL vs VSL.
-
+when running ParVSL vs VSL. The following are times
 
 \begin{center}
-\includegraphics[width=.9\linewidth]{thread_local.png}
+  \begin{tabular}{lrr}
+                       & VSL    & ParVSL \\
+  \hline
+  x86 Linux            &   58s & 1m08s \\
+  x86 MacOS            & 1m19s & 3m56s  \\
+  x86 Windows (Cygwin) &   1ms & 10m15 \\
+  \end{tabular}
+  % \caption{Building Reduce on different platforms VSL vs ParVSL}
 \end{center}
 
+
+\subsection{Thread-local access performance}
+
+The biggest culprit for the performance imact is the system's thread local storage (TLS)
+mechanism.
+
+\begin{figure}
+\centering
+\includegraphics[width=1\linewidth]{thread_local.png}
+\label{fig:thread-local}
+\end{figure}
 
 As we can observe, simply using thread-local storage can have a big impact on performance.
