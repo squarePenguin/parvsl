@@ -1,4 +1,3 @@
-#define LEHMER 1
 // This is a version that will use my "arithlib.hpp" big-number code.
 
 // Things to think about
@@ -622,7 +621,7 @@ static inline bool isEQHASHX(LispObject x)
 // The Lisp heap will have fixed size.
 
 #ifndef MEM
-INLINE const size_t MEM = 4096;
+INLINE const size_t MEM = (sizeof(void *)==4 ? 360 : 4096);
 #endif // MEM
 
 INLINE const size_t HALFBITMAPSIZE = (uintptr_t)MEM*1024*(1024/128);
@@ -8391,7 +8390,6 @@ void *setuphashlookup(void *k)
     while (setuphash2k[i] != NULL &&
            memcmp(setuphash2k[i], p, MAX_NAMESIZE) != 0)
         i = (i + 1) % SETUPHASHSIZE;
-    return setuphash2v[i];
 }
 
 uint32_t image_nblocks;
@@ -8516,7 +8514,7 @@ int warm_start_1(gzFile f, int *errcode)
         setuphash1v[h] = imagesetup_names[i];
     }
     for (i=0; i<SETUPSIZE; i++)
-    {   const uint64_t *s = (const uint64_t *)setup_names[i];
+    {   const uintptr_t *s = (const uintptr_t *)setup_names[i];
 // The next line computes a value based on the first 16 bytes of the
 // name of an entrypoint. Since it is just used as as hash value the
 // fact that the exact value loaded will depend on whether a big or
