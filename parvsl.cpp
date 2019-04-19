@@ -8250,7 +8250,7 @@ int warm_start_1(gzFile f, int *errcode)
         setuphash1v[h] = imagesetup_names[i];
     }
     for (i=0; i<SETUPSIZE; i++)
-    {   const uint64_t *s = (const uint64_t *)setup_names[i];
+    {   const uintptr_t *s = (const uintptr_t *)setup_names[i];
 // The next line computes a value based on the first 16 bytes of the
 // name of an entrypoint. Since it is just used as as hash value the
 // fact that the exact value loaded will depend on whether a big or
