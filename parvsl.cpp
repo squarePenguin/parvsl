@@ -805,14 +805,11 @@ static LispObject Lchar_upcase(LispObject data, LispObject arg)
 
 static LispObject Lchar_downcase(LispObject data, LispObject arg)
 {   LispObject a = arg;
-    if (isSYMBOL(a))
-    {   if (qpname(a) == nil) return a;
-        a = qpname(a);
-    }
+    if (isSYMBOL(a)) a = qpname(a);
     int ch = 0;
     if (isSTRING(a))
     {   ch = qstring(a)[0] & 0xff;
-        size_t len = veclength(qheader(a)); // strlen(qstring(a));
+        size_t len = strlen(qstring(a));
         if (len==1 && (ch&0x80) == 0) ch = tolower(ch);
         else if (len==2 && (ch & 0xe0) == 0xc0) // 2-byte UTF8
         {   ch = ((ch & 0x1f)<<6) | (qstring(a)[1] & 0x3f);
@@ -1204,7 +1201,7 @@ void inner_reclaim(LispObject *C_stack) {
     inner_reclaim();
 }
 
-volatile int volatile_variable = 12345;
+std::atomic_int volatile_variable{12345};
 
 // VB: For now I naively lock this. Will probably very slow.
 std::mutex check_space_mutex;
@@ -1289,17 +1286,34 @@ static int my_identity_function(int a)
 {   return a;
 }
 
+// From C++17 onwards there will be a guarantee that platform-specific
+// non standard attributes will be ignored, and so I expect to be able to
+// write "[[clang::optnone]]" and the like here, giving cleaner code. Until
+// I am confident about C++17 availability I will guard things with #ifdef.
+#if defined __clang__
+[[clang::optnone]]
+#elif defined __GNUC__
+__attribute__((optimize(0)))
+#endif
 void middle_reclaim()
 {
 // This function is here to have a stack frame (containing w) that will
 // lie between that of reclaim and inner_reclaim. The stupid-looking test
 // on volatile_variable is intended to persuade clever compilers that they
 // should not compile this procedure in-line or consolidate its stack
-// frame with either its caller or callee.
+// frame with either its caller or callee. Well I suppose I can still imagine
+// some agressive compiler inlining the first one or two levels of the
+// appatent recursion here and then positioning tha variable w at an arbitrary
+// position in the stack frame of the caller, so I do not have any guarantees
+// here, and it is pretty clear than no C++ standard would ever let me make
+// this code officially portable. But it will take a pretty extreme compiler
+// to mess things up! Also observe that for both g++ and clang I try the use
+// of pragmas to disable optimization for this particular function to yet
+// further strengthen my expectations.
     int w;
     if (volatile_variable != my_identity_function(volatile_variable))
     {   inner_reclaim(NULL);  // never executed!
-        middle_reclaim();     // never executed!
+        middle_reclaim();     // recursive call to self never executed!
     }
     inner_reclaim((LispObject *)((intptr_t)&w & -sizeof(LispObject)));
     par::reset_segments();
@@ -1319,18 +1333,26 @@ void reclaim(int line)
 // The purpose of this function is to force any even partially
 // reasonable C compiler into putting all registers that contain
 // values from the caller onto the stack. It assumes that there
-// could not be more than 12 "callee saves" registers, that the
-// "register" qualifier in the declaraion here will cause a1-a12 to
-// take precedence when allocating same, and that the volatile
-// qualifier on the variable that is repeatedly referenced is there
-// to try to tell the compiler that it may not make any assumptions
-// (eg that a1-a12 might all have the same value), and the use
-// of it again after the call to inner_reclaim() should force
-// each of those values to be saved across that call. The work done
-// is of course a waste (but assigning back to a volatile variable
-// may force it to be done!) but is modest in the large scheme of
-// things. On most machines I can think of there are a lot fewer
-// than 12 callee-save registers and so this is overkill!
+// could not be more than 12 "callee saves" registers, and that
+// apparent heavy use of the variables a1-a12 will cayuse an
+// optimizing compiler to use its registers for them. The use of
+// a std::atomic<int> variable is there to suggest to the compiler
+// that each separate reference might yield a different value, so all
+// reads and writes to that variable must be performed and an optimizer
+// may not make any assumptions about the values returned. This includes
+// the case of the test "if (volatile_variable != volatile_variable)" which
+// in the absence of other threads can never succeed. In an earlier version
+// of those code I make the variable "volatile int" but I now believe that
+// std::atomic<int> will provide a stronger clue to the compiler that it
+// should not mess about.
+// The values of a1-a12 -- all potentially (but not in reality!) different
+// are set up before the call to middle_reclaim and used after it.
+// The use afterwards is coded to tend to mean that the compiler will generate
+// code to access each variable, and the fact that the result of the
+// calculation is combined into the volatile variable should mean that it
+// does actually have to be computed. Of course because of the lack of
+// sequence points the exact details of the order of calculation here is
+// not defined and a careful compiler could moan to me about that!
     int a1 = volatile_variable,  a2 = volatile_variable,
                  a3 = volatile_variable,  a4 = volatile_variable,
                  a5 = volatile_variable,  a6 = volatile_variable,

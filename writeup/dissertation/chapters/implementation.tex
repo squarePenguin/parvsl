@@ -1,16 +1,20 @@
 \section{Integrating threads}
-\label{sec:orgc047512}
+\label{sec:babythreads}
 After familiarising myself with the VSL codebase I tried to implement the simplest form of
 multi-threading and test out how the language would behave. I added a new function to VSL
 which would takes a piece of code as an argument, starts a new thread and joins again with
 the main thread. Once implemented, I could run first and simplest unit test for ParVSL:
 
 \begin{verbatim}
-(dotimes (i 4) (thread '(print "Hello World")))
+> (dotimes (i 4) (thread '(print "Hello World")))
+"Hello World"
+"Hello World"
+"Value: Hello Worln"Hello Woird"
+ld"
 \end{verbatim}
 
 We can immediately observe the effects of parallelism in action. At this point, the code above
-is just about the only working example. The interpreter is non thread-safe and data races
+is just about the only working example. The interpreter is not thread-safe and data races
 on global variables (including printing to the same stream) lead to undefined behaviour. Printing
 still seems to work, however most other functions would fail. The spawned threads can only handle strings
 and will crash on handling numbers or symbols, or when trying to allocate anything.
