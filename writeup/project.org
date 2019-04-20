@@ -125,11 +125,16 @@ implement harness to bisect
 * Performance
 
 #+BEGIN_QUOTE
-However even when I build using optimization level -O3 the naive tests I have tried show parfastvsl to be slower than fastvsl by about a factor of 10, which seems utterly astonishing to me. When I had seen the slowdown on the "-O0 -g" version I had expected it to be down to you using more inline functions and the non-optimised compilation of those having huge overheads, but there is clearly more than that, and it deserves a bit of investigation and comment. You do not need any of Reduce to observe that - try
+However even when I build using optimization level -O3 the naive tests I have tried show parfastvsl to be slower than fastvsl by about a factor of 10, which seems utterly astonishing to me.
+When I had seen the slowdown on the "-O0 -g" version I had expected it to be down to you using more inline functions and the non-optimised compilation of those having huge overheads,
+but there is clearly more than that, and it deserves a bit of investigation and comment. You do not need any of Reduce to observe that - try
    ./parvsl
    (dotimes (i 100000))
    (time)
-or some such.
+or some such.: "Hello World"
+: "Hello World"
+: "Value: Hello Worln"Hello Woird"
+: ld"
 
 
 Hmm time to profile with "-pg"?? Or to wonder exactly what overheads std::vector imposes, eg by using gdb to step through instruction by instruction .
@@ -281,3 +286,4 @@ in conclusion: I found that debugging was much more difficult
 things not likely to be be repeatable
 retrofitting concurrency to a an existing codebase shows hidden problems
 which other languages support threads? what's the difference?
+lisp is very extensible
