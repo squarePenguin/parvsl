@@ -1,6 +1,7 @@
 #ifndef COMMON_HPP
 #define COMMON_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 
@@ -622,11 +623,31 @@ std::atomic<LispObject> obhash[OBHASH_SIZE];
 
 // Each thread uses its own threadlocal workspace and shouldn't interfere
 // with the others.
-static thread_local LispObject work1 = NULLATOM;
-static thread_local LispObject work2 = NULLATOM;
-static thread_local LispObject cursym = NULLATOM;
+/* static thread_local LispObject work1 = NULLATOM; */
+/* static thread_local LispObject work2 = NULLATOM; */
+/* static thread_local LispObject cursym = NULLATOM; */
 
 static inline LispObject allocateatom(size_t n);
+
+
+INLINE constexpr size_t BOFFO_SIZE = 4096;
+
+INLINE constexpr int printPLAIN = 1;
+INLINE constexpr int printESCAPES = 2;
+INLINE constexpr int printHEX = 4;
+
+INLINE constexpr int INPUT_LINE_SIZE = 256;
+
+INLINE constexpr unsigned int unwindNONE      = 0;
+INLINE constexpr unsigned int unwindERROR     = 1;
+INLINE constexpr unsigned int unwindBACKTRACE = 2;
+INLINE constexpr unsigned int unwindGO        = 4;
+INLINE constexpr unsigned int unwindRETURN    = 8;
+INLINE constexpr unsigned int unwindPRESERVE  = 16;
+INLINE constexpr unsigned int unwindRESTART   = 32;
+
+INLINE constexpr int backtraceHEADER = 1;
+INLINE constexpr int backtraceTRACE  = 2;
 
 // ... and non-LispObject values that need to be saved as part of a
 // heap image.

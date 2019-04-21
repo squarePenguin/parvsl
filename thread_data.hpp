@@ -49,7 +49,7 @@ void add_debug_global(LispObject s) {
 
 static std::atomic_int num_symbols(0);
 
-thread_local std::vector<LispObject> fluid_locals;
+/* thread_local std::vector<LispObject> fluid_locals; */
 std::vector<LispObject> fluid_globals; // the global values
 
 
@@ -64,11 +64,33 @@ public:
     LispObject *C_stackbase;
     LispObject *C_stackhead = nullptr;
 
-    LispObject *work1;
-    LispObject *work2;
-    LispObject *cursym;
+    LispObject work1 = NULLATOM;
+    LispObject work2 = NULLATOM;
+    LispObject cursym = NULLATOM;
 
-    std::vector<LispObject> *fluid_locals;
+    char boffo[BOFFO_SIZE+4];
+    size_t boffop;
+
+    int lispin = STDIN, lispout = STDOUT;
+    std::string file_buffer[MAX_LISPFILES];
+
+    char input_line[INPUT_LINE_SIZE];
+    size_t input_ptr = 0, input_max = 0;
+
+    char printbuffer[32];
+
+    int curchar = '\n', symtype = 0;
+
+    unsigned int unwindflag = unwindNONE;
+    int backtraceflag = -1;
+
+    // I suspect that linelength and linepos need to be maintained
+    // independently for each output stream. At present that is not
+    // done. And also blank_pending.
+    int linelength = 80, linepos = 0, printflags = printESCAPES;
+    bool blank_pending = false;
+
+    std::vector<LispObject> fluid_locals;
 
     /**
      * Whether the thread is in a safe state for GC.
@@ -77,24 +99,24 @@ public:
     bool safe_memory = true;
 
     /**
-     * [local_symbol]
-     * Works just like above, except you can specify the thread id to access.
-     * */
+    * [local_symbol] gets the thread local symbol. may return undefined.
+    * Note, thread_local symbols are only lazily resised. Accessing a local
+    * symbol directly is dangerous. You need to use this function to ensure the
+    * local symbol is at least allocated.
+    */
     LispObject& local_symbol(int loc) {
-        auto& locals = *fluid_locals;
-
-        if (num_symbols > (int)locals.size()) {
-            locals.resize(num_symbols, undefined);
+        if (num_symbols > (int)fluid_locals.size()) {
+            fluid_locals.resize(num_symbols, undefined);
         }
 
 #ifdef DEBUG
-        if (loc >= (int)locals.size()) {
+        if (loc >= (int)fluid_locals.size()) {
             std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
             throw std::logic_error("bad thread_local index");
         }
 #endif // DEBUG
 
-        return locals[loc];
+        return fluid_locals[loc];
     }
 };
 
@@ -117,7 +139,7 @@ public:
     std::thread& get() { return t; }
 };
 
-thread_local Thread_data thread_data;
+static thread_local Thread_data td;
 
 std::unordered_map<int, Thread_data&> thread_table;
 std::mutex thread_table_mutex;
@@ -126,8 +148,6 @@ std::mutex thread_table_mutex;
 // TODO: add to Garbage collector
 std::unordered_map<int, LispObject> thread_returns;
 std::mutex thread_returns_mutex;
-
-thread_local int thread_index = -1;
 
 std::atomic_int num_threads(0);
 std::atomic_int paused_threads(0);
@@ -144,7 +164,7 @@ class Gc_guard {
 public:
     Gc_guard() {
         int stack_var = 0;
-        thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+        td.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
         paused_threads += 1;
         gc_waitall.notify_one();
@@ -155,7 +175,7 @@ public:
         gc_cv.wait(lock, []() { return !gc_on; });
         paused_threads -= 1;
 
-        thread_data.C_stackhead = nullptr;
+        td.C_stackhead = nullptr;
     }
 };
 
@@ -166,24 +186,24 @@ private:
 public:
     Gc_lock() : lock(gc_lock_mutex) {
         assert(gc_on);
-        // std::cerr << "waiting gc lock " << thread_data.id <<  std::endl;
+        // std::cerr << "waiting gc lock " << td.id <<  std::endl;
 
         int stack_var = 0;
-        thread_data.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+        td.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
 
         paused_threads += 1;
         gc_waitall.wait(lock, []() {
             // std::cerr << "paused: " << paused_threads << std::endl;
             // std::cerr << "total: " << num_threads << std::endl;
             return paused_threads == num_threads; });
-        // std::cerr << "Gc_lock " << thread_data.id <<  std::endl;
+        // std::cerr << "Gc_lock " << td.id <<  std::endl;
     }
 
     ~Gc_lock() {
-        // std::cerr << "~Gc_lock " << thread_data.id << std::endl;
+        // std::cerr << "~Gc_lock " << td.id << std::endl;
         paused_threads -= 1;
         gc_on = false;
-        thread_data.C_stackhead = nullptr;
+        td.C_stackhead = nullptr;
         gc_cv.notify_all();
     }
 };
@@ -206,16 +226,12 @@ std::mutex active_threads_mutex;
 int tid = 0;
 
 void init_thread_data(int id, LispObject *C_stackbase) {
-    thread_data.C_stackbase = C_stackbase;
-    thread_data.id = id;
-    thread_data.fluid_locals = &fluid_locals;
-    thread_data.work1 = &work1;
-    thread_data.work2 = &work2;
-    cursym = nil;
-    thread_data.cursym = &cursym;
+    td.C_stackbase = C_stackbase;
+    td.id = id;
+    td.cursym = nil;
 
     std::lock_guard<std::mutex> lock{thread_table_mutex};
-    thread_table.emplace(id, par::thread_data);
+    thread_table.emplace(id, par::td);
     num_threads += 1;
 }
 
@@ -233,7 +249,7 @@ public:
     ~Thread_manager() {
         std::lock_guard<std::mutex> lock{thread_table_mutex};
         num_threads -= 1;
-        thread_table.erase(thread_data.id);
+        thread_table.erase(td.id);
     }
 };
 
@@ -246,10 +262,10 @@ int start_thread(std::function<LispObject(void)> f) {
     auto twork = [f, id]() {
         Thread_manager tm{id};
 
-        // std::cerr << "stackbase " << thread_data.C_stackbase << std::endl;
+        // std::cerr << "stackbase " << td.C_stackbase << std::endl;
         LispObject result = f();
         std::lock_guard<std::mutex> lock{thread_returns_mutex};
-        thread_returns[thread_data.id] = result;
+        thread_returns[td.id] = result;
         thread_cleanup();
     };
 
@@ -398,34 +414,11 @@ int allocate_symbol() {
     return loc;
 }
 
-/**
-* [local_symbol] gets the thread local symbol. may return undefined.
-* Note, thread_local symbols are only lazily resised. Accessing a local
-* symbol directly is dangerous. You need to use this function to ensure the
-* local symbol is at least allocated.
-*/
-LispObject& local_symbol(int loc) {
-    // std::cerr << "local symbol at " << loc << " total=" << num_symbols << std::endl;
-    if (num_symbols > (int)fluid_locals.size()) {
-        fluid_locals.resize(num_symbols, undefined);
-    }
-
-#ifdef DEBUG
-    if (loc >= (int)fluid_locals.size()) {
-        // THis is basically an assert but I am printing a bit more information.
-        std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
-        throw std::logic_error("bad thread_local index");
-    }
-#endif // DEBUG
-
-    return fluid_locals[loc];
-}
-
 bool is_fluid_bound(LispObject s) {
     if (not is_fluid(s)) return false;
 
     int loc = qfixnum(qvalue(s));
-    LispObject local = local_symbol(loc);
+    LispObject local = td.local_symbol(loc);
 
     return local == undefined;
 }
@@ -442,7 +435,7 @@ LispObject& symval(LispObject s) {
     }
 
     int loc = qfixnum(qvalue(s));
-    LispObject& res = local_symbol(loc);
+    LispObject& res = td.local_symbol(loc);
     // Here I assume undefined is a sort of "reserved value", meaning it can only exist
     // when the object is not shallow_bound. This helps me distinguish between fluids that
     // are actually global and those that have been bound.
@@ -470,7 +463,7 @@ public:
         }
 
         loc = qfixnum(qvalue(x));
-        LispObject& sv = local_symbol(loc);
+        LispObject& sv = td.local_symbol(loc);
         save = sv;
         sv = tval;
     }
@@ -478,7 +471,7 @@ public:
     Shallow_bind(Shallow_bind&&) noexcept = default;
 
     ~Shallow_bind() {
-        local_symbol(loc) = save;
+        td.local_symbol(loc) = save;
     }
 };
 

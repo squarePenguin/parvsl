@@ -529,41 +529,41 @@ LispObject wrongnumber5up(LispObject env, LispObject a, LispObject a2,
 static inline LispObject cons(LispObject a, LispObject b)
 {
     check_space(2*sizeof(LispObject), __LINE__);
-    setheapstarts(par::thread_data.segment_fringe);
-    qcar(par::thread_data.segment_fringe) = a;
-    qcdr(par::thread_data.segment_fringe) = b;
-    a = par::thread_data.segment_fringe;
-    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::td.segment_fringe);
+    qcar(par::td.segment_fringe) = a;
+    qcdr(par::td.segment_fringe) = b;
+    a = par::td.segment_fringe;
+    par::td.segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject list2star(LispObject a, LispObject b, LispObject c)
 {   // (cons a (cons b c))
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(par::thread_data.segment_fringe);
-    qcar(par::thread_data.segment_fringe) = a;
-    qcdr(par::thread_data.segment_fringe) = par::thread_data.segment_fringe + 2*sizeof(LispObject);
-    a = par::thread_data.segment_fringe;
-    par::thread_data.segment_fringe += 2*sizeof(LispObject);
-    setheapstarts(par::thread_data.segment_fringe);
-    qcar(par::thread_data.segment_fringe) = b;
-    qcdr(par::thread_data.segment_fringe) = c;
-    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::td.segment_fringe);
+    qcar(par::td.segment_fringe) = a;
+    qcdr(par::td.segment_fringe) = par::td.segment_fringe + 2*sizeof(LispObject);
+    a = par::td.segment_fringe;
+    par::td.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::td.segment_fringe);
+    qcar(par::td.segment_fringe) = b;
+    qcdr(par::td.segment_fringe) = c;
+    par::td.segment_fringe += 2*sizeof(LispObject);
     return a;
 }
 
 static inline LispObject acons(LispObject a, LispObject b, LispObject c)
 {   // (cons (cons a b) c)
     check_space(4*sizeof(LispObject), __LINE__);
-    setheapstarts(par::thread_data.segment_fringe);
-    qcar(par::thread_data.segment_fringe) = par::thread_data.segment_fringe + 2*sizeof(LispObject);
-    qcdr(par::thread_data.segment_fringe) = c;
-    c = par::thread_data.segment_fringe;
-    par::thread_data.segment_fringe += 2*sizeof(LispObject);
-    setheapstarts(par::thread_data.segment_fringe);
-    qcar(par::thread_data.segment_fringe) = a;
-    qcdr(par::thread_data.segment_fringe) = b;
-    par::thread_data.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::td.segment_fringe);
+    qcar(par::td.segment_fringe) = par::td.segment_fringe + 2*sizeof(LispObject);
+    qcdr(par::td.segment_fringe) = c;
+    c = par::td.segment_fringe;
+    par::td.segment_fringe += 2*sizeof(LispObject);
+    setheapstarts(par::td.segment_fringe);
+    qcar(par::td.segment_fringe) = a;
+    qcdr(par::td.segment_fringe) = b;
+    par::td.segment_fringe += 2*sizeof(LispObject);
     return c;
 }
 
@@ -571,10 +571,10 @@ static inline LispObject boxfloat(double a)
 {   if (!std::isfinite(a)) return error0("floating point error");
     LispObject r;
     check_space(8, __LINE__);
-    setheapstartsandfp(par::thread_data.segment_fringe);
-    r = par::thread_data.segment_fringe + tagFLOAT;
+    setheapstartsandfp(par::td.segment_fringe);
+    r = par::td.segment_fringe + tagFLOAT;
     qfloat(r) = a;
-    par::thread_data.segment_fringe += 8;
+    par::td.segment_fringe += 8;
     return r;
 }
 
@@ -584,8 +584,8 @@ static inline LispObject boxfloat(double a)
 static inline LispObject allocatesymbol(LispObject pname)
 {   LispObject r;
     check_space(SYMSIZE*sizeof(LispObject), __LINE__);
-    setheapstarts(par::thread_data.segment_fringe);
-    r = par::thread_data.segment_fringe + tagSYMBOL;
+    setheapstarts(par::td.segment_fringe);
+    r = par::td.segment_fringe + tagSYMBOL;
     qflags(r) = tagHDR + typeSYM;
     qvalue(r) = packfixnum(par::allocate_symbol());
     qplist(r) = nil;
@@ -598,7 +598,7 @@ static inline LispObject allocatesymbol(LispObject pname)
     qdefn4(r) = undefined4;
     qdefn5up(r) = undefined5up;
     qlits(r)  = r;
-    par::thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
+    par::td.segment_fringe += SYMSIZE*sizeof(LispObject);
     return r;
 }
 
@@ -611,11 +611,11 @@ static inline LispObject allocateatom(size_t n)
 // header and must then be rounded up to be a multiple of 8.
     int nn = ALIGN8(sizeof(LispObject) + n);
     check_space(nn, __LINE__);
-    setheapstarts(par::thread_data.segment_fringe);
-    r = par::thread_data.segment_fringe + tagATOM;
+    setheapstarts(par::td.segment_fringe);
+    r = par::td.segment_fringe + tagATOM;
 // I mark the new vector as being a string so that it is GC safe
     qheader(r) = tagHDR + typeSTRING + packlength(n);
-    par::thread_data.segment_fringe += nn;
+    par::td.segment_fringe += nn;
     return r;
 }
 
@@ -852,9 +852,9 @@ static LispObject Lchar_downcase(LispObject data, LispObject arg)
     else return arg;
 }
 
-INLINE constexpr size_t BOFFO_SIZE = 4096;
-thread_local char boffo[BOFFO_SIZE+4];
-thread_local size_t boffop;
+/* INLINE constexpr size_t BOFFO_SIZE = 4096; */
+/* thread_local char par::td.boffo[BOFFO_SIZE+4]; */
+/* thread_local size_t par::td.boffop; */
 
 using std::swap;
 
@@ -914,9 +914,9 @@ void par_reclaim() {
     for (auto x: par::thread_table) {
         auto td = x.second;
 
-        *(td.work1) = copy(*(td.work1));
-        *(td.work2) = copy(*(td.work2));
-        *(td.cursym) = copy(*(td.cursym));
+        par::td.work1 = copy(par::td.work1);
+        par::td.work2 = copy(par::td.work2);
+        par::td.cursym = copy(par::td.cursym);
     }
 
     for (auto& x: par::thread_returns) {
@@ -1197,7 +1197,7 @@ void inner_reclaim()
 // This force sets the stackhead of the gc thread.
 // Useful when inner_reclaim is called directly, e.g during preserve.
 void inner_reclaim(LispObject *C_stack) {
-    par::thread_data.C_stackhead = C_stack;
+    par::td.C_stackhead = C_stack;
     inner_reclaim();
 }
 
@@ -1229,7 +1229,7 @@ void check_space(int len, int line)
     for (;;) // loop for when pinned items intrude.
     {
         // Check if we can just fit in the current segment
-        if (par::thread_data.segment_fringe + len >= par::thread_data.segment_limit) {
+        if (par::td.segment_fringe + len >= par::td.segment_limit) {
 
             std::lock_guard<std::mutex> lock(check_space_mutex);
             int a = par::Thread_data::SEGMENT_SIZE; // Doesn't compile without the indirection
@@ -1243,41 +1243,41 @@ void check_space(int len, int line)
                 }
                 continue;
             } else {
-                // printf("segfringe %llu seglimit %llu size %d \n", par::thread_data.segment_fringe, par::thread_data.segment_limit, size);
-                par::thread_data.segment_fringe = fringe1;
-                par::thread_data.segment_limit = par::thread_data.segment_fringe + size;
+                // printf("segfringe %llu seglimit %llu size %d \n", par::td.segment_fringe, par::td.segment_limit, size);
+                par::td.segment_fringe = fringe1;
+                par::td.segment_limit = par::td.segment_fringe + size;
                 fringe1 += size;
             }
         }
 
         // printf("%lld %lld %lld %lld\n", thread_data.segment_fringe, fringe1, thread_data.segment_limit, limit1);
         // VB: if a segment has been assigned we make these assertions
-        assert(par::thread_data.segment_fringe < par::thread_data.segment_limit);
-        assert(par::thread_data.segment_limit <= limit1);
+        assert(par::td.segment_fringe < par::td.segment_limit);
+        assert(par::td.segment_limit <= limit1);
 
 // here thread_data.segment_fringe+len < thread_data.segment_limit
         for (i=0; i<len; i+=8)
-            if (getheapstarts(par::thread_data.segment_fringe+i)) break;
+            if (getheapstarts(par::td.segment_fringe+i)) break;
         if (i >= len) return; // success
 // a block that looks like a string will serve as a padder...
         if (i > 0)
-        {   qcar(par::thread_data.segment_fringe) =
+        {   qcar(par::td.segment_fringe) =
                 tagHDR + typeSTRING + packlength(i-sizeof(LispObject));
-            setheapstarts(par::thread_data.segment_fringe);
-            par::thread_data.segment_fringe += i;
+            setheapstarts(par::td.segment_fringe);
+            par::td.segment_fringe += i;
             heap1_pads += i;
         }
-        while (getheapstarts(par::thread_data.segment_fringe))
+        while (getheapstarts(par::td.segment_fringe))
         {   LispObject h;
 // I now need to skip over the pinned item. If it is floating point,
 // a cons cell or a symbol I have to detect that, otherwise its
 // header gives its length explicitly.
-            if (getheapfp(par::thread_data.segment_fringe)) par::thread_data.segment_fringe += 8;
-            else if (!isHDR(h = qcar(par::thread_data.segment_fringe)))
-                par::thread_data.segment_fringe += 2*sizeof(LispObject);
+            if (getheapfp(par::td.segment_fringe)) par::td.segment_fringe += 8;
+            else if (!isHDR(h = qcar(par::td.segment_fringe)))
+                par::td.segment_fringe += 2*sizeof(LispObject);
             else if ((h & TYPEBITS) == typeSYM)
-                 par::thread_data.segment_fringe += SYMSIZE*sizeof(LispObject);
-            else par::thread_data.segment_fringe += ALIGN8(sizeof(LispObject) + veclength(h));
+                 par::td.segment_fringe += SYMSIZE*sizeof(LispObject);
+            else par::td.segment_fringe += ALIGN8(sizeof(LispObject) + veclength(h));
         }
     }
 }
@@ -1617,21 +1617,18 @@ static inline LispObject copycontent(LispObject s)
     }
 }
 
-INLINE constexpr int printPLAIN = 1;
-INLINE constexpr int printESCAPES = 2;
-INLINE constexpr int printHEX = 4;
-
-// I suspect that linelength and linepos need to be maintained
+// TODOL: These moved to thread_data. Remove
+// I suspect that par::td.linelength and par::td.linepos need to be maintained
 // independently for each output stream. At present that is not
-// done. And also blank_pending.
-thread_local int linelength = 80, linepos = 0, printflags = printESCAPES;
-thread_local bool blank_pending = false;
+// done. And also par::td.blank_pending.
+/* thread_local int par::td.linelength = 80, par::td.linepos = 0, par::td.printflags = printESCAPES; */
+/* thread_local bool par::td.blank_pending = false; */
 
 LispObject Llinelength(LispObject lits, LispObject a1)
-{   int oo = linelength;
+{   int oo = par::td.linelength;
     if (isFIXNUM(a1))
     {   int nn = qfixnum(a1);
-        if (nn > 0 && nn < 1000000) linelength = nn;
+        if (nn > 0 && nn < 1000000) par::td.linelength = nn;
     }
     return packfixnum(oo);
 }
@@ -1643,20 +1640,20 @@ FILE *lispfiles[MAX_LISPFILES], *logfile = NULL;
 FILE *lispfiles[MAX_LISPFILES];
 #endif // DEBUG
 int32_t interactive = 0;
-thread_local int lispin = STDIN, lispout = STDOUT;
+/* thread_local int par::td.lispin = STDIN, par::td.lispout = STDOUT; */
 std::bitset<MAX_LISPFILES> file_direction;
 int filecurchar[MAX_LISPFILES], filesymtype[MAX_LISPFILES];
 
-thread_local std::string file_buffer[MAX_LISPFILES];
+/* thread_local std::string par::td.file_buffer[MAX_LISPFILES]; */
 std::mutex flush_mutex[MAX_LISPFILES];
 
 void flush(int file=-1) {
-    std::lock_guard<std::mutex> lock(flush_mutex[lispout]);
-    if (file == -1) file = lispout;
-    if (file_buffer[file].length() > 0) {
+    std::lock_guard<std::mutex> lock(flush_mutex[par::td.lispout]);
+    if (file == -1) file = par::td.lispout;
+    if (par::td.file_buffer[file].length() > 0) {
         // assert(file_direction[file]);
-        fwrite(file_buffer[file].c_str(), sizeof(char), file_buffer[file].length(), lispfiles[file]);
-        file_buffer[file].clear();
+        fwrite(par::td.file_buffer[file].c_str(), sizeof(char), par::td.file_buffer[file].length(), lispfiles[file]);
+        par::td.file_buffer[file].clear();
         fflush(lispfiles[file]);
     }
 }
@@ -1665,9 +1662,9 @@ void flushall() {
     for (int i = 0; i < MAX_LISPFILES; i += 1) {
         if (lispfiles[i] != nullptr && file_direction[i]) {
             std::lock_guard<std::mutex> lock(flush_mutex[i]);
-            if (file_buffer[i].length() > 0) {
-                fwrite(file_buffer[i].c_str(), sizeof(char), file_buffer[i].length(), lispfiles[i]);
-                file_buffer[i].clear();
+            if (par::td.file_buffer[i].length() > 0) {
+                fwrite(par::td.file_buffer[i].c_str(), sizeof(char), par::td.file_buffer[i].length(), lispfiles[i]);
+                par::td.file_buffer[i].clear();
                 fflush(lispfiles[i]);
             }
         }
@@ -1676,51 +1673,51 @@ void flushall() {
 
 void wrch1(int c)
 {   //????if (c == '\r') return;
-    if (lispout == -1)
+    if (par::td.lispout == -1)
     {   char w[4];
 // This bit is for the benefit of explode and explodec.
         LispObject r;
         w[0] = c; w[1] = 0;
         r = lookup(w, 1, 1);
-        work1 = cons(r, work1);
+        par::td.work1 = cons(r, par::td.work1);
     }
-    else if (lispout == -3)
+    else if (par::td.lispout == -3)
     {
 // This bit is for the benefit of exploden and explodecn.
         LispObject r;
         r = packfixnum(c & 0xff);
-        work1 = cons(r, work1);
+        par::td.work1 = cons(r, par::td.work1);
     }
-    else if (lispout == -2) boffo[boffop++] = c;
+    else if (par::td.lispout == -2) par::td.boffo[par::td.boffop++] = c;
     else
     {
-        // putc(c, lispfiles[lispout]);
-        file_buffer[lispout] += c;
+        // putc(c, lispfiles[par::td.lispout]);
+        par::td.file_buffer[par::td.lispout] += c;
 #ifdef DEBUG
         if (logfile != NULL)
         {
             // TODO: unsafe writing here
             putc(c, logfile);
             if (c == '\n')
-            {   fprintf(logfile, "%d]", lispout);
+            {   fprintf(logfile, "%d]", par::td.lispout);
             }
         }
 #endif // DEBUG
         if (c == '\n')
-        {   linepos = 0;
+        {   par::td.linepos = 0;
             flush();
-            // fflush(lispfiles[lispout]);
+            // fflush(lispfiles[par::td.lispout]);
         }
-        else if (c == '\t') linepos = (linepos + 8) & ~7;
-        else linepos++;
+        else if (c == '\t') par::td.linepos = (par::td.linepos + 8) & ~7;
+        else par::td.linepos++;
     }
 }
 
 
 void wrch(int ch)
-{   if (blank_pending)
-    {   if (lispout < 0 || linepos != 0) wrch1(' ');
-        blank_pending = false;
+{   if (par::td.blank_pending)
+    {   if (par::td.lispout < 0 || par::td.linepos != 0) wrch1(' ');
+        par::td.blank_pending = false;
     }
     wrch1(ch);
 }
@@ -1730,10 +1727,10 @@ static EditLine *el_struct;
 static History *el_history;
 static HistEvent el_history_event;
 
-INLINE constexpr int INPUT_LINE_SIZE = 256;
-thread_local static char input_line[INPUT_LINE_SIZE];
-thread_local static size_t input_ptr = 0, input_max = 0;
-thread_local char the_prompt[80] = "> ";
+/* INLINE constexpr int INPUT_LINE_SIZE = 256; */
+/* thread_local static char par::td.input_line[INPUT_LINE_SIZE]; */
+/* thread_local static size_t par::td.input_ptr = 0, par::td.input_max = 0; */
+char the_prompt[] = "> ";
 
 // gcc moans if the value of snprintf is unused and there is any chance that
 // truncation arose. To get rid of the warning message I dump the value of
@@ -1753,10 +1750,10 @@ LispObject Lsetpchar(LispObject lits, LispObject a)
 
 int rdch()
 {   LispObject w;
-    if (lispin == -1)
-    {   if (!isCONS(work1)) return EOF;
-        w = qcar(work1);
-        work1 = qcdr(work1);
+    if (par::td.lispin == -1)
+    {   if (!isCONS(par::td.work1)) return EOF;
+        w = qcar(par::td.work1);
+        par::td.work1 = qcdr(par::td.work1);
         if (isFIXNUM(w)) return (qfixnum(w) & 0xff);
         if (isSYMBOL(w)) w = qpname(w);
         if (!isSTRING(w)) return EOF;
@@ -1764,8 +1761,8 @@ int rdch()
     }
     else
     {   int c;
-        if (lispfiles[lispin] == stdin && stdin_tty)
-        {   if (input_ptr >= input_max)
+        if (lispfiles[par::td.lispin] == stdin && stdin_tty)
+        {   if (par::td.input_ptr >= par::td.input_max)
             {   int n = -1;
                 const char *s;
 
@@ -1778,14 +1775,14 @@ int rdch()
                 history(el_history, &el_history_event, H_ENTER, s);
                 if (s == NULL) return EOF;
                 if (n > INPUT_LINE_SIZE-1) n = INPUT_LINE_SIZE-1;
-                strncpy(input_line, s, n);
-                input_line[INPUT_LINE_SIZE-1] = 0;
-                input_ptr = 0;
-                input_max = n;
+                strncpy(par::td.input_line, s, n);
+                par::td.input_line[INPUT_LINE_SIZE-1] = 0;
+                par::td.input_ptr = 0;
+                par::td.input_max = n;
             }
-            c = input_line[input_ptr++];
+            c = par::td.input_line[par::td.input_ptr++];
         }
-        else c = getc(lispfiles[lispin]);
+        else c = getc(lispfiles[par::td.lispin]);
         if (c != EOF && par::symval(echo) != nil) wrch(c);
         return c;
     }
@@ -1794,13 +1791,13 @@ int rdch()
 int gensymcounter = 1;
 
 void checkspace(int n)
-{   if (linepos + n + (blank_pending ? 1 : 0) > linelength &&
-        lispout != -1 &&
-        lispout != -2 &&
-        lispout != -3) wrch('\n');
+{   if (par::td.linepos + n + (par::td.blank_pending ? 1 : 0) > par::td.linelength &&
+        par::td.lispout != -1 &&
+        par::td.lispout != -2 &&
+        par::td.lispout != -3) wrch('\n');
 }
 
-thread_local char printbuffer[32];
+/* thread_local char par::td.printbuffer[32]; */
 
 //
 // I want the floating point print style that I use to match the
@@ -1951,7 +1948,7 @@ void internalprint(LispObject x)
 // print a blank unril I have assessed the width of whatever will follow it!
 // So when a blank is or may be due I set a flag to indicate that and wrch and
 // checkspace will need to interact with it.
-                if (sep == ' ') blank_pending = true;
+                if (sep == ' ') par::td.blank_pending = true;
                 else
                 {   checkspace(1);
                     wrch(sep);
@@ -1961,10 +1958,10 @@ void internalprint(LispObject x)
                 x = qcdr(x);
             }
             if (x != nil)
-            {   blank_pending = true;
+            {   par::td.blank_pending = true;
                 checkspace(1);
                 wrch('.');
-                blank_pending = true;
+                par::td.blank_pending = true;
                 internalprint(x);
             }
             checkspace(1);
@@ -1973,16 +1970,16 @@ void internalprint(LispObject x)
         case tagSYMBOL:
             pn = qpname(x);
             if (pn == nil)
-            {   int len = snprintf(printbuffer, sizeof(printbuffer),
+            {   int len = snprintf(par::td.printbuffer, sizeof(par::td.printbuffer),
                                    "g%.3d", gensymcounter++);
-                if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+                if (len<0 || (unsigned int)len>=sizeof(par::td.printbuffer))
                     pn = makestring("?gensym?", 8);
-                else pn = makestring(printbuffer, len);
+                else pn = makestring(par::td.printbuffer, len);
                 qpname(x) = pn;
             }
             len = veclength(qheader(pn));
             s = qstring(pn);
-            if ((printflags & printESCAPES) == 0)
+            if ((par::td.printflags & printESCAPES) == 0)
             {   uintptr_t i;
                 checkspace(len);
                 for (i=0; i<len; i++) wrch(s[i]);
@@ -2018,7 +2015,7 @@ void internalprint(LispObject x)
                         len = veclength(qheader(x));
                         s = qstring(x);
 #define RAWSTRING       s
-                        if ((printflags & printESCAPES) == 0)
+                        if ((par::td.printflags & printESCAPES) == 0)
                         {   uintptr_t i;
                             checkspace(len);
                             for (i=0; i<len; i++) wrch(RAWSTRING[i]);
@@ -2039,7 +2036,7 @@ void internalprint(LispObject x)
                         return;
                     case typeBIGNUM:
                         {   LispObject ss =
-                                (printflags&printHEX) != 0 ?
+                                (par::td.printflags&printHEX) != 0 ?
                                      arithlib::bignum_to_string_hex(x) :
                                      arithlib::bignum_to_string(x);
                             len = veclength(qheader(ss));
@@ -2069,7 +2066,7 @@ void internalprint(LispObject x)
                             wrch('[');
                         }
                         else for (i=0; i<len; i++)
-                        {   if (sep==' ') blank_pending = true;
+                        {   if (sep==' ') par::td.blank_pending = true;
                             else
                             {   checkspace(1);
                                 wrch(sep);
@@ -2087,98 +2084,98 @@ void internalprint(LispObject x)
                 }
         case tagFLOAT:
             {   double d =  *((double *)(x - tagFLOAT));
-                fp_sprint(printbuffer, d, print_precision, 'e');
+                fp_sprint(par::td.printbuffer, d, print_precision, 'e');
             }
-            len = strlen(printbuffer);
-            for (i=0; i<len; i++) wrch(printbuffer[i]);
+            len = strlen(par::td.printbuffer);
+            for (i=0; i<len; i++) wrch(par::td.printbuffer[i]);
             return;
         case tagFIXNUM:
-            if ((printflags & printHEX) != 0)
-                snprintf(printbuffer, sizeof(printbuffer),
+            if ((par::td.printflags & printHEX) != 0)
+                snprintf(par::td.printbuffer, sizeof(par::td.printbuffer),
                          "%" PRIx64, (int64_t)qfixnum(x));
-            else snprintf(printbuffer, sizeof(printbuffer),
+            else snprintf(par::td.printbuffer, sizeof(par::td.printbuffer),
                          "%" PRId64, (int64_t)qfixnum(x));
-            checkspace(len = strlen(printbuffer));
-            for (i=0; i<len; i++) wrch(printbuffer[i]);
+            checkspace(len = strlen(par::td.printbuffer));
+            for (i=0; i<len; i++) wrch(par::td.printbuffer[i]);
             return;
         default:
 //case tagFORWARD:
 //case tagHDR:
-//          snprintf(printbuffer, sizeof(printbuffer), "??%#" PRIxPTR "??\n", x);
-//          checkspace(len = strlen(printbuffer));
-//          for (i=0; i<len; i++) wrch(printbuffer[i]);
+//          snprintf(par::td.printbuffer, sizeof(par::td.printbuffer), "??%#" PRIxPTR "??\n", x);
+//          checkspace(len = strlen(par::td.printbuffer));
+//          for (i=0; i<len; i++) wrch(par::td.printbuffer[i]);
             assert(0);
     }
 }
 
 LispObject prin(LispObject a)
-{   printflags = printESCAPES;
+{   par::td.printflags = printESCAPES;
     internalprint(a);
     return a;
 }
 
 LispObject princ(LispObject a)
-{   printflags = printPLAIN;
+{   par::td.printflags = printPLAIN;
     internalprint(a);
     return a;
 }
 
 LispObject print(LispObject a)
-{   printflags = printESCAPES;
+{   par::td.printflags = printESCAPES;
     internalprint(a);
     wrch('\n');
     return a;
 }
 
 LispObject printc(LispObject a)
-{   printflags = printPLAIN;
+{   par::td.printflags = printPLAIN;
     internalprint(a);
     wrch('\n');
     return a;
 }
 
 LispObject prinhex(LispObject a)
-{   printflags = printESCAPES | printHEX;
+{   par::td.printflags = printESCAPES | printHEX;
     internalprint(a);
     return a;
 }
 
 LispObject princhex(LispObject a)
-{   printflags = printPLAIN | printHEX;
+{   par::td.printflags = printPLAIN | printHEX;
     internalprint(a);
     return a;
 }
 
 LispObject printhex(LispObject a)
-{   printflags = printESCAPES | printHEX;
+{   par::td.printflags = printESCAPES | printHEX;
     internalprint(a);
     wrch('\n');
     return a;
 }
 
 LispObject printchex(LispObject a)
-{   printflags = printPLAIN | printHEX;
+{   par::td.printflags = printPLAIN | printHEX;
     internalprint(a);
     wrch('\n');
     return a;
 }
 
 void errprint(LispObject a)
-{   int saveout = lispout, saveflags = printflags;
-    lispout = 1; printflags = printESCAPES;
+{   int saveout = par::td.lispout, saveflags = par::td.printflags;
+    par::td.lispout = 1; par::td.printflags = printESCAPES;
     internalprint(a);
     wrch('\n');
-    lispout = saveout; printflags = saveflags;
+    par::td.lispout = saveout; par::td.printflags = saveflags;
 }
 
 void errprin(LispObject a)
-{   int saveout = lispout, saveflags = printflags;
-    lispout = 1; printflags = printESCAPES;
+{   int saveout = par::td.lispout, saveflags = par::td.printflags;
+    par::td.lispout = 1; par::td.printflags = printESCAPES;
     internalprint(a);
-    lispout = saveout; printflags = saveflags;
+    par::td.lispout = saveout; par::td.printflags = saveflags;
 }
 
-thread_local int curchar = '\n', symtype = 0;
+/* thread_local int par::td.curchar = '\n', par::td.symtype = 0; */
 
 int hexval(int n)
 {   if (isdigit(n)) return n - '0';
@@ -2193,160 +2190,160 @@ static LispObject Ntimes2(LispObject a, LispObject b);
 
 LispObject token()
 {
-    symtype = 'a';           // Default result is an atom.
+    par::td.symtype = 'a';           // Default result is an atom.
     while (1)
-    {   while (curchar == ' ' ||
-               curchar == '\t' ||
-               curchar == '\n') curchar = rdch(); // Skip whitespace
+    {   while (par::td.curchar == ' ' ||
+               par::td.curchar == '\t' ||
+               par::td.curchar == '\n') par::td.curchar = rdch(); // Skip whitespace
 // Discard comments from "%" to end of line.
-        if (curchar == '%')
-        {   while (curchar != '\n' &&
-                   curchar != EOF) curchar = rdch();
+        if (par::td.curchar == '%')
+        {   while (par::td.curchar != '\n' &&
+                   par::td.curchar != EOF) par::td.curchar = rdch();
             continue;
         }
         break;
     }
-    if (curchar == EOF)
-    {   symtype = curchar;
+    if (par::td.curchar == EOF)
+    {   par::td.symtype = par::td.curchar;
         return NULLATOM;     // End of file marker.
     }
-    if (curchar == '(' || curchar == '.' ||
-        curchar == ')' || curchar == '\'' ||
-        curchar == '`' || curchar == ',')
-    {   symtype = curchar;   // Lisp special characters.
-        curchar = rdch();
-        if (symtype == ',' && curchar == '@')
-        {   symtype = '@';
-            curchar = rdch();
+    if (par::td.curchar == '(' || par::td.curchar == '.' ||
+        par::td.curchar == ')' || par::td.curchar == '\'' ||
+        par::td.curchar == '`' || par::td.curchar == ',')
+    {   par::td.symtype = par::td.curchar;   // Lisp special characters.
+        par::td.curchar = rdch();
+        if (par::td.symtype == ',' && par::td.curchar == '@')
+        {   par::td.symtype = '@';
+            par::td.curchar = rdch();
         }
         return NULLATOM;
     }
-    boffop = 0;
-    if (isalpha(curchar) || curchar == '!') // Start a symbol.
-    {   while (isalpha(curchar) ||
-               isdigit(curchar) ||
-               curchar == '_' ||
-               curchar == '!')
-        {   if (curchar == '!') curchar = rdch();
-            else if (curchar != EOF && par::symval(symlower) != nil) curchar = tolower(curchar);
-            else if (curchar != EOF && par::symval(symraise) != nil) curchar = toupper(curchar);
-            if (curchar != EOF)
-            {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-                curchar = rdch();
+    par::td.boffop = 0;
+    if (isalpha(par::td.curchar) || par::td.curchar == '!') // Start a symbol.
+    {   while (isalpha(par::td.curchar) ||
+               isdigit(par::td.curchar) ||
+               par::td.curchar == '_' ||
+               par::td.curchar == '!')
+        {   if (par::td.curchar == '!') par::td.curchar = rdch();
+            else if (par::td.curchar != EOF && par::symval(symlower) != nil) par::td.curchar = tolower(par::td.curchar);
+            else if (par::td.curchar != EOF && par::symval(symraise) != nil) par::td.curchar = toupper(par::td.curchar);
+            if (par::td.curchar != EOF)
+            {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+                par::td.curchar = rdch();
             }
         }
-        boffo[boffop] = 0;
-        return lookup(boffo, boffop, 1);
+        par::td.boffo[par::td.boffop] = 0;
+        return lookup(par::td.boffo, par::td.boffop, 1);
     }
-    if (curchar == '"')                     // Start a string
-    {   curchar = rdch();
+    if (par::td.curchar == '"')                     // Start a string
+    {   par::td.curchar = rdch();
         while (1)
-        {   while (curchar != '"' && curchar != EOF)
-            {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-                curchar = rdch();
+        {   while (par::td.curchar != '"' && par::td.curchar != EOF)
+            {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+                par::td.curchar = rdch();
             }
 // Note that a double-quote can be repeated within a string to denote
 // a string with that character within it. As in
 //   "abc""def"   is a string with contents   abc"def.
-            if (curchar != EOF) curchar = rdch();
-            if (curchar != '"') break;
-            if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-            curchar = rdch();
+            if (par::td.curchar != EOF) par::td.curchar = rdch();
+            if (par::td.curchar != '"') break;
+            if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+            par::td.curchar = rdch();
         }
-        return makestring(boffo, boffop);
+        return makestring(par::td.boffo, par::td.boffop);
     }
-    if (curchar == '+' || curchar == '-')
-    {   boffo[boffop++] = curchar;
-        curchar = rdch();
+    if (par::td.curchar == '+' || par::td.curchar == '-')
+    {   par::td.boffo[par::td.boffop++] = par::td.curchar;
+        par::td.curchar = rdch();
 // + and - are treated specially, since if followed by a digit they
 // introduce a (signed) number, but otherwise they are treated as punctuation.
-        if (!isdigit(curchar))
-        {   boffo[boffop] = 0;
-            return lookup(boffo, boffop, 1);
+        if (!isdigit(par::td.curchar))
+        {   par::td.boffo[par::td.boffop] = 0;
+            return lookup(par::td.boffo, par::td.boffop, 1);
         }
     }
 // Note that in some cases after a + or - I drop through to here.
-    if (curchar == '0' && boffop == 0)  // "0" without a sign in front
-    {   boffo[boffop++] = curchar;
-        curchar = rdch();
-        if (curchar == 'x' || curchar == 'X') // Ahah - hexadecimal input
+    if (par::td.curchar == '0' && par::td.boffop == 0)  // "0" without a sign in front
+    {   par::td.boffo[par::td.boffop++] = par::td.curchar;
+        par::td.curchar = rdch();
+        if (par::td.curchar == 'x' || par::td.curchar == 'X') // Ahah - hexadecimal input
         {   LispObject r;
-            boffop = 0;
-            curchar = rdch();
-            while (isxdigit(curchar))
-            {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-                curchar = rdch();
+            par::td.boffop = 0;
+            par::td.curchar = rdch();
+            while (isxdigit(par::td.curchar))
+            {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+                par::td.curchar = rdch();
             }
             r = packfixnum(0);
-            boffop = 0;
-            while (boffo[boffop] != 0)
+            par::td.boffop = 0;
+            while (par::td.boffo[par::td.boffop] != 0)
             {   r = Nplus2(Ntimes2(packfixnum(16), r),
-                           packfixnum(hexval(boffo[boffop++])));
+                           packfixnum(hexval(par::td.boffo[par::td.boffop++])));
             }
             return r;
         }
     }
-    if (isdigit(curchar) || (boffop == 1 && boffo[0] == '0'))
-    {   while (isdigit(curchar))
-        {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-            curchar = rdch();
+    if (isdigit(par::td.curchar) || (par::td.boffop == 1 && par::td.boffo[0] == '0'))
+    {   while (isdigit(par::td.curchar))
+        {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+            par::td.curchar = rdch();
         }
 // At this point I have a (possibly signed) integer. If it is immediately
 // followed by a "." then a floating point value is indicated.
-        if (curchar == '.')
-        {   symtype = 'f';
-            if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-            curchar = rdch();
-            while (isdigit(curchar))
-            {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-                curchar = rdch();
+        if (par::td.curchar == '.')
+        {   par::td.symtype = 'f';
+            if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+            par::td.curchar = rdch();
+            while (isdigit(par::td.curchar))
+            {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+                par::td.curchar = rdch();
             }
 // To make things tidy If I have a "." not followed by any digits I will
 // insert a "0".
-            if (!isdigit((int)boffo[boffop-1])) boffo[boffop++] = '0';
+            if (!isdigit((int)par::td.boffo[par::td.boffop-1])) par::td.boffo[par::td.boffop++] = '0';
         }
 // Whether or not there was a ".", an "e" or "E" introduces an exponent and
 // hence indicates a floating point value.
-        if (curchar == 'e' || curchar == 'E')
-        {   symtype = 'f';
-            if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-            curchar = rdch();
-            if (curchar == '+' || curchar == '-')
-            {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-                curchar = rdch();
+        if (par::td.curchar == 'e' || par::td.curchar == 'E')
+        {   par::td.symtype = 'f';
+            if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+            par::td.curchar = rdch();
+            if (par::td.curchar == '+' || par::td.curchar == '-')
+            {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+                par::td.curchar = rdch();
             }
-            while (isdigit(curchar))
-            {   if (boffop < BOFFO_SIZE) boffo[boffop++] = curchar;
-                curchar = rdch();
+            while (isdigit(par::td.curchar))
+            {   if (par::td.boffop < BOFFO_SIZE) par::td.boffo[par::td.boffop++] = par::td.curchar;
+                par::td.curchar = rdch();
             }
 // If there had been an "e" I force at least one digit in following it.
-            if (!isdigit((int)boffo[boffop-1])) boffo[boffop++] = '0';
+            if (!isdigit((int)par::td.boffo[par::td.boffop-1])) par::td.boffo[par::td.boffop++] = '0';
         }
-        boffo[boffop] = 0;
-        if (symtype == 'a')
+        par::td.boffo[par::td.boffop] = 0;
+        if (par::td.symtype == 'a')
         {   int neg = 0;
             LispObject r = packfixnum(0);
-            boffop = 0;
-            if (boffo[boffop] == '+') boffop++;
-            else if (boffo[boffop] == '-') neg=1, boffop++;
-            while (boffo[boffop] != 0)
+            par::td.boffop = 0;
+            if (par::td.boffo[par::td.boffop] == '+') par::td.boffop++;
+            else if (par::td.boffo[par::td.boffop] == '-') neg=1, par::td.boffop++;
+            while (par::td.boffo[par::td.boffop] != 0)
             {   r = Nplus2(Ntimes2(packfixnum(10), r),
-                           packfixnum(boffo[boffop++] - '0'));
+                           packfixnum(par::td.boffo[par::td.boffop++] - '0'));
             }
             if (neg) r = Nminus(r);
             return r;
         }
         else
         {   double d;
-            sscanf(boffo, "%lg", &d);
+            sscanf(par::td.boffo, "%lg", &d);
             return boxfloat(d);
         }
     }
-    boffo[boffop++] = curchar;
-    curchar = rdch();
-    boffo[boffop] = 0;
-    symtype = 'a';
-    return lookup(boffo, boffop, 1);
+    par::td.boffo[par::td.boffop++] = par::td.curchar;
+    par::td.curchar = rdch();
+    par::td.boffo[par::td.boffop] = 0;
+    par::td.symtype = 'a';
+    return lookup(par::td.boffo, par::td.boffop, 1);
 }
 
 // Syntax for Lisp input
@@ -2369,16 +2366,16 @@ static LispObject readT();
 LispObject readS()
 {   LispObject q, w;
     while (1)
-    {   switch (symtype)
+    {   switch (par::td.symtype)
         {   case '?':
-                cursym = token();
+                par::td.cursym = token();
                 continue;
             case '(':
-                cursym = token();
+                par::td.cursym = token();
                 return readT();
             case '.':
             case ')':     // Ignore spurious "." and ")" input.
-                cursym = token();
+                par::td.cursym = token();
                 continue;
             case '\'':
                 w = quote;
@@ -2395,10 +2392,10 @@ LispObject readS()
             case EOF:
                 return eofsym;
             default:
-                symtype = '?';
-                return cursym;
+                par::td.symtype = '?';
+                return par::td.cursym;
         }
-        cursym = token();
+        par::td.cursym = token();
         q = readS();
         return list2star(w, q, nil);
     }
@@ -2406,18 +2403,18 @@ LispObject readS()
 
 LispObject readT()
 {   LispObject q, r;
-    if (symtype == '?') cursym = token();
-    switch (symtype)
+    if (par::td.symtype == '?') par::td.cursym = token();
+    switch (par::td.symtype)
     {   case EOF:
             return eofsym;
         case '.':
-            cursym = token();
+            par::td.cursym = token();
             q = readS();
-            if (symtype == '?') cursym = token();
-            if (symtype == ')') symtype = '?'; // Ignore if not ")".
+            if (par::td.symtype == '?') par::td.cursym = token();
+            if (par::td.symtype == ')') par::td.symtype = '?'; // Ignore if not ")".
             return q;
         case ')':
-            symtype = '?';
+            par::td.symtype = '?';
             return nil;
         // case '(':  case '\'':
         // case '`':  case ',':
@@ -2482,65 +2479,65 @@ LispObject lookup(const char *name, size_t len, int flag)
     return sym;
 }
 
-INLINE constexpr unsigned int unwindNONE      = 0;
-INLINE constexpr unsigned int unwindERROR     = 1;
-INLINE constexpr unsigned int unwindBACKTRACE = 2;
-INLINE constexpr unsigned int unwindGO        = 4;
-INLINE constexpr unsigned int unwindRETURN    = 8;
-INLINE constexpr unsigned int unwindPRESERVE  = 16;
-INLINE constexpr unsigned int unwindRESTART   = 32;
+/* INLINE constexpr unsigned int unwindNONE      = 0; */
+/* INLINE constexpr unsigned int unwindERROR     = 1; */
+/* INLINE constexpr unsigned int unwindBACKTRACE = 2; */
+/* INLINE constexpr unsigned int unwindGO        = 4; */
+/* INLINE constexpr unsigned int unwindRETURN    = 8; */
+/* INLINE constexpr unsigned int unwindPRESERVE  = 16; */
+/* INLINE constexpr unsigned int unwindRESTART   = 32; */
 
-thread_local unsigned int unwindflag = unwindNONE;
+/* thread_local unsigned int par::td.unwindflag = unwindNONE; */
 
-thread_local int backtraceflag = -1;
-INLINE constexpr int backtraceHEADER = 1;
-INLINE constexpr int backtraceTRACE  = 2;
+/* thread_local int par::td.backtraceflag = -1; */
+/* INLINE constexpr int backtraceHEADER = 1; */
+/* INLINE constexpr int backtraceTRACE  = 2; */
 
 LispObject error0(const char *msg)
-{   if ((backtraceflag & backtraceHEADER) != 0)
-    {   linepos = printf("\n+++ Error: %s\n", msg);
+{   if ((par::td.backtraceflag & backtraceHEADER) != 0)
+    {   par::td.linepos = printf("\n+++ Error: %s\n", msg);
 #ifdef DEBUG
         if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s\n", msg);
 #endif // DEBUG
     }
-    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+    par::td.unwindflag = (par::td.backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
                  unwindERROR;
     return nil;
 }
 
 LispObject quiet_error()
-{   unwindflag = unwindERROR;
+{   par::td.unwindflag = unwindERROR;
     return nil;
 }
 
 LispObject error1(const char *msg, LispObject data)
-{   if ((backtraceflag & backtraceHEADER) != 0)
-    {   linepos = printf("\n+++ Error: %s: ", msg);
+{   if ((par::td.backtraceflag & backtraceHEADER) != 0)
+    {   par::td.linepos = printf("\n+++ Error: %s: ", msg);
 #ifdef DEBUG
         if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s: ", msg);
 #endif // DEBUG
         errprint(data);
     }
-    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+    par::td.unwindflag = (par::td.backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
                  unwindERROR;
     return nil;
 }
 
 LispObject error2(const char *msg, const char *s1, LispObject data)
-{   if ((backtraceflag & backtraceHEADER) != 0)
-    {   linepos = printf("\n+++ Error: %s (%s): ", msg, s1);
+{   if ((par::td.backtraceflag & backtraceHEADER) != 0)
+    {   par::td.linepos = printf("\n+++ Error: %s (%s): ", msg, s1);
 #ifdef DEBUG
         if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s (%s): ", msg, s1);
 #endif // DEBUG
         errprint(data);
     }
-    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+    par::td.unwindflag = (par::td.backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
                  unwindERROR;
     return nil;
 }
 
 LispObject error1s(const char *msg, const char *data)
-{   if ((backtraceflag & backtraceHEADER) != 0)
+{   if ((par::td.backtraceflag & backtraceHEADER) != 0)
 #ifdef DEBUG
     {   printf("\n+++ Error: %s %s\n", msg, data);
         if (logfile != NULL) fprintf(logfile, "\n+++ Error: %s %s\n", msg, data);
@@ -2548,7 +2545,7 @@ LispObject error1s(const char *msg, const char *data)
 #else // DEBUG
         printf("\n+++ Error: %s %s\n", msg, data);
 #endif // DEBUG
-    unwindflag = (backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
+    par::td.unwindflag = (par::td.backtraceflag & backtraceTRACE) != 0 ? unwindBACKTRACE :
                  unwindERROR;
     return nil;
 }
@@ -2583,7 +2580,7 @@ LispObject interpreted0(LispObject b)
     r = nil;
     while (isCONS(b))
     {   r = eval(qcar(b));
-        if (unwindflag != unwindNONE) break;
+        if (par::td.unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
     return r;
@@ -2608,7 +2605,7 @@ LispObject interpreted1(LispObject b, LispObject a1)
     r = nil;
     while (isCONS(b))
     {   r = eval(qcar(b));
-        if (unwindflag != unwindNONE) break;
+        if (par::td.unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
     return r;
@@ -2635,7 +2632,7 @@ LispObject interpreted2(LispObject b, LispObject a1, LispObject a2)
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
-        if (unwindflag != unwindNONE) break;
+        if (par::td.unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
     return w;
@@ -2665,7 +2662,7 @@ LispObject interpreted3(LispObject b, LispObject a1,
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
-        if (unwindflag != unwindNONE) break;
+        if (par::td.unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
     return w;
@@ -2698,7 +2695,7 @@ LispObject interpreted4(LispObject b, LispObject a1, LispObject a2,
     w = nil;
     while (isCONS(b))
     {   w = eval(qcar(b));
-        if (unwindflag != unwindNONE) break;
+        if (par::td.unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
     return w;
@@ -2758,7 +2755,7 @@ LispObject interpreted5up(LispObject b, LispObject a1, LispObject a2,
 
     while (isCONS(b))
     {   w = eval(qcar(b));
-        if (unwindflag != unwindNONE) break;
+        if (par::td.unwindflag != unwindNONE) break;
         b = qcdr(b);
     }
 
@@ -2775,15 +2772,15 @@ LispObject evlis(LispObject x)
     LispObject p, q;
     if (!isCONS(x)) return nil;
     p = eval(qcar(x));
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     p = q = cons(p, nil);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     x = qcdr(x);
     while (isCONS(x))
     {   LispObject w = eval(qcar(x));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         w = cons(w, nil);
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         qcdr(q) = w;
         q = w;
         x = qcdr(x);
@@ -2806,22 +2803,22 @@ LispObject eval(LispObject x)
     {   LispObject fn = qcar(x);
         int traced = qflags(fn) & flagTRACED;
         if (traced != 0)
-        {   linepos += printf("Macroexpand: ");
-            if (unwindflag != unwindNONE) return nil;
+        {   par::td.linepos += printf("Macroexpand: ");
+            if (par::td.unwindflag != unwindNONE) return nil;
             errprint(x);
         }
         x = (*(LispFn1 *)qdefn1(fn))(qlits(fn), x);
-        if (unwindflag == unwindBACKTRACE)
-        {   linepos += printf("Call to ");
+        if (par::td.unwindflag == unwindBACKTRACE)
+        {   par::td.linepos += printf("Call to ");
             errprin(fn);
             printf(" failed\n");
-            linepos = 0;
+            par::td.linepos = 0;
             return nil;
         }
         if (traced != 0)
-        {   linepos += printf("= ");
+        {   par::td.linepos += printf("= ");
             errprint(x);
-            if (unwindflag != unwindNONE) return nil;
+            if (par::td.unwindflag != unwindNONE) return nil;
         }
     }
     if (isSYMBOL(x))
@@ -2854,236 +2851,236 @@ LispObject eval(LispObject x)
             {
             case 0:
                 if (flags & flagTRACED)
-                {   if (linepos!=0) wrch('\n');
-                    linepos += printf("Calling: ");
-                    printf("%s\n", fname); linepos = 0;
+                {   if (par::td.linepos!=0) wrch('\n');
+                    par::td.linepos += printf("Calling: ");
+                    printf("%s\n", fname); par::td.linepos = 0;
 //                  errprint(f);
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                 }
                 x = (*qdefn0(f))(qlits(f));
-                if (unwindflag == unwindBACKTRACE)
-                {   if (linepos!=0) wrch('\n');
-                    linepos += printf("Call to ");
+                if (par::td.unwindflag == unwindBACKTRACE)
+                {   if (par::td.linepos!=0) wrch('\n');
+                    par::td.linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
-                    linepos = 0;
+                    par::td.linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   if (linepos!=0) wrch('\n');
+                {   if (par::td.linepos!=0) wrch('\n');
                     errprin(f);
-                    linepos += printf(" = ");
-                    if (unwindflag != unwindNONE) return nil;
+                    par::td.linepos += printf(" = ");
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     errprint(x);
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                 }
                 return x;
             case 1:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 if (flags & flagTRACED)
-                {   if (linepos!=0) wrch('\n');
-                    linepos += printf("Calling: ");
+                {   if (par::td.linepos!=0) wrch('\n');
+                    par::td.linepos += printf("Calling: ");
                     errprint(f);
-                    if (unwindflag != unwindNONE) return nil;
-                    linepos += printf("Arg1: ");
+                    if (par::td.unwindflag != unwindNONE) return nil;
+                    par::td.linepos += printf("Arg1: ");
                     errprint(x);
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                 }
                 x = (*qdefn1(f))(qlits(f), x);
-                if (unwindflag == unwindBACKTRACE)
-                {   if (linepos!=0) wrch('\n');
-                    linepos += printf("Call to ");
+                if (par::td.unwindflag == unwindBACKTRACE)
+                {   if (par::td.linepos!=0) wrch('\n');
+                    par::td.linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
-                    linepos = 0;
+                    par::td.linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   if (linepos!=0) wrch('\n');
+                {   if (par::td.linepos!=0) wrch('\n');
                     errprin(f);
-                    linepos += printf(" = ");
-                    if (unwindflag != unwindNONE) return nil;
+                    par::td.linepos += printf(" = ");
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     errprint(x);
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                 }
                 return x;
             case 2:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = eval(qcar(qcdr(aa)));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 if (flags & flagTRACED)
-                {   if (linepos!=0) wrch('\n');
-                    linepos += printf("Calling: ");
+                {   if (par::td.linepos!=0) wrch('\n');
+                    par::td.linepos += printf("Calling: ");
                     errprint(f);
-                    if (unwindflag != unwindNONE) return nil;
-                    linepos += printf("Arg1: ");
+                    if (par::td.unwindflag != unwindNONE) return nil;
+                    par::td.linepos += printf("Arg1: ");
                     errprint(x);
-                    if (unwindflag != unwindNONE) return nil;
-                    linepos += printf("Arg2: ");
+                    if (par::td.unwindflag != unwindNONE) return nil;
+                    par::td.linepos += printf("Arg2: ");
                     errprint(aa);
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                 }
                 x = (*qdefn2(f))(qlits(f), x, aa);
-                if (unwindflag == unwindBACKTRACE)
-                {   if (linepos!=0) wrch('\n');
-                    linepos += printf("Call to ");
+                if (par::td.unwindflag == unwindBACKTRACE)
+                {   if (par::td.linepos!=0) wrch('\n');
+                    par::td.linepos += printf("Call to ");
                     errprin(f);
                     printf(" failed\n");
-                    linepos = 0;
+                    par::td.linepos = 0;
                     return nil;
                 }
                 if (flags & flagTRACED)
-                {   if (linepos!=0) wrch('\n');
+                {   if (par::td.linepos!=0) wrch('\n');
                     errprin(f);
-                    linepos += printf(" = ");
-                    if (unwindflag != unwindNONE) return nil;
+                    par::td.linepos += printf(" = ");
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     errprint(x);
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                 }
                 return x;
             case 3:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = qcdr(aa);
                 {   LispObject a2 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   if (linepos!=0) wrch('\n');
-                        linepos += printf("Calling: ");
+                    {   if (par::td.linepos!=0) wrch('\n');
+                        par::td.linepos += printf("Calling: ");
                         errprint(f);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg1: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg1: ");
                         errprint(x);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg2: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg2: ");
                         errprint(a2);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg3: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg3: ");
                         errprint(aa);
-                        if (unwindflag != unwindNONE) return nil;
+                        if (par::td.unwindflag != unwindNONE) return nil;
                     }
                     x = (*qdefn3(f))(qlits(f), x, a2, aa);
-                    if (unwindflag == unwindBACKTRACE)
-                    {   if (linepos!=0) wrch('\n');
-                        linepos += printf("Call to ");
+                    if (par::td.unwindflag == unwindBACKTRACE)
+                    {   if (par::td.linepos!=0) wrch('\n');
+                        par::td.linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
-                        linepos = 0;
+                        par::td.linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   if (linepos!=0) wrch('\n');
+                    {   if (par::td.linepos!=0) wrch('\n');
                         errprin(f);
-                        linepos += printf(" = ");
-                        if (unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf(" = ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
                         errprint(x);
-                        if (unwindflag != unwindNONE) return nil;
+                        if (par::td.unwindflag != unwindNONE) return nil;
                     }
                     return x;
                 }
             case 4:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = qcdr(aa);
                 {   LispObject a2 = eval(qcar(aa)), a3;
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = qcdr(aa);
                     a3 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   if (linepos!=0) wrch('\n');
-                        linepos += printf("Calling: ");
+                    {   if (par::td.linepos!=0) wrch('\n');
+                        par::td.linepos += printf("Calling: ");
                         errprint(f);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg1: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg1: ");
                         errprint(x);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg2: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg2: ");
                         errprint(a2);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg3: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg3: ");
                         errprint(a3);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg4: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg4: ");
                         errprint(aa);
-                        if (unwindflag != unwindNONE) return nil;
+                        if (par::td.unwindflag != unwindNONE) return nil;
                     }
                     x = (*qdefn4(f))(qlits(f), x, a2, a3, aa);
-                    if (unwindflag == unwindBACKTRACE)
-                    {   if (linepos!=0) wrch('\n');
-                        linepos += printf("Call to ");
+                    if (par::td.unwindflag == unwindBACKTRACE)
+                    {   if (par::td.linepos!=0) wrch('\n');
+                        par::td.linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
-                        linepos = 0;
+                        par::td.linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   if (linepos!=0) wrch('\n');
+                    {   if (par::td.linepos!=0) wrch('\n');
                         errprin(f);
-                        linepos += printf(" = ");
-                        if (unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf(" = ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
                         errprint(x);
-                        if (unwindflag != unwindNONE) return nil;
+                        if (par::td.unwindflag != unwindNONE) return nil;
                     }
                     return x;
                 }
             default:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = qcdr(aa);
                 {   LispObject a2 = eval(qcar(aa)), a3, a4;
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = qcdr(aa);
                     a3 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = qcdr(aa);
                     a4 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = evlis(qcdr(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     if (flags & flagTRACED)
-                    {   if (linepos!=0) wrch('\n');
-                        linepos += printf("Calling: ");
+                    {   if (par::td.linepos!=0) wrch('\n');
+                        par::td.linepos += printf("Calling: ");
                         errprint(f);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg1: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg1: ");
                         errprint(x);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg2: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg2: ");
                         errprint(a2);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg3: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg3: ");
                         errprint(a3);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg4: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg4: ");
                         errprint(a4);
-                        if (unwindflag != unwindNONE) return nil;
-                        linepos += printf("Arg5...: ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf("Arg5...: ");
                         errprint(aa);
-                        if (unwindflag != unwindNONE) return nil;
+                        if (par::td.unwindflag != unwindNONE) return nil;
                     }
                     x = (*qdefn5up(f))(qlits(f), x, a2, a3, a4, aa);
-                    if (unwindflag == unwindBACKTRACE)
-                    {   if (linepos!=0) wrch('\n');
-                        linepos += printf("Call to ");
+                    if (par::td.unwindflag == unwindBACKTRACE)
+                    {   if (par::td.linepos!=0) wrch('\n');
+                        par::td.linepos += printf("Call to ");
                         errprin(f);
                         printf(" failed\n");
-                        linepos = 0;
+                        par::td.linepos = 0;
                         return nil;
                     }
                     if (flags & flagTRACED)
-                    {   if (linepos!=0) wrch('\n');
+                    {   if (par::td.linepos!=0) wrch('\n');
                         errprin(f);
-                        linepos += printf(" = ");
-                        if (unwindflag != unwindNONE) return nil;
+                        par::td.linepos += printf(" = ");
+                        if (par::td.unwindflag != unwindNONE) return nil;
                         errprint(x);
-                        if (unwindflag != unwindNONE) return nil;
+                        if (par::td.unwindflag != unwindNONE) return nil;
                     }
                     return x;
                 }
@@ -3107,51 +3104,51 @@ LispObject eval(LispObject x)
                 return interpreted0(qcdr(f));
             case 1:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 return interpreted1(qcdr(f), x);
             case 2:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = eval(qcar(qcdr(aa)));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 return interpreted2(qcdr(f), x, aa);
             case 3:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = qcdr(aa);
                 {   LispObject a2 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     return interpreted3(qcdr(f), x, a2, aa);
                 }
             case 4:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = qcdr(aa);
                 {   LispObject a2 = eval(qcar(aa)), a3;
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = qcdr(aa);
                     a3 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = eval(qcar(qcdr(aa)));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     return interpreted4(qcdr(f), x, a2, a3, aa);
                 }
             default:
                 x = eval(qcar(aa));
-                if (unwindflag != unwindNONE) return nil;
+                if (par::td.unwindflag != unwindNONE) return nil;
                 aa = qcdr(aa);
                 {   LispObject a2 = eval(qcar(aa)), a3, a4;
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = qcdr(aa);
                     a3 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = qcdr(aa);
                     a4 = eval(qcar(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     aa = evlis(qcdr(aa));
-                    if (unwindflag != unwindNONE) return nil;
+                    if (par::td.unwindflag != unwindNONE) return nil;
                     return interpreted5up(qcdr(f), x, a2, a3, a4, aa);
                 }
             }
@@ -3194,7 +3191,7 @@ LispObject Lcond(LispObject lits, LispObject x)
     {   LispObject carx = qcar(x);
         if (isCONS(carx))
         {   LispObject p = eval(qcar(carx));
-            if (unwindflag != unwindNONE) return nil;
+            if (par::td.unwindflag != unwindNONE) return nil;
             else if (p != nil) return Lprogn(nil, qcdr(carx));
         }
         x = qcdr(x);
@@ -3206,7 +3203,7 @@ LispObject Land(LispObject lits, LispObject x)
 {   LispObject r = lisptrue;
     while (isCONS(x))
     {   r = eval(qcar(x));
-        if (r == nil || unwindflag != unwindNONE) return nil;
+        if (r == nil || par::td.unwindflag != unwindNONE) return nil;
         x = qcdr(x);
     }
     return r;
@@ -3216,7 +3213,7 @@ LispObject Lor(LispObject lits, LispObject x)
 {   while (isCONS(x))
     {   LispObject r;
         r = eval(qcar(x));
-        if (r != nil || unwindflag != unwindNONE) return r;
+        if (r != nil || par::td.unwindflag != unwindNONE) return r;
         x = qcdr(x);
     }
     return nil;
@@ -3240,11 +3237,11 @@ LispObject shallow_copy(LispObject x)
     LispObject p, q, w;
     if (!isCONS(x)) return x;
     p = q = cons(qcar(x), w = qcdr(x));
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     while (isCONS(w))
     {   x = w;
         w = cons(qcar(w), qcdr(w));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         qcdr(q) = w;
         q = w;
         w = qcdr(x);
@@ -3290,7 +3287,7 @@ LispObject definer(LispObject x, int flags)
     qlits(name) = def;
 // Now I will try to call macroexpand_list to expand all macros.
     x = call1("macroexpand_list", qcdr(def));
-    if (x == NULLATOM || unwindflag != unwindNONE) return name;
+    if (x == NULLATOM || par::td.unwindflag != unwindNONE) return name;
     qlits(name) = cons(qcar(def), x);
     return name;
 }
@@ -3346,7 +3343,7 @@ LispObject Lsetq(LispObject lits, LispObject x)
             w == nil || w == lisptrue)
             return error1("bad variable in setq", x);
         w = eval(qcar(qcdr(x)));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
 
 #ifdef DEBUG_GLOBALS
         if (is_global(qcar(x)) or par::is_fluid_bound(qcar(x))) {
@@ -3366,7 +3363,7 @@ LispObject Lprogn(LispObject lits, LispObject x)
     while (isCONS(x))
     {   r = eval(qcar(x));
         x = qcdr(x);
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
     }
     return r;
 }
@@ -3375,19 +3372,19 @@ LispObject Lunwind_protect(LispObject lits, LispObject x)
 {   if (!isCONS(x)) return nil;
     LispObject r = eval(qcar(x));
     x = qcdr(x);
-    unsigned int saveunwind = unwindflag;
-    unwindflag = unwindNONE;
-    LispObject savework1 = work1;
+    unsigned int saveunwind = par::td.unwindflag;
+    par::td.unwindflag = unwindNONE;
+    LispObject savework1 = par::td.work1;
     while (isCONS(x))
     {   r = eval(qcar(x));
         x = qcdr(x);
 // If something within the protecting forms raises an unwind event
 // such as a GO or a RETURN that that will replace the one from the
 // protected form.
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
     }
-    work1 = savework1;
-    unwindflag = saveunwind;
+    par::td.work1 = savework1;
+    par::td.unwindflag = saveunwind;
     return r;
 }
 
@@ -3406,39 +3403,39 @@ LispObject Lprog(LispObject lits, LispObject x)
         if (!isSYMBOL(v))
             return error1("Not a symbol in variable list for prog", v);
         bind_vars.emplace_back(v, nil);
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
     }
     save_x = x;  // So that "go" can scan the whole block to find a label.
-    work1 = nil;
+    par::td.work1 = nil;
     while (isCONS(x))
     {   if (isCONS(qcar(x))) eval(qcar(x));
         x = qcdr(x);
-        if (unwindflag == unwindRETURN)
-        {   unwindflag = unwindNONE;
+        if (par::td.unwindflag == unwindRETURN)
+        {   par::td.unwindflag = unwindNONE;
             break;
         }
-        else if (unwindflag == unwindGO)
-        {   unwindflag = unwindNONE;
+        else if (par::td.unwindflag == unwindGO)
+        {   par::td.unwindflag = unwindNONE;
             x = save_x;
-            while (isCONS(x) && qcar(x) != work1) x = qcdr(x);
+            while (isCONS(x) && qcar(x) != par::td.work1) x = qcdr(x);
             continue;
         }
-        if (unwindflag != unwindNONE) break;
-        work1 = nil;
+        if (par::td.unwindflag != unwindNONE) break;
+        par::td.work1 = nil;
     }
 // Now I must unbind all the variables.
 
     while (not bind_vars.empty()) {
         bind_vars.pop_back();
     }
-    return work1;
+    return par::td.work1;
 }
 
 LispObject Lgo(LispObject lits, LispObject x)
-{   if (!isCONS(x) || !isSYMBOL(work1 = qcar(x)))
+{   if (!isCONS(x) || !isSYMBOL(par::td.work1 = qcar(x)))
         return error1("bad go", x);
-    work1 = qcar(x);
-    if (unwindflag == unwindNONE) unwindflag = unwindGO;
+    par::td.work1 = qcar(x);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindGO;
     return nil;
 }
 
@@ -3592,7 +3589,7 @@ void unglobal_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) != 0) {
         int loc = par::allocate_symbol();
         LispObject val = qvalue(s);
-        // par::local_symbol(loc) = qvalue(s);
+        // par::td.local_symbol(loc) = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL;
         par::symval(s) = val;
@@ -3608,7 +3605,7 @@ void fluid_symbol(LispObject s) {
 
     if (qflags(s) & flagGLOBAL) {
         int loc = par::allocate_symbol();
-        // par::local_symbol(loc) = qvalue(s);
+        // par::td.local_symbol(loc) = qvalue(s);
         // LispObject val = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL; // disable global
@@ -4526,21 +4523,21 @@ LispObject Lorderp(LispObject lits, LispObject x, LispObject y)
 // messy case where one or both are gensyms that have not been printed yet,
 // so in that case I need to allocate printnames for them!
         if (pn == nil)
-        {   int len = snprintf(printbuffer, sizeof(printbuffer),
+        {   int len = snprintf(par::td.printbuffer, sizeof(par::td.printbuffer),
                                "g%.3d", gensymcounter++);
-            if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+            if (len<0 || (unsigned int)len>=sizeof(par::td.printbuffer))
                 pn = makestring("?gensym?", 8);
-            else pn = makestring(printbuffer, len);
+            else pn = makestring(par::td.printbuffer, len);
             qpname(x) = pn;
         }
         x = pn;
         pn = qpname(y);
         if (pn == nil)
-        {   int len = snprintf(printbuffer, sizeof(printbuffer),
+        {   int len = snprintf(par::td.printbuffer, sizeof(par::td.printbuffer),
                                "g%.3d", gensymcounter++);
-            if (len<0 || (unsigned int)len>=sizeof(printbuffer))
+            if (len<0 || (unsigned int)len>=sizeof(par::td.printbuffer))
                 pn = makestring("?gensym?", 8);
-            else pn = makestring(printbuffer, len);
+            else pn = makestring(par::td.printbuffer, len);
             qpname(y) = pn;
         }
         y = pn;
@@ -4683,13 +4680,13 @@ LispObject Llist2string(LispObject lits, LispObject a)
 
 LispObject Loblist(LispObject lits)
 {   size_t i;
-    work1 = nil;
+    par::td.work1 = nil;
     for (i=0; i<OBHASH_SIZE; i++)
-        for (work2=obhash[i].load(std::memory_order_acquire); isCONS(work2); work2 = qcdr(work2))
-        {   if (qcar(work2) != undefined)
-                work1 = cons(qcar(work2), work1);
+        for (par::td.work2=obhash[i].load(std::memory_order_acquire); isCONS(par::td.work2); par::td.work2 = qcdr(par::td.work2))
+        {   if (qcar(par::td.work2) != undefined)
+                par::td.work1 = cons(qcar(par::td.work2), par::td.work1);
         }
-    return work1;
+    return par::td.work1;
 }
 
 LispObject Leval(LispObject lits, LispObject x)
@@ -4999,15 +4996,15 @@ LispObject Lgetd(LispObject lits, LispObject x)
 
 LispObject Lreturn_0(LispObject lits)
 {
-    work1 = nil;
-    unwindflag = unwindRETURN;
+    par::td.work1 = nil;
+    par::td.unwindflag = unwindRETURN;
     return nil;
 }
 
 LispObject Lreturn_1(LispObject lits, LispObject x)
 {
-    work1 = x;
-    if (unwindflag == unwindNONE) unwindflag = unwindRETURN;
+    par::td.work1 = x;
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindRETURN;
     return nil;
 }
 
@@ -6466,7 +6463,7 @@ LispObject Lplus_3(LispObject data, LispObject a1,
                    LispObject a2, LispObject a3)
 {
     LispObject r = Nplus2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nplus2(r, a3);
 }
 
@@ -6474,9 +6471,9 @@ LispObject Lplus_4(LispObject data, LispObject a1, LispObject a2,
                    LispObject a3, LispObject a4)
 {
     LispObject r = Nplus2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nplus2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nplus2(r, a4);
 }
 
@@ -6484,14 +6481,14 @@ LispObject Lplus_5up(LispObject data, LispObject a1, LispObject a2,
                       LispObject a3, LispObject a4, LispObject a5up)
 {
     LispObject r = Nplus2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nplus2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nplus2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     while (isCONS(a5up))
     {   r = Nplus2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         a5up = qcdr(a5up);
     }
     return r;
@@ -6516,7 +6513,7 @@ LispObject Ltimes_3(LispObject data, LispObject a1,
                    LispObject a2, LispObject a3)
 {
     LispObject r = Ntimes2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Ntimes2(r, a3);
 }
 
@@ -6524,9 +6521,9 @@ LispObject Ltimes_4(LispObject data, LispObject a1, LispObject a2,
                    LispObject a3, LispObject a4)
 {
     LispObject r = Ntimes2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Ntimes2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Ntimes2(r, a4);
 }
 
@@ -6534,14 +6531,14 @@ LispObject Ltimes_5up(LispObject data, LispObject a1, LispObject a2,
                       LispObject a3, LispObject a4, LispObject a5up)
 {
     LispObject r = Ntimes2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Ntimes2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Ntimes2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     while (isCONS(a5up))
     {   r = Ntimes2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         a5up = qcdr(a5up);
     }
     return r;
@@ -6566,7 +6563,7 @@ LispObject Llogand_3(LispObject data, LispObject a1,
                      LispObject a2, LispObject a3)
 {
     LispObject r = Nlogand2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nlogand2(r, a3);
 }
 
@@ -6574,9 +6571,9 @@ LispObject Llogand_4(LispObject data, LispObject a1, LispObject a2,
                    LispObject a3, LispObject a4)
 {
     LispObject r = Nlogand2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogand2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nlogand2(r, a4);
 }
 
@@ -6584,14 +6581,14 @@ LispObject Llogand_5up(LispObject data, LispObject a1, LispObject a2,
                       LispObject a3, LispObject a4, LispObject a5up)
 {
     LispObject r = Nlogand2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogand2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogand2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     while (isCONS(a5up))
     {   r = Nlogand2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         a5up = qcdr(a5up);
     }
     return r;
@@ -6616,7 +6613,7 @@ LispObject Llogor_3(LispObject data, LispObject a1,
                    LispObject a2, LispObject a3)
 {
     LispObject r = Nlogor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nlogor2(r, a3);
 }
 
@@ -6624,9 +6621,9 @@ LispObject Llogor_4(LispObject data, LispObject a1, LispObject a2,
                    LispObject a3, LispObject a4)
 {
     LispObject r = Nlogor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nlogor2(r, a4);
 }
 
@@ -6634,14 +6631,14 @@ LispObject Llogor_5up(LispObject data, LispObject a1, LispObject a2,
                       LispObject a3, LispObject a4, LispObject a5up)
 {
     LispObject r = Nlogor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogor2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     while (isCONS(a5up))
     {   r = Nlogor2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         a5up = qcdr(a5up);
     }
     return r;
@@ -6666,7 +6663,7 @@ LispObject Llogxor_3(LispObject data, LispObject a1,
                    LispObject a2, LispObject a3)
 {
     LispObject r = Nlogxor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nlogxor2(r, a3);
 }
 
@@ -6674,9 +6671,9 @@ LispObject Llogxor_4(LispObject data, LispObject a1, LispObject a2,
                    LispObject a3, LispObject a4)
 {
     LispObject r = Nlogxor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogxor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     return Nlogxor2(r, a4);
 }
 
@@ -6684,14 +6681,14 @@ LispObject Llogxor_5up(LispObject data, LispObject a1, LispObject a2,
                       LispObject a3, LispObject a4, LispObject a5up)
 {
     LispObject r = Nlogxor2(a1, a2);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogxor2(r, a3);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     r = Nlogxor2(r, a4);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     while (isCONS(a5up))
     {   r = Nlogxor2(r, qcar(a5up));
-        if (unwindflag != unwindNONE) return nil;
+        if (par::td.unwindflag != unwindNONE) return nil;
         a5up = qcdr(a5up);
     }
     return r;
@@ -6723,22 +6720,22 @@ int coldstart = 0;
 
 LispObject Lrestart_lisp_0(LispObject data)
 {
-    work1 = cons(nil, nil);
-    if (unwindflag == unwindNONE) unwindflag = unwindRESTART;
+    par::td.work1 = cons(nil, nil);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindRESTART;
     return nil;
 }
 
 LispObject Lrestart_lisp_1(LispObject data, LispObject a1)
 {
-    work1 = cons(a1, nil);
-    if (unwindflag == unwindNONE) unwindflag = unwindRESTART;
+    par::td.work1 = cons(a1, nil);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindRESTART;
     return nil;
 }
 
 LispObject Lrestart_lisp_2(LispObject data, LispObject a1, LispObject a2)
 {
-    work1 = list2star(a1, a2, nil);
-    if (unwindflag == unwindNONE) unwindflag = unwindRESTART;
+    par::td.work1 = list2star(a1, a2, nil);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindRESTART;
     return nil;
 }
 
@@ -6757,24 +6754,24 @@ LispObject Lrestart_lisp_2(LispObject data, LispObject a1, LispObject a2)
 LispObject Lpreserve_0(LispObject data)
 {
     restartfn = nil;
-    work1 = cons(nil, nil);
-    if (unwindflag == unwindNONE) unwindflag = unwindPRESERVE;
+    par::td.work1 = cons(nil, nil);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindPRESERVE;
     return nil;
 }
 
 LispObject Lpreserve_1(LispObject data, LispObject a1)
 {
     restartfn = a1;
-    work1 = cons(nil, nil);
-    if (unwindflag == unwindNONE) unwindflag = unwindPRESERVE;
+    par::td.work1 = cons(nil, nil);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindPRESERVE;
     return nil;
 }
 
 LispObject Lpreserve_2(LispObject data, LispObject a1, LispObject a2)
 {
     restartfn = a1;
-    work1 = cons(nil, nil);
-    if (unwindflag == unwindNONE) unwindflag = unwindPRESERVE;
+    par::td.work1 = cons(nil, nil);
+    if (par::td.unwindflag == unwindNONE) par::td.unwindflag = unwindPRESERVE;
     return nil;
 }
 
@@ -6782,10 +6779,10 @@ LispObject Lpreserve_3(LispObject data, LispObject a1,
                        LispObject a2, LispObject a3)
 {
     restartfn = a1;
-    work1 = cons(a3, nil);
-    if (unwindflag == unwindNONE)
-    {   unwindflag = unwindPRESERVE;
-        if (a3 != nil) unwindflag |= unwindRESTART;
+    par::td.work1 = cons(a3, nil);
+    if (par::td.unwindflag == unwindNONE)
+    {   par::td.unwindflag = unwindPRESERVE;
+        if (a3 != nil) par::td.unwindflag |= unwindRESTART;
     }
     return nil;
 }
@@ -6794,10 +6791,10 @@ LispObject Lpreserve_4(LispObject data, LispObject a1,
                        LispObject a2, LispObject a3, LispObject a4)
 {
     restartfn = a1;
-    work1 = cons(a3, nil);
-    if (unwindflag == unwindNONE)
-    {   unwindflag = unwindPRESERVE;
-        if (a3 != nil) unwindflag |= unwindRESTART;
+    par::td.work1 = cons(a3, nil);
+    if (par::td.unwindflag == unwindNONE)
+    {   par::td.unwindflag = unwindPRESERVE;
+        if (a3 != nil) par::td.unwindflag |= unwindRESTART;
     }
     return nil;
 }
@@ -6855,7 +6852,7 @@ LispObject Lspaces(LispObject lits, LispObject n)
 }
 
 LispObject Lposn(LispObject lits)
-{   return packfixnum(linepos);
+{   return packfixnum(par::td.linepos);
 }
 
 LispObject Lnreverse(LispObject lits, LispObject x)
@@ -6863,47 +6860,47 @@ LispObject Lnreverse(LispObject lits, LispObject x)
 }
 
 LispObject Lexplode(LispObject lits, LispObject x)
-{   int f = lispout;
-    int savepos = linepos;
-    lispout = -1;
-    work1 = nil;
+{   int f = par::td.lispout;
+    int savepos = par::td.linepos;
+    par::td.lispout = -1;
+    par::td.work1 = nil;
     prin(x);
-    lispout = f;
-    linepos = savepos;
-    return nreverse(work1);
+    par::td.lispout = f;
+    par::td.linepos = savepos;
+    return nreverse(par::td.work1);
 }
 
 LispObject Lexplodec(LispObject lits, LispObject x)
-{   int f = lispout;
-    int savepos = linepos;
-    lispout = -1;
-    work1 = nil;
+{   int f = par::td.lispout;
+    int savepos = par::td.linepos;
+    par::td.lispout = -1;
+    par::td.work1 = nil;
     princ(x);
-    lispout = f;
-    linepos = savepos;
-    return nreverse(work1);
+    par::td.lispout = f;
+    par::td.linepos = savepos;
+    return nreverse(par::td.work1);
 }
 
 LispObject Lexploden(LispObject lits, LispObject x)
-{   int f = lispout;
-    int savepos = linepos;
-    lispout = -3;
-    work1 = nil;
+{   int f = par::td.lispout;
+    int savepos = par::td.linepos;
+    par::td.lispout = -3;
+    par::td.work1 = nil;
     prin(x);
-    lispout = f;
-    linepos = savepos;
-    return nreverse(work1);
+    par::td.lispout = f;
+    par::td.linepos = savepos;
+    return nreverse(par::td.work1);
 }
 
 LispObject Lexplodecn(LispObject lits, LispObject x)
-{   int f = lispout;
-    int savepos = linepos;
-    lispout = -3;
-    work1 = nil;
+{   int f = par::td.lispout;
+    int savepos = par::td.linepos;
+    par::td.lispout = -3;
+    par::td.work1 = nil;
     princ(x);
-    lispout = f;
-    linepos = savepos;
-    return nreverse(work1);
+    par::td.lispout = f;
+    par::td.linepos = savepos;
+    return nreverse(par::td.work1);
 }
 
 
@@ -6920,12 +6917,12 @@ LispObject Lreadch(LispObject lits)
 LispObject Lreadline(LispObject lits)
 {   char ch[200];
     size_t n = 0;
-    if (curchar == '\n') curchar = rdch();
-    while (curchar != '\n' && curchar != EOF)
-    {   if (n < sizeof(ch)-1) ch[n++] = curchar;
-        curchar = rdch();
+    if (par::td.curchar == '\n') par::td.curchar = rdch();
+    while (par::td.curchar != '\n' && par::td.curchar != EOF)
+    {   if (n < sizeof(ch)-1) ch[n++] = par::td.curchar;
+        par::td.curchar = rdch();
     }
-    if (n == 0 && curchar == EOF) return eofsym;
+    if (n == 0 && par::td.curchar == EOF) return eofsym;
     ch[n] = 0;
     return lookup(ch, n, 1);
 }
@@ -6936,35 +6933,35 @@ LispObject Lread(LispObject lits)
 }
 
 LispObject Lcompress(LispObject lits, LispObject x)
-{   int f = lispin;
+{   int f = par::td.lispin;
     LispObject r, save_cursym;
-    int savetype = symtype, savech = curchar;
-    lispin = -1;
-    symtype = '?';
-    curchar = '\n';
-    save_cursym = cursym;
-    work1 = x;
+    int savetype = par::td.symtype, savech = par::td.curchar;
+    par::td.lispin = -1;
+    par::td.symtype = '?';
+    par::td.curchar = '\n';
+    save_cursym = par::td.cursym;
+    par::td.work1 = x;
     r = readS();
-    lispin = f;
-    cursym = save_cursym;
-    symtype = savetype;
-    curchar = savech;
+    par::td.lispin = f;
+    par::td.cursym = save_cursym;
+    par::td.symtype = savetype;
+    par::td.curchar = savech;
     return r;
 }
 
 LispObject Lrds(LispObject lits, LispObject x)
-{   int old = lispin;
+{   int old = par::td.lispin;
     if (x == nil) x = packfixnum(3);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL && file_direction[n] == 0)
-        {   filecurchar[old] = curchar;
-            filesymtype[old] = symtype;
-            lispin = n;
-            curchar = filecurchar[n];
-            symtype = filesymtype[n];
-            if (curchar == EOF) curchar = '\n';
-            if (symtype == EOF) symtype = '?';
+        {   filecurchar[old] = par::td.curchar;
+            filesymtype[old] = par::td.symtype;
+            par::td.lispin = n;
+            par::td.curchar = filecurchar[n];
+            par::td.symtype = filesymtype[n];
+            if (par::td.curchar == EOF) par::td.curchar = '\n';
+            if (par::td.symtype == EOF) par::td.symtype = '?';
             return packfixnum(old);
         }
     }
@@ -6972,12 +6969,12 @@ LispObject Lrds(LispObject lits, LispObject x)
 }
 
 LispObject Lwrs(LispObject lits, LispObject x)
-{   int old = lispout;
+{   int old = par::td.lispout;
     if (x == nil) x = packfixnum(1);
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (0 <= n && n < MAX_LISPFILES && lispfiles[n] != NULL && file_direction[n] != 0)
-        {   lispout = n;
+        {   par::td.lispout = n;
             return packfixnum(old);
         }
     }
@@ -7121,8 +7118,8 @@ LispObject Lclose(LispObject lits, LispObject x)
     if (isFIXNUM(x))
     {   int n = (int)qfixnum(x);
         if (n > 3 && n < MAX_LISPFILES)
-        {   if (lispin == n) Lrds(nil, packfixnum(3));
-            if (lispout == n) Lwrs(nil, packfixnum(1));
+        {   if (par::td.lispin == n) Lrds(nil, packfixnum(3));
+            if (par::td.lispout == n) Lwrs(nil, packfixnum(1));
             if (lispfiles[n] != NULL) fclose(lispfiles[n]);
             lispfiles[n] = NULL;
             file_direction.reset(n);
@@ -7135,16 +7132,16 @@ LispObject Lclose(LispObject lits, LispObject x)
 static bool showallreads = false;
 
 void readevalprint(int loadp)
-{   while (symtype != EOF)
+{   while (par::td.symtype != EOF)
     {   LispObject r;
         // I make sure here that echo is locally bound here.
         // Otherwise threads would content over the global value.
         {
             par::Shallow_bind(echo, par::symval(echo));
-            unwindflag = unwindNONE;
+            par::td.unwindflag = unwindNONE;
             if (loadp) par::symval(echo) = nil;
             if (showallreads) par::symval(echo) = lisptrue;
-            backtraceflag = backtraceHEADER | backtraceTRACE;
+            par::td.backtraceflag = backtraceHEADER | backtraceTRACE;
             r = readS();
         }
 
@@ -7154,15 +7151,15 @@ void readevalprint(int loadp)
         }
         // fflush(stdout);
         flush(STDOUT); // stdout
-        if (unwindflag != unwindNONE) /* Do nothing */ ;
+        if (par::td.unwindflag != unwindNONE) /* Do nothing */ ;
         else if (loadp || par::symval(dfprint) == nil ||
             (isCONS(r) && (qcar(r) == lookup("rdf", 3, 2) ||
                            qcar(r) == lookup("faslend", 7, 2))))
         {
             r = eval(r);
-            if (showallreads || (unwindflag == unwindNONE && !loadp))
-            {   if (linepos != 0) wrch('\n');
-                linepos += printf("Value: ");
+            if (showallreads || (par::td.unwindflag == unwindNONE && !loadp))
+            {   if (par::td.linepos != 0) wrch('\n');
+                par::td.linepos += printf("Value: ");
 #ifdef DEBUG
                 if (logfile != NULL) fprintf(logfile, "Value: ");
 #endif // DEBUG
@@ -7173,16 +7170,16 @@ void readevalprint(int loadp)
         }
         else
         {   r = cons(r, nil);
-            if (unwindflag == unwindNONE) Lapply(nil, par::symval(dfprint), r);
+            if (par::td.unwindflag == unwindNONE) Lapply(nil, par::symval(dfprint), r);
         }
-        if ((unwindflag & (unwindPRESERVE | unwindRESTART)) != 0) return;
+        if ((par::td.unwindflag & (unwindPRESERVE | unwindRESTART)) != 0) return;
     }
 }
 
 LispObject Lrdf(LispObject lits, LispObject x)
 {   int f, f1;
     f1 = Lopen(nil, x, input);
-    if (unwindflag != unwindNONE) return nil;
+    if (par::td.unwindflag != unwindNONE) return nil;
     f = Lrds(nil, f1);
     readevalprint(0);
     Lrds(nil, f);
@@ -7194,13 +7191,13 @@ LispObject Lrdf(LispObject lits, LispObject x)
 LispObject Lload_module(LispObject lits, LispObject x)
 {   int f, f1;
     f1 = Lopen_module(nil, x, input);
-    if (unwindflag != unwindNONE)
+    if (par::td.unwindflag != unwindNONE)
     {   printf("+++ Module could not be opened\n");
         return nil;
     }
     f = Lrds(nil, f1);
     readevalprint(1);
-    if (unwindflag != unwindNONE) printf("+++ Error loading module\n");
+    if (par::td.unwindflag != unwindNONE) printf("+++ Error loading module\n");
     Lrds(nil, f);
     Lclose(nil, f1);
     return nil;
@@ -7243,19 +7240,19 @@ static bool debugFlag = false;
 
 LispObject Lerrorset_3(LispObject lits, LispObject a1,
                        LispObject a2, LispObject a3)
-{   int save = backtraceflag;
-    backtraceflag = 0;
-    if (a2 != nil || debugFlag) backtraceflag |= backtraceHEADER;
-    if (a3 != nil || debugFlag) backtraceflag |= backtraceTRACE;
-    if (debugFlag) backtraceflag = backtraceHEADER | backtraceTRACE;
+{   int save = par::td.backtraceflag;
+    par::td.backtraceflag = 0;
+    if (a2 != nil || debugFlag) par::td.backtraceflag |= backtraceHEADER;
+    if (a3 != nil || debugFlag) par::td.backtraceflag |= backtraceTRACE;
+    if (debugFlag) par::td.backtraceflag = backtraceHEADER | backtraceTRACE;
     a1 = eval(a1);
-    if (unwindflag == unwindERROR ||
-        unwindflag == unwindBACKTRACE)
-    {   unwindflag = unwindNONE;
+    if (par::td.unwindflag == unwindERROR ||
+        par::td.unwindflag == unwindBACKTRACE)
+    {   par::td.unwindflag = unwindNONE;
         a1 = nil;
     }
     else a1 = cons(a1, nil);
-    backtraceflag = save;
+    par::td.backtraceflag = save;
     return a1;
 }
 
@@ -7346,7 +7343,7 @@ LispObject Lhardware_threads(LispObject _data) {
 }
 
 LispObject Lthread_id(LispObject _data) {
-    return packfixnum(par::thread_data.id);
+    return packfixnum(par::td.id);
 }
 
 LispObject Lthread_yield(LispObject _data) {
@@ -7999,8 +7996,8 @@ void setup()
     par::symval(symlower) = lisptrue;
     // Lput(nil, symraise, symfluid, lisptrue);
     // Lput(nil, symlower, symfluid, lisptrue);
-    cursym = nil;
-    work1 = work2 = nil;
+    par::td.cursym = nil;
+    par::td.work1 = par::td.work2 = nil;
     for (i=0; setup_names[i][0]!='x'; i++)
     {   LispObject w = lookup(1+setup_names[i], strlen(1+setup_names[i]), 3);
         if (qdefn0(w) == undefined0) qdefn0(w) = wrongnumber0;
@@ -8512,7 +8509,7 @@ int warm_start_1(gzFile f, int *errcode)
                                 par::symval(w) = val;
                                 par::fluid_globals[loc] = val;
                             } else {
-                                par::local_symbol(loc) = val;
+                                par::td.local_symbol(loc) = val;
                             }
                         }
                     }
@@ -8563,7 +8560,7 @@ int warm_start_1(gzFile f, int *errcode)
                                     par::symval(w) = val;
                                     par::fluid_globals[loc] = val;
                                 } else {
-                                    par::local_symbol(loc) = val;
+                                    par::td.local_symbol(loc) = val;
                                 }
                             }
                         }
@@ -8642,15 +8639,15 @@ int warm_start_1(gzFile f, int *errcode)
     }
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
-     par::symval(echo) = interactive ? nil : lisptrue;
+    par::symval(echo) = interactive ? nil : lisptrue;
 
     // Restore the work bases to thread_local storage.
-     work1 = work1_base;
-     work2 = work2_base;
-     cursym = cursym_base;
-     work1_base = NULLATOM;
-     work2_base = NULLATOM;
-     cursym_base = NULLATOM;
+    par::td.work1 = work1_base;
+    par::td.work2 = work2_base;
+    par::td.cursym = cursym_base;
+    work1_base = NULLATOM;
+    work2_base = NULLATOM;
+    cursym_base = NULLATOM;
 
 #ifdef DEBUG_GLOBALS
     par::debug_safe = true;
@@ -8879,9 +8876,9 @@ void write_image(gzFile f)
 
     // at this stage only the main thread is running. we can store
     // the work variables inside listbases for preservation
-    work1_base = work1;
-    work2_base = work2;
-    cursym_base = cursym;
+    work1_base = par::td.work1;
+    work2_base = par::td.work2;
+    cursym_base = par::td.cursym;
 
     int errcode;
     inner_reclaim(C_stackbase); // To compact memory.
@@ -8903,10 +8900,10 @@ void write_image(gzFile f)
 
                     // TODO: this is a hack. need to keep both values
                     if (qvalue(x) == undefined) {
-                        qvalue(x) = par::local_symbol(loc);
+                        qvalue(x) = par::td.local_symbol(loc);
                     }
                 } else {
-                    qvalue(x) = par::local_symbol(loc);
+                    qvalue(x) = par::td.local_symbol(loc);
                 }
             }
         }
@@ -9592,13 +9589,13 @@ int main(int argc, char *argv[])
     printf("imagename = <%s>\n", imagename);
     printf("VSL version %d.%.3d\n", IVERSION, FVERSION); fflush(stdout);
 
-    linepos = 0;
+    par::td.linepos = 0;
     for (size_t i=0; i<MAX_LISPFILES; i++) lispfiles[i] = 0;
     lispfiles[0] = stdin;   lispfiles[1] = stdout;
     lispfiles[2] = stderr;  lispfiles[3] = stdin;
     file_direction.set(1);
     file_direction.set(2);
-    lispin = 3; lispout = 1;
+    par::td.lispin = 3; par::td.lispout = 1;
     if (inputfilename != NULL)
     {   FILE *in = fopen(inputfilename, "r");
         if (in == NULL)
@@ -9606,7 +9603,7 @@ int main(int argc, char *argv[])
                    inputfilename);
         else lispfiles[3] = in;
     }
-    boffop = 0;
+    par::td.boffop = 0;
     for (;;) // This loop is for restart-lisp and preserve.
     {   allocateheap();
 // A warm start will read an image file which it expects to have been
@@ -9661,13 +9658,13 @@ int main(int argc, char *argv[])
                 qflags(d3) |= flagTRACED;
             }
         }
-        curchar = '\n'; symtype = '?'; cursym = nil;
-        if (boffop == 0) // Use standard restart function from image.
+        par::td.curchar = '\n'; par::td.symtype = '?'; par::td.cursym = nil;
+        if (par::td.boffop == 0) // Use standard restart function from image.
         {   if (restartfn == nil) readevalprint(0);
             else Lapply(nil, restartfn, nil);
         }
         else
-        {   LispObject x, data = makestring(boffo, boffop);
+        {   LispObject x, data = makestring(par::td.boffo, par::td.boffop);
             data = Lcompress(nil, Lexplodec(nil, data));
             x = qcar(data);   // 'fn or '(module fn)
             if (isCONS(x))
@@ -9676,7 +9673,7 @@ int main(int argc, char *argv[])
             }
             Lapply(nil, x, qcdr(data));
         }
-        if ((unwindflag & unwindPRESERVE) != 0)
+        if ((par::td.unwindflag & unwindPRESERVE) != 0)
         {   gzFile f = gzopen(imagename, "wbT");
             if (f == NULL)
                 printf("\n+++ Unable to open %s for writing\n", imagename);
@@ -9685,19 +9682,19 @@ int main(int argc, char *argv[])
 // A cautious person would have checked for error codes returned by the
 // above calls to write and close. I omit that here to be concise.
         }
-        if ((unwindflag & unwindRESTART) == 0) break;
-        unwindflag = unwindNONE;
-        boffop = 0;
-        if (qcar(work1) == nil) coldstart = 1;
-        else if (qcar(work1) == lisptrue) coldstart = 0;
+        if ((par::td.unwindflag & unwindRESTART) == 0) break;
+        par::td.unwindflag = unwindNONE;
+        par::td.boffop = 0;
+        if (qcar(par::td.work1) == nil) coldstart = 1;
+        else if (qcar(par::td.work1) == lisptrue) coldstart = 0;
         else
-        {   int save = lispout;
-            int savepos = linepos;
-            lispout = -2;
-            internalprint(work1);
+        {   int save = par::td.lispout;
+            int savepos = par::td.linepos;
+            par::td.lispout = -2;
+            internalprint(par::td.work1);
             wrch(0);
-            lispout = save;
-            linepos = savepos;
+            par::td.lispout = save;
+            par::td.linepos = savepos;
             coldstart = 0;
         }
     }

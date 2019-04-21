@@ -143,7 +143,7 @@ total memory, I have found a good compromise for segments of a few kilobytes eac
 I will use the shortened form \emph{GC} to refer to garbage collection throughout the rest of this chapter for
 brevity.
 
-The garbage collector has to account for the state of all threads. These threads have to be synchronised
+The \emph{garbage collector} (GC) has to account for the state of all threads. These threads have to be synchronised
 and in a safe state to initiate the GC. They must also be included in the calculation of the root set.
 
 I store all the thread-local information required for synchronisation in a class called \texttt{Thread\_data}. This
