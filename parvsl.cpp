@@ -7137,7 +7137,7 @@ void readevalprint(int loadp)
         // I make sure here that echo is locally bound here.
         // Otherwise threads would content over the global value.
         {
-            par::Shallow_bind(echo, par::symval(echo));
+            par::Shallow_bind bind{echo, par::symval(echo)};
             par::td.unwindflag = unwindNONE;
             if (loadp) par::symval(echo) = nil;
             if (showallreads) par::symval(echo) = lisptrue;
@@ -7953,7 +7953,8 @@ void setup()
 
     echo = lookup("*echo", 5, 3);
     fluid_symbol(echo);
-    par::symval(echo) = interactive ? nil : lisptrue;
+    par::symval(echo) = nil;
+    // interactive ? nil : lisptrue;
 
     {
         LispObject nn = lookup("*nocompile", 10, 3);
@@ -8639,7 +8640,8 @@ int warm_start_1(gzFile f, int *errcode)
     }
 // This setting may change from run to run so a setting saved in the
 // image file should be clobbered here!
-    par::symval(echo) = interactive ? nil : lisptrue;
+    par::symval(echo) = nil;
+    // interactive ? nil : lisptrue;
 
     // Restore the work bases to thread_local storage.
     par::td.work1 = work1_base;

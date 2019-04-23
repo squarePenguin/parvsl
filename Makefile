@@ -70,10 +70,10 @@ vsl.img:	vsl library.lsp vsl.lsp
 	time ./vsl -z library.lsp | tee vsl.img.log
 
 dparvsl.img:	dparvsl parlibrary.lsp parvsl.lsp
-	time ./dparvsl -z parlibrary.lsp | tee dparvsl.img.log
+	time ./dparvsl -z library.lsp | tee dparvsl.img.log
 
 parvsl.img:	parvsl parlibrary.lsp parvsl.lsp
-	time ./parvsl -z parlibrary.lsp | tee parvsl.img.log
+	time ./parvsl -z library.lsp | tee parvsl.img.log
 
 # In much the way that dvsl.img (and friends) is a Lisp built on top of
 # the VSL kernel, dreduce[.img] is the Reduce algebra system.
@@ -97,14 +97,14 @@ dparreduce:	dparvsl
 	rm -f dparreduce.img.modules/* dparreduce.img inline-defs.dat
 	time ./dparvsl -z -idparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildparreduce.lsp | tee dparreduce.log
+		buildreduce.lsp | tee dparreduce.log
 
 parreduce:	parvsl
 	mkdir -p parreduce.img.modules
 	rm -f parreduce.img.modules/* parreduce.img inline-defs.dat
 	time ./parvsl -z -iparreduce.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildparreduce.lsp | tee parreduce.log
+		buildreduce.lsp | tee parreduce.log
 
 
 debug_reduce:	dvsl
@@ -137,14 +137,14 @@ dparrcore:	dparvsl buildparrcore.lsp
 	rm -f dparrcore.img.modules/* dparrcore.img inline-defs.dat
 	time ./dparvsl -z -idparrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildparrcore.lsp | tee dparrcore.log
+		buildrcore.lsp | tee dparrcore.log
 
 parrcore:	parvsl buildparrcore.lsp
 	mkdir -p parrcore.img.modules
 	rm -f parrcore.img.modules/* parrcore.img inline-defs.dat
 	time ./parvsl -z -iparrcore.img -D@srcdir=. -D@reduce=.. \
 		-Dnoinlines=t \
-		buildparrcore.lsp | tee parrcore.log
+		buildrcore.lsp | tee parrcore.log
 
 # The target "step2" at one stage activated a script that started from
 # drcore and compiled additional parts of Reduce to bring it up to the
