@@ -94,15 +94,6 @@ any advantage multi-threading brings to the language.
 % \end{center}
 
 
-% \begin{center}
-% \begin{tabular}{llll}
-%  & VSL & MUTEX & LOCK-free\\
-% \hline
-%  & 1m55s & 2m10s & 2m4s\\
-% \end{tabular}
-% \end{center}
-
-
 \subsection{Memory allocation}
 \label{sec:malloc}
 I wanted to allow multiple threads in parallel without affecting the performance
@@ -314,10 +305,10 @@ public:
 % interlocks add overhead, but w do not need real-time performance
 % not many threads
 
-\label{sec:symbols}
 \section{Data races in the interpreter}
+\label{sec:symbols}
 \label{sec:datarace}
-The interpreter runs a read-eval-print loop which makes heavy use of global state and side effects.
+The interpreter is the core of VSL. It runs a read-eval-print loop which makes heavy use of global state and side effects.
 
 All named objects in the lifecycle of the program are \emph{symbols}. All global and local variables, including
 special ones (like \texttt{true} or \texttt{nil}) and function arguments are symbols. A global hash-table keeps track of
@@ -393,8 +384,7 @@ LispObject par_value(LispObject symbol) {
 I carefully replaced all calls to \texttt{value} to \texttt{par\_value}. Now, multiple threads accessing the same symbol
 can do so safely, as they will each access their own versions. This eliminates data races entirely.
 
-% \section{{\bfseries\sffamily TODO} make diagram}
-% \label{sec:orgf99baa4}
+% TODO: diagram
 
 % \section{Shared memory and global variables}
 % \label{sec:sharedmem}
@@ -565,6 +555,15 @@ LispObject lookup(std::string name) {
   return s;
 }
 \end{verbatim}
+
+% \begin{center}
+% \begin{tabular}{llll}
+%  & VSL & MUTEX & LOCK-free\\
+% \hline
+%  & 1m55s & 2m10s & 2m4s\\
+% \end{tabular}
+% \end{center}
+
 \section{Threads}
 \label{sec:threads}
 
@@ -608,6 +607,7 @@ thread B, but thread B is waiting for garbage collection). To solve such issues,
 changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
 to make all waiting calls put a thread into a \emph{safe} state before sleeping, so that the garbage collector
 can proceed with the thread.
+
 \section{Saving state to disk and reloading}
 \label{sec:preserve}
 
