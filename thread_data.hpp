@@ -49,7 +49,7 @@ void add_debug_global(LispObject s) {
 
 static std::atomic_int num_symbols(0);
 
-/* thread_local std::vector<LispObject> fluid_locals; */
+thread_local std::vector<LispObject> fluid_locals;
 std::vector<LispObject> fluid_globals; // the global values
 
 
@@ -90,7 +90,7 @@ public:
     int linelength = 80, linepos = 0, printflags = printESCAPES;
     bool blank_pending = false;
 
-    std::vector<LispObject> fluid_locals;
+    std::vector<LispObject> *fluid_locals;
 
     /**
      * Whether the thread is in a safe state for GC.
@@ -105,20 +105,43 @@ public:
     * local symbol is at least allocated.
     */
     LispObject& local_symbol(int loc) {
-        if (num_symbols > (int)fluid_locals.size()) {
-            fluid_locals.resize(num_symbols, undefined);
+        auto& locals = *this->fluid_locals;
+
+        if (num_symbols > (int)locals.size()) {
+            locals.resize(num_symbols, undefined);
         }
 
 #ifdef DEBUG
-        if (loc >= (int)fluid_locals.size()) {
+        if (loc >= (int)locals.size()) {
             std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
             throw std::logic_error("bad thread_local index");
         }
 #endif // DEBUG
 
-        return fluid_locals[loc];
+        return locals[loc];
     }
 };
+
+/**
+* [local_symbol] gets the thread local symbol. may return undefined.
+* Note, thread_local symbols are only lazily resised. Accessing a local
+* symbol directly is dangerous. You need to use this function to ensure the
+* local symbol is at least allocated.
+*/
+LispObject& local_symbol(int loc) {
+    if (num_symbols > (int)fluid_locals.size()) {
+        fluid_locals.resize(num_symbols, undefined);
+    }
+
+#ifdef DEBUG
+    if (loc >= (int)fluid_locals.size()) {
+        std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
+        throw std::logic_error("bad thread_local index");
+    }
+#endif // DEBUG
+
+    return fluid_locals[loc];
+}
 
 // joins the thread on destruction
 class Thread_RAII {
@@ -229,6 +252,7 @@ void init_thread_data(int id, LispObject *C_stackbase) {
     td.C_stackbase = C_stackbase;
     td.id = id;
     td.cursym = nil;
+    td.fluid_locals = &fluid_locals;
 
     std::lock_guard<std::mutex> lock{thread_table_mutex};
     thread_table.emplace(id, par::td);
