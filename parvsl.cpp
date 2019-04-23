@@ -3169,7 +3169,7 @@ LispObject interpretspecform(LispObject lits, LispObject x)
     v = qcar(lits);
     lits = qcdr(lits);
     if (!isCONS(v) || !isSYMBOL(v = qcar(v))) return nil;
-    par::Shallow_bind(v, x);
+    par::Shallow_bind bind_v{v, x};
     lits = Lprogn(nil, lits);
     return lits;
 }
