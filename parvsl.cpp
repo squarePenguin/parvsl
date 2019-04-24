@@ -1549,8 +1549,7 @@ void copy_symval(LispObject x) {
         int loc = qfixnum(qvalue(x));
         for (auto x: par::thread_table) {
             auto ttd = x.second;
-            // TODO: need local_symbol here!
-            auto& val = ttd.local_symbol(loc);
+            auto& val = par::td.local_symbol(loc);
             val = copy(val);
         }
 
@@ -3589,7 +3588,7 @@ void unglobal_symbol(LispObject s) {
     if ((qflags(s) & flagGLOBAL) != 0) {
         int loc = par::allocate_symbol();
         LispObject val = qvalue(s);
-        // par::local_symbol(loc) = qvalue(s);
+        // par::td.local_symbol(loc) = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL;
         par::symval(s) = val;
@@ -3605,7 +3604,7 @@ void fluid_symbol(LispObject s) {
 
     if (qflags(s) & flagGLOBAL) {
         int loc = par::allocate_symbol();
-        // par::local_symbol(loc) = qvalue(s);
+        // par::td.local_symbol(loc) = qvalue(s);
         // LispObject val = qvalue(s);
         qvalue(s) = packfixnum(loc);
         qflags(s) &= ~flagGLOBAL; // disable global
@@ -8510,7 +8509,7 @@ int warm_start_1(gzFile f, int *errcode)
                                 par::symval(w) = val;
                                 par::fluid_globals[loc] = val;
                             } else {
-                                par::local_symbol(loc) = val;
+                                par::td.local_symbol(loc) = val;
                             }
                         }
                     }
@@ -8561,7 +8560,7 @@ int warm_start_1(gzFile f, int *errcode)
                                     par::symval(w) = val;
                                     par::fluid_globals[loc] = val;
                                 } else {
-                                    par::local_symbol(loc) = val;
+                                    par::td.local_symbol(loc) = val;
                                 }
                             }
                         }
@@ -8902,10 +8901,10 @@ void write_image(gzFile f)
 
                     // TODO: this is a hack. need to keep both values
                     if (qvalue(x) == undefined) {
-                        qvalue(x) = par::local_symbol(loc);
+                        qvalue(x) = par::td.local_symbol(loc);
                     }
                 } else {
-                    qvalue(x) = par::local_symbol(loc);
+                    qvalue(x) = par::td.local_symbol(loc);
                 }
             }
         }

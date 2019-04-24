@@ -409,6 +409,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cmath>
 #include <cctype>
 #include <cinttypes>
 #include <cstdlib>
@@ -1181,7 +1182,7 @@ inline size_t number_size(uint64_t *p)
 // On 32-bit systems a bignum will have a wasted 32-bit word after the
 // header and before the digits, so that the digits are properly aligned
 // in memory. The result will be that the bignum is laid out as follows
-//      |     hdr64     | digit64 | gigit64 | ... |    (64-bit world)
+//      |     hdr64     | digit64 | digit64 | ... |    (64-bit world)
 //      | hdr32 | gap32 | digit64 | digit64 | ... |    (32-bit world)
 // The length value packed into the header is the length of the vector
 // excluding its header.
@@ -5729,7 +5730,10 @@ INLINE_VAR constexpr size_t K=18;
 // "const", but for now it is a simple variable so I can tinker with the
 // value during testing and tuning.
 
+#ifndef KARATSUBA_CUTOFF
+// It may be defined globvally as a severe override of what happens here!
 INLINE_VAR size_t KARATSUBA_CUTOFF = K;
+#endif
 
 inline void small_or_big_multiply(uint64_t *a, size_t lena,
                                   uint64_t *b, size_t lenb,

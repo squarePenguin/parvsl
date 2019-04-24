@@ -47,9 +47,8 @@ void add_debug_global(LispObject s) {
 
 #endif // DEBUG_GLOBALS
 
-static std::atomic_int num_symbols(0);
+inline std::atomic_int num_symbols(0);
 
-thread_local std::vector<LispObject> fluid_locals;
 std::vector<LispObject> fluid_globals; // the global values
 
 
@@ -90,7 +89,7 @@ public:
     int linelength = 80, linepos = 0, printflags = printESCAPES;
     bool blank_pending = false;
 
-    std::vector<LispObject> *fluid_locals;
+    std::vector<LispObject> fluid_locals;
 
     /**
      * Whether the thread is in a safe state for GC.
@@ -105,43 +104,20 @@ public:
     * local symbol is at least allocated.
     */
     LispObject& local_symbol(int loc) {
-        auto& locals = *this->fluid_locals;
-
-        if (num_symbols > (int)locals.size()) {
-            locals.resize(num_symbols, undefined);
+        if (num_symbols > (int)fluid_locals.size()) {
+            fluid_locals.resize(num_symbols, undefined);
         }
 
 #ifdef DEBUG
-        if (loc >= (int)locals.size()) {
+        if (loc >= (int)fluid_locals.size()) {
             std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
             throw std::logic_error("bad thread_local index");
         }
 #endif // DEBUG
 
-        return locals[loc];
+        return fluid_locals[loc];
     }
 };
-
-/**
-* [local_symbol] gets the thread local symbol. may return undefined.
-* Note, thread_local symbols are only lazily resised. Accessing a local
-* symbol directly is dangerous. You need to use this function to ensure the
-* local symbol is at least allocated.
-*/
-LispObject& local_symbol(int loc) {
-    if (num_symbols > (int)fluid_locals.size()) {
-        fluid_locals.resize(num_symbols, undefined);
-    }
-
-#ifdef DEBUG
-    if (loc >= (int)fluid_locals.size()) {
-        std::cerr << "location invalid " << loc << " " << num_symbols << std::endl;
-        throw std::logic_error("bad thread_local index");
-    }
-#endif // DEBUG
-
-    return fluid_locals[loc];
-}
 
 // joins the thread on destruction
 class Thread_RAII {
@@ -162,7 +138,7 @@ public:
     std::thread& get() { return t; }
 };
 
-static thread_local Thread_data td;
+inline thread_local Thread_data td;
 
 std::unordered_map<int, Thread_data&> thread_table;
 std::mutex thread_table_mutex;
@@ -252,7 +228,6 @@ void init_thread_data(int id, LispObject *C_stackbase) {
     td.C_stackbase = C_stackbase;
     td.id = id;
     td.cursym = nil;
-    td.fluid_locals = &fluid_locals;
 
     std::lock_guard<std::mutex> lock{thread_table_mutex};
     thread_table.emplace(id, par::td);
@@ -420,7 +395,7 @@ void condvar_notify_all(int cvid) {
     get_condvar(cvid).notify_all();
 }
 
-static std::mutex alloc_symbol_mutex;
+inline std::mutex alloc_symbol_mutex;
 
 /**
  * This just returns a shared id to index the symbol.
@@ -467,7 +442,7 @@ LispObject& symval(LispObject s) {
     if (is_fluid(s) && res == undefined) {
         return fluid_globals[loc];
     }
-    // THis is either local or locally bound fluid
+    // This is either local or locally bound fluid
     return res;
 }
 

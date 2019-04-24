@@ -1,7 +1,7 @@
-% A first sketch of a minamalist Groebner Base package
+% A first sketch of a minimalist Groebner Base package
 
 
-% At present this generates a GRoebner base using monic polynomials
+% At present this generates a Groebner base using monic polynomials
 % (which therefore have rational number coefficients). It uses just
 % lexographic order using some variables whose names are in the list
 % varnames).
@@ -12,6 +12,50 @@ symbolic;
 on echo, backtrace, comp;
 
 if getd 'spool then spool "babygroe.log";
+
+% I will put the main and central and important part first!
+
+symbolic procedure babygroe L;
+  begin
+    scalar pairs;
+    L := for each p in L collect dfmake_monic p;
+    pairs := for each p on L conc
+      for each q in cdr p collect (car p . q);
+    terpri();
+    printc "Babygroe input:";
+    for each p in L do << dfprin p; terpri() >>;
+    while pairs do begin
+      scalar s := s_poly(caar pairs, cdar pairs);
+      if !*noisy then <<
+        princ "Raw s-poly = "; dfprin s; terpri() >>;
+      pairs := cdr pairs;
+      s := reduce_by(s, L);
+      if !*noisy then <<
+        princ "Reduced s-poly = "; dfprin s; terpri()>>;
+      if not null s then begin
+        scalar L1 := L;  % because I will update L as I scan it.
+% Now if any polynomial in the existing base would be divisible by the new
+% element I should remove it and all pending pairs using it. Doing this
+% should let me end up with a miminal basis.
+        for each p in L1 do
+          if not xless(dfx p, dfx s) then <<
+            if !*noisy then <<
+              princ "I can now discard "; dfprin p >>;
+            L := delete(p, L);
+            pairs := delete_pairlist(p, pairs) >>;
+        for each p in L do pairs := (s . p) . pairs;
+        if !*noisy then <<
+          princ "Add new poly into the base: "; dfprin s; terpri() >>;
+        L := s . L end
+    end;
+    terpri();
+    printc "The base is:";
+    for each p in L do <<
+      dfprin p;
+      terpri() >>;
+    return L
+  end;
+
 
 % First I will want support for distributed polynomials.
 
@@ -324,47 +368,6 @@ symbolic procedure delete_pairlist(p, L);
   if null L then nil
   else if p = caar L or p = cdar L then delete_pairlist(p, cdr L)
   else car L . delete_pairlist(p, cdr L);
-
-symbolic procedure babygroe L;
-  begin
-    scalar pairs;
-    L := for each p in L collect dfmake_monic p;
-    pairs := for each p on L conc
-      for each q in cdr p collect (car p . q);
-    terpri();
-    printc "Babygroe input:";
-    for each p in L do << dfprin p; terpri() >>;
-    while pairs do begin
-      scalar s := s_poly(caar pairs, cdar pairs);
-      if !*noisy then <<
-        princ "Raw s-poly = "; dfprin s; terpri() >>;
-      pairs := cdr pairs;
-      s := reduce_by(s, L);
-      if !*noisy then <<
-        princ "Reduced s-poly = "; dfprin s; terpri()>>;
-      if not null s then begin
-        scalar L1 := L;  % because I will update L as I scan it.
-% Now if any polynomial in the existing base would be divisible by the new
-% element I should remove it and all pending pairs using it. Doing this
-% should let me end up with a miminal basis.
-        for each p in L1 do
-          if not xless(dfx p, dfx s) then <<
-            if !*noisy then <<
-              princ "I can now discard "; dfprin p >>;
-            L := delete(p, L);
-            pairs := delete_pairlist(p, pairs) >>;
-        for each p in L do pairs := (s . p) . pairs;
-        if !*noisy then <<
-          princ "Add new poly into the base: "; dfprin s; terpri() >>;
-        L := s . L end
-    end;
-    terpri();
-    printc "The base is:";
-    for each p in L do <<
-      dfprin p;
-      terpri() >>;
-    return L
-  end;
 
 % Now partially hook this onto Reduce.
 

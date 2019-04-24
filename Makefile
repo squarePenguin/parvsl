@@ -7,8 +7,8 @@
 # end up with page after page of messages. Many current C++ compilers
 # support C++11 by default, but some do not so I force that issue.
 
-CFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O0 -g -rdynamic -pg -Wall
-FASTCFLAGS = --std=gnu++11 -fno-diagnostics-color -fmax-errors=5 -O3 -Wall
+CFLAGS = --std=gnu++17 -fno-diagnostics-color -fmax-errors=5 -O0 -g -rdynamic -pg -Wall
+FASTCFLAGS = --std=gnu++17 -fno-diagnostics-color -fmax-errors=5 -O3 -Wall
 
 
 # The issue of just which libraries I need to link in seems to be
