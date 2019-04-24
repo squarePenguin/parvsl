@@ -60,7 +60,7 @@ In effect, the garbage collector is an important component of the VSL interprete
 have to be made when modifying it. First of all, any bugs in the garbage collector may leave the memory in
 an invalid state, corrupting the state of the program and leading to undefined behaviour in C. Such errors
 are also very difficult to spot and debug, as they can go undetected until the particular region of memory
-is accessed again.
+is accessed again. The original VSL memory allocation and garbage collector only supported a single-threaded model.
 
 \subsection{Cheney's algorithm}
 The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
@@ -80,8 +80,9 @@ of memory is in use, the copying of all live memory might become more expensive 
 Finally, this approach is not incremental. The entire heap is scanned and cleaned every run. Other approaches might
 reduce latency by collecting only partially in more, but shorter cycles.
 
-The problem sizes in Reduce are usually not bound by memory on modern computers, with none of the applications
-being known to use more than one gigabyte. Its application is also not latency-sensitive. It is used for
+The problem sizes in Reduce are usually not bound by memory on modern computers, with most of the test applications
+using less than a gigabyte, although some users of Reduce elsewhere perform calculations
+using tens or even hundreds of gigabytes elsewhere. Its application is also not latency-sensitive. It is used for
 solving large problems as fast as possible. A large compaction stage is more efficient as it reduces time
 switching between running code and collecting garbage and minimises fragmentation.
 This makes the copying approach suitable for the language.
