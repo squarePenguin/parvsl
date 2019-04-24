@@ -1,5 +1,5 @@
 \section{ParVSL}
-I have forked the the original VSL project into a new language which I call for simplicity Parallel VSL, or ParVSL.
+I have forked the the original VSL project into a new language which I call Parallel VSL, or ParVSL.
 ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
 
 VSL was a good candidate for this project because it featured a complete, working Lisp implementation while being
@@ -19,14 +19,14 @@ and operating systems and can break between versions.
 C++ is a superset of C and can compile existing, standard C code easily. The C++11 standard addresses the
 above omissions, making C++ a multi-threaded language. While in some cases the implementation uses the same
 libraries as the C equivalent (e.g POSIX), we do not have to think about these details and the code
-we write is fully portable. The only requirement is that a C++11 compliant compiler is used to compile the
-code and then which platforms these compilers can target. As of today, the C++11 standard has matured enough
+we write is fully portable. The only requirement is that a C++11 compliant compiler is used and that it supports
+the target platform. As of today, the C++11 standard has matured enough
 that all the large compiler vendors (i.e GCC, Clang, Visual C++, Mingw, etc.) fully support it on the
 major platforms (e.g x86, ARM and SPARC).
 
 The first change I have made to the implementation is to clear it of any incompatible code and compile it
 with a C++ compiler. This was a trivial task and mostly involved adding a few more explicit casts.
-However, I have been slowly transitioning the code from idiomatic C++ as I analysed more parts of it
+However, I have been slowly transitioning the code to idiomatic C++ as I analysed more parts of it
 and became confident those changes wouldn't affect the semantics of the program.
 
 \section{Throughput vs latency}
@@ -74,13 +74,13 @@ memory allocations, and thus heuristics have to be employed.
 VSL avoids this problem entirely by using a copying garbage collector. This means it compacts memory by moving
 traceable objects to a new region. The unreachable objects are simply not moved and they will eventually be overwritten.
 This method has the advantage that it fully compacts memory, fixing the issue of fragmentation in an efficient,
-straight-forward way. The main trade-off this approach has is the total memory usage. A region of memory at least
+straight-forward way. The main trade-off is the total memory usage. A region of memory at least
 as large as the one in use has to be used to copy the live objects into. In addition, when a very large amount
 of memory is in use, the copying of all live memory might become more expensive than managing the free memory.
-Finally, this approach is not incremental. The entire heap is scanned and cleaned every run. Other ways might
+Finally, this approach is not incremental. The entire heap is scanned and cleaned every run. Other approaches might
 reduce latency by collecting only partially in more, but shorter cycles.
 
-The problem sizes in REDUCE are usually not bound by memory on modern computers, with none of the applications
+The problem sizes in Reduce are usually not bound by memory on modern computers, with none of the applications
 being known to use more than one gigabyte. Its application is also not latency-sensitive. It is used for
 solving large problems as fast as possible. A large compaction stage is more efficient as it reduces time
 switching between running code and collecting garbage and minimises fragmentation.
@@ -135,7 +135,7 @@ have to be careful when handling these values, and cannot manipulate them as \te
 \texttt{copy} or \texttt{copycontent} above on them, but they still need to be kept during garbage collection. The solution was
 to \emph{pin} them. Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
 Additionally, the \texttt{allocate} function will have to check for pinned items on the heap and skip over them. This
-additional book-keeping is manageable, When building the entirety of REDUCE, the number of pinned items is never
+additional book-keeping is manageable. When building the entirety of Reduce, the number of pinned items is never
 larger than 300. Considering memory used is in the order of megabytes, these pinned locations cause negligible
 fragmentation.
 
@@ -146,7 +146,7 @@ This mechanism was counter-intuitive at first, and is lacking in providing safet
 There are two lifetime specifiers for symbols: \emph{global} and \emph{fluid}. It is important to note that they
 do not refer semantically to variables but only to \textbf{symbol names}.
 
-A \emph{global} symbols has only a single globally visible value. That means you cannot bind the name to any local
+A \emph{global} symbol has only a single globally visible value. That means you cannot bind the name to any local
 variable. For instance if \texttt{x} is declared global, it then cannot be used as a function parameter name, or in a
 let binding.
 
@@ -157,15 +157,15 @@ in other languages, allowing the name to be reused.
 it will result in an error. If it is a fluid and has a global value, that value will be shadowed for the lifetime
 of the binding.
 
-To make it easier to use it as a scripting language, Reduce's Lisp allows using symbols that aren't global, fluid,
+To make it easier to use as a scripting language, Reduce's Lisp allows using symbols that aren't global, fluid,
 or locally bound. These will act like local variables, except their lifetime will be defined for the duration of the
 program. For single-threaded programs, this distinction is not important: these variables would act like fluids. However,
 when implementing multithreading, fluids have a global value visible to all threads, while these symbols are only
 visible on their local thread. I will call these symbols \emph{unbound locals}.
 
 \section{Saving state to disk}
-REDUCE has an important feature which allows the user to preserve the state to disk. A \texttt{preserve} instruction can be
+Reduce has an important feature which allows the user to preserve the state to disk. A \texttt{preserve} instruction can be
 used to do so, and the user is able to specify a function to run on restart. Preserve saves the entire state of the
-program, including memory and symbols. The feature involves careful manipulation of the world state and it can maintaining
-it unaffected when enabling multi-threaded programs is complicated. I ran into a few challenges when implementing ParVSL,
+program, including memory and symbols. The feature involves careful manipulation of the world state and keeping it
+unaffected when enabling multi-threaded programs is complicated. I ran into a few challenges when implementing ParVSL,
 which I will discuss in the implementation section.
