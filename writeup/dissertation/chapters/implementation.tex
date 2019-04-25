@@ -24,44 +24,44 @@ To manage the threads, I made further use of the C++11 standard library. I creat
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
 identifier, which is returned to the user. The user can then use the identifier to join the thread.
 
-\subsection{RAII classes}
-\label{sec:raii}
-The RAII (Resource Allocation Is Initialisation) design pattern is common in C++ \cite{effective-cpp}.
-It is a programming technique which binds the lifetime of resources to an object's lifetime. Normally,
-C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
-This makes it easy to introduce bugs when there is an attempted access to an unallocated resource,
-or leaks when a resource is not released after use. C++ classes offer a solution to this problem.
-Classes have both constructors and destructors, and these are automatically called when the object
-is created and when it becomes unavailable, respectively.
+% \subsection{RAII classes}
+% \label{sec:raii}
+% The RAII (Resource Allocation Is Initialisation) design pattern is common in C++ \cite{effective-cpp}.
+% It is a programming technique which binds the lifetime of resources to an object's lifetime. Normally,
+% C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
+% This makes it easy to introduce bugs when there is an attempted access to an unallocated resource,
+% or leaks when a resource is not released after use. C++ classes offer a solution to this problem.
+% Classes have both constructors and destructors, and these are automatically called when the object
+% is created and when it becomes unavailable, respectively.
 
-\begin{verbatim}
-{
-  // obj1, obj2 are constructed here, unlike Java,
-  // where it would be a null reference.
-  Foo obj1;
-  Bar obj2;
-} // End of scope, obj2 is destructed, followed by obj1.
-Foo *obj3 = new Foo(); // Foo constructor called here.
-delete obj3; // Foo destructor is called here on obj3.
-\end{verbatim}
+% \begin{verbatim}
+% {
+%   // obj1, obj2 are constructed here, unlike Java,
+%   // where it would be a null reference.
+%   Foo obj1;
+%   Bar obj2;
+% } // End of scope, obj2 is destructed, followed by obj1.
+% Foo *obj3 = new Foo(); // Foo constructor called here.
+% delete obj3; // Foo destructor is called here on obj3.
+% \end{verbatim}
 
-We can use this mechanism to implement RAII. We simply make sure
-the underlying resource is allocated in the constructor and deallocated in the destructor.
-Smart pointers like \texttt{std::unique\_ptr} are a good showcase of the power of RAII. As soon as the
-smart pointer objects become inaccessible (e.g by going out of scope), the underlying pointer
-is safely deleted, providing a primitive (but very effective) form of automatic reference counting.
+% We can use this mechanism to implement RAII. We simply make sure
+% the underlying resource is allocated in the constructor and deallocated in the destructor.
+% Smart pointers like \texttt{std::unique\_ptr} are a good showcase of the power of RAII. As soon as the
+% smart pointer objects become inaccessible (e.g by going out of scope), the underlying pointer
+% is safely deleted, providing a primitive (but very effective) form of automatic reference counting.
 
-When changing the codebase to use C++ features I found various opportunities to apply the RAII pattern,
-when managing threads, shallow binding and garbage collection.
+% When changing the codebase to use C++ features I found various opportunities to apply the RAII pattern,
+% when managing threads, shallow binding and garbage collection.
 
-Thread objects in C++ are not implemented in a RAII style in the standard library. When a thread object
-is destructed, it must be in an \emph{unjoinable} state. A thread is unjoinable if it either has joined or
-it has been detached. If an unjoinable thread is ever destructed it will cause the entire C++ program to
-terminate.
+% Thread objects in C++ are not implemented in a RAII style in the standard library. When a thread object
+% is destructed, it must be in an \emph{unjoinable} state. A thread is unjoinable if it either has joined or
+% it has been detached. If an unjoinable thread is ever destructed it will cause the entire C++ program to
+% terminate.
 
-I have wrapped all threads in a \texttt{ThreadRAII} class, so that whenever they go out of scope they are automatically
-joined (when still in a joinable state). This guarantees there will be no premature termination in the case the
-user does not handle the thread correctly and that the ParVSL interpreter will exit cleanly.
+% I have wrapped all threads in a \texttt{ThreadRAII} class, so that whenever they go out of scope they are automatically
+% joined (when still in a joinable state). This guarantees there will be no premature termination in the case the
+% user does not handle the thread correctly and that the ParVSL interpreter will exit cleanly.
 
 % TODO: more robust code
 % if there is an exception etc make sure it will always happen
@@ -304,7 +304,118 @@ public:
 % interlocks add overhead, but w do not need real-time performance
 % not many threads
 
-\section{Data races in the interpreter}
+\section{Lock-free hashtable for symbol lookup}
+\label{sec:hashtable}
+Just like allocations are a critical region of code in VSL, so are symbol lookups.
+Every occurrence of a symbol must be looked up in the symbol table. If the symbol does
+not exist, it will be created. Multiple threads looking up symbols will cause contention.
+If two threads try to allocate the same symbol name at the same time, they will invalidate
+the table.
+
+As before, the naive solution would be to implement a mutex lock on the entire
+lookup function.
+
+To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access
+to either a single writing thread, or all the reading threads. This would would allow multiple
+threads to lookup symbols at the same time, however, as soon as one one thread has to create a
+symbol, all the readers have to wait for it to finish.
+
+Moreover, the lookup function is two-step: first it tries to find a symbol, then it creates one
+if it didn't find any. If two threads lookup the same symbol at the same time, it is possible for
+both of them to end try to create it at the same time. The reader-writer lock would not prevent this!
+It would serialise the writes, so it does prevent undefined behaviour in C++, however it does still
+create the symbol twice. The pointer to the symbol that the first thread returned from the function
+would become invalid.
+
+I have found a third approach, based on the Compare-And-Swap (CAS) instruction which solves the issue
+above, while also providing a lock-free implementation. The symbol lookup table is currently implemented
+as a static array of linked lists. VSL never erases symbols, which made the lock-free implementation easier.
+
+\begin{figure}
+\begin{verbatim}
+std::atomic<LispObject> symbol_table[TABLE_SIZE];
+
+LispObject lookup(std::string name) {
+  size_t loc = hash(name) % SYMBOLS_SIZE;
+
+  LispObject bucket = symbols[loc].load(std::memory_order_acquire);
+
+  while (bucket != nil) {
+    LispObject s = head(bucket); // first list element
+
+    if (symbol_name(s) == name) {
+      // found the symbol
+      return s;
+    }
+
+    bucket = tail(bucket); // rest of the list
+  }
+
+  LispObject s = allocate_symbol(name);
+
+  LispObject new_bucket = cons(s, bucket);
+
+  while (!symbols[loc].compare_exchange_strong(
+      bucket, new_bucket, std::memory_order_acquire_release))
+  {
+    // search for stored value
+    LispObject old_bucket = bucket;
+    bucket = symbols[loc].load(std::memory_order_acquire);
+
+    for (LispObject s; s != old_bucket; s = tail(s)) {
+      if (symbol_name(s) == name) {
+        // Another thread created the symbol. Use that.
+        return s;
+      }
+    }
+
+    // Make sure we don't discard new symbols inserted by other threads.
+    new_bucket = cons(s, bucket);
+  }
+
+  return s;
+}
+\end{verbatim}
+\caption{Lock-free symbol hashtable look up implementation}
+\label{code:lockfree}
+\end{figure}
+
+This approach adds no penalty to single-threaded
+code. For comparison, I also implemented the mutex lock approach and tested
+them on building Reduce (single-threaded). Table \ref{fig:lockfree} shows that the mutex
+version is noticeably slower.
+
+\begin{figure}
+  \centering
+  \begin{tabular}{lr}
+                               & Time \\
+  \hline
+  VSL                          & 1m55s \\
+  ParVSL with mutex lookup     & 2m10s \\
+  ParVSL with lock-free lookup & 1m55s \\
+  ParVSL with std::string      & 2m04s
+  \end{tabular}
+  \label{fig:lockfree}
+  \caption{Symbol lookup effects on building Reduce}
+\end{figure}
+
+\subsection{Impact of C++ \texttt{std::string} on performance}
+
+While modifying this code, I saw the opportunity to change C-style string to C++
+standard library ones. The lookup function, for example, actually takes a char array
+pointer and the string length as separate arguments. I even identified a bug
+in VSL where the wrong length was passed as a hard-coded number, and it prompted
+me to use the more modern \verb|std::string| class. To my surprise, this change alone
+slowed down ParVSL, as can be seen in the last row of Table \ref{fig:lockfree}.
+I made sure no more extra copying or construction of these strings was done than
+necessary. I reverted my change in this case, but I note it as an interesting example
+of the trade-off C++ features can bring.
+
+% times
+% vsl 0m14.353s
+%     0m13.764s
+
+\section{Symbol access}
 \label{sec:symbols}
 \label{sec:datarace}
 The interpreter is the core of VSL. It runs a read-eval-print loop which makes heavy use of global state and side effects.
@@ -410,105 +521,6 @@ Thread 3 has not bound any local value to the symbol so it is \texttt{undefined}
 global value in \verb|shared_fluids|, the string \verb|"John"|. Finally, symbol \verb|y| is \emph{local}. It is
 undefined in \verb|shared_fluids| but otherwise behaves the same as \verb|x|, storing its thread-local values at
 index \verb|1|.
-
-\subsection{Lock-free hashtable for symbol lookup}
-\label{sec:hashtable}
-Just like allocations are a critical region of code in VSL, so are symbol lookups.
-Every occurrence of a symbol must be looked up in the symbol table. If the symbol does
-not exist, it will be created. Multiple threads looking up symbols will cause contention.
-If two threads try to allocate the same symbol name at the same time, they will invalidate
-the table.
-
-\begin{verbatim}
-LispObject symbols[SYMBOLS_SIZE];
-
-LispObject lookup(std::string name) {
-  size_t loc = hash(name) % SYMBOLS_SIZE;
-
-  LispObject bucket = symbols[loc];
-
-  while (bucket != nil) {
-    LispObject s = head(bucket); // first list element
-
-    if (symbol_name(s) == name) {
-      // found the symbol
-      return s;
-    }
-
-    bucket = tail(bucket); // rest of the list
-  }
-
-  LispObject s = allocate_symbol(name);
-  symbols[loc] = cons(s, bucket);
-
-  return s;
-}
-\end{verbatim}
-
-As before, the naive solution would be to implement a mutex lock on the entire
-lookup function.
-
-To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access
-to either a single writing thread, or all the reading threads. This would would allow multiple
-threads to lookup symbols at the same time, however, as soon as one one thread has to create a
-symbol, all the readers have to wait for it to finish.
-
-Moreover, the lookup function is two-step: first it tries to find a symbol, then it creates one
-if it didn't find any. If two threads lookup the same symbol at the same time, it is possible for
-both of them to end try to create it at the same time. The reader-writer lock would not prevent this!
-It would serialise the writes, so it does prevent undefined behaviour in C++, however it does still
-create the symbol twice. The pointer to the symbol that the first thread returned from the function
-would become invalid.
-
-I have found a third approach, based on the Compare-and-swap (CAS) instruction which solves the issue
-above, while also providing a lock-free implementation. The symbol lookup table is currently implemented
-as static array of linked list.
-
-Instead, I replaced it with:
-\begin{verbatim}
-std::atomic<LispObject> symbol_table[TABLE_SIZE];
-
-LispObject lookup(std::string name) {
-  size_t loc = hash(name) % SYMBOLS_SIZE;
-
-  LispObject bucket = symbols[loc].load(std::memory_order_acquire);
-
-  while (bucket != nil) {
-    LispObject s = head(bucket); // first list element
-
-    if (symbol_name(s) == name) {
-      // found the symbol
-      return s;
-    }
-
-    bucket = tail(bucket); // rest of the list
-  }
-
-  LispObject s = allocate_symbol(name);
-
-  LispObject new_bucket = cons(s, bucket);
-
-  while (!symbols[loc].compare_exchange_strong(
-      bucket, new_bucket, std::memory_order_release))
-  {
-    // search for stored value
-    LispObject old_bucket = bucket;
-    bucket = symbols[loc].load(std::memory_order_acquire);
-
-    for (LispObject s; s != old_bucket; s = tail(s)) {
-      if (symbol_name(s) == name) {
-        // Another name created the symbol. Use that.
-        return s;
-      }
-    }
-
-    // Make sure we don't discard new symbols inserted by other threads.
-    new_bucket = cons(s, bucket);
-  }
-
-  return s;
-}
-\end{verbatim}
 
 % \begin{center}
 % \begin{tabular}{llll}
