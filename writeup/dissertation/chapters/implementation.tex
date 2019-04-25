@@ -140,7 +140,8 @@ of the other threads.
 
 The \emph{ambiguous root set} is the set of potential references found on the stack. The stack is a continuous area
 of memory managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
-from C++, however we can dereference a stack variable to find its location on the stack. VSL remembers the position
+from C++, however we can take the address of a stack variable to find its location and hence approximate the
+stack pointer's value. VSL remembers the position
 of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
 scans the all locations in between for ambiguous roots.
 
@@ -496,7 +497,7 @@ lookup function.
 To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access
 to either a single writing thread, or all the reading threads. This would would allow multiple
 threads to lookup symbols at the same time, however, as soon as one one thread has to create a
-symbol, all th reader have to wait for it to finish.
+symbol, all the readers have to wait for it to finish.
 
 Moreover, the lookup function is two-step: first it tries to find a symbol, then it creates one
 if it didn't find any. If two threads lookup the same symbol at the same time, it is possible for

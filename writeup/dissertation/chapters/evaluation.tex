@@ -7,7 +7,7 @@ My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
 multi-paradigm programming language, it is not possible to guarantee to cover all
 possible scenarios that might exhibit new bugs. Thankfully, the language and its
-direct application are well intertwined, so there is a vey large coverage test already
+direct application are well intertwined, so there is a very large coverage test already
 available to demonstrate the most functionalities of the language: building REDUCE.
 
 REDUCE consists of around 400 thousand lines of code, and since VSL was built to
@@ -58,6 +58,8 @@ parsing, meaning any tests using the variable \texttt{x} would have the value be
 to code. Another instance was a name clash in the error handling function, leading to failure
 to contain exceptions. While these two cases have been manually fixed, there are many other
 such potential problems within the Reduce packages which will have to be cleaned up.
+% Identifying when odd behaviour was down to my code or whether it revealed
+
 
 \subsection{Benchmarks}
 
