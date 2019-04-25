@@ -2,8 +2,8 @@
 \label{sec:babythreads}
 After familiarising myself with the VSL codebase I tried to implement the simplest form of
 multi-threading and test out how the language would behave. I added a new function to VSL
-which would takes a piece of code as an argument, starts a new thread and joins again with
-the main thread. Once implemented, I could run first and simplest unit test for ParVSL:
+which takes a piece of code as an argument, starts a new thread and joins again with
+the main thread. Once implemented, I could run the first and simplest unit test for ParVSL:
 
 \begin{verbatim}
 > (dotimes (i 4) (thread '(print "Hello World")))
@@ -13,13 +13,12 @@ the main thread. Once implemented, I could run first and simplest unit test for 
 ld"
 \end{verbatim}
 
-We can immediately observe the effects of parallelism in action. At this point, the code above
-is just about the only working example. The interpreter is not thread-safe and data races
+We can immediately observe the effects of parallelism in action. The interpreter is not thread-safe and data races
 on global variables (including printing to the same stream) lead to undefined behaviour. Printing
 still seems to work, however most other functions would fail. The spawned threads can only handle strings
 and will crash on handling numbers or symbols, or when trying to allocate anything.
 There is no inter-thread communication, exception safety, and any garbage collection would produce a segmentation
-fault. To be able to write a more complicated test, I need to make changes in all ares of the compiler.
+fault. To be able to write a more complicated test, I need to make changes in all areas of the interpreter.
 
 To manage the threads, I made further use of the C++11 standard library. I created a global hashmap storing
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
@@ -27,8 +26,8 @@ identifier, which is returned to the user. The user can then use the identifier 
 
 \subsection{RAII classes}
 \label{sec:raii}
-The RAII (Resource Allocation Is Initialisation) design pattern is common in C++. It is a programming
-technique which binds the lifetime of resources to an object's lifetime. Normally,
+The RAII (Resource Allocation Is Initialisation) design pattern is common in C++ \cite{effective-cpp}.
+It is a programming technique which binds the lifetime of resources to an object's lifetime. Normally,
 C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
 This makes it easy to introduce bugs when there is an attempted access to an unallocated resource,
 or leaks when a resource is not released after use. C++ classes offer a solution to this problem.
@@ -37,7 +36,7 @@ is created and when it becomes unavailable, respectively.
 
 \begin{verbatim}
 {
-  // obj1 is constructed here, unlike Java,
+  // obj1, obj2 are constructed here, unlike Java,
   // where it would be a null reference.
   Foo obj1;
   Bar obj2;
@@ -46,7 +45,7 @@ Foo *obj3 = new Foo(); // Foo constructor called here.
 delete obj3; // Foo destructor is called here on obj3.
 \end{verbatim}
 
-We can use this mechanism to implement automatic resource management, or RAII. We simply make sure
+We can use this mechanism to implement RAII. We simply make sure
 the underlying resource is allocated in the constructor and deallocated in the destructor.
 Smart pointers like \texttt{std::unique\_ptr} are a good showcase of the power of RAII. As soon as the
 smart pointer objects become inaccessible (e.g by going out of scope), the underlying pointer
@@ -75,10 +74,10 @@ to allocate concurrently, causing contention. A naive solution to this problem
 would have been to use a mutex lock on allocations. While this would be easy to
 implement, it would also severely degrade performance. Locks are expensive even
 in single-threaded scenarios with no contention, and allocations are very common
-when evaluating Lisp. This is especially the case in an interpreted Lisp were no
+when evaluating Lisp. This is especially the case in an interpreted Lisp where no
 allocations are optimised away. Simply reading the code to evaluate allocates
 \(O(n)\) times for code of length \(n\). That is because code in Lisp code is data.
-Each instruction is a list data structure, with each elements allocated.
+Each instruction is a list data structure, with all elements allocated.
 Serialising allocations is guaranteed to slow down the language enough to cancel
 any advantage multi-threading brings to the language.
 
@@ -126,14 +125,11 @@ there will be a lot of contention on requesting segments, leading back to the or
 problem of locking on every allocation. If the segment size is too large, there is a risk
 of threads holding large amounts of memory without using it and causing early garbage collection
 cycles. This is because reclaiming memory is requested when a new segment cannot be created,
-regardless of how much free space there is in existing segments. While trade-off depends on the
+regardless of how much free space there is in existing segments. While the trade-off depends on the
 total memory, I have found a good compromise for segments of a few kilobytes each.
 
 \section{Garbage collection}
 \label{sec:gc}
-I will use the shortened form \emph{GC} to refer to garbage collection throughout the rest of this chapter for
-brevity.
-
 The \emph{garbage collector} (GC) has to account for the state of all threads. These threads have to be synchronised
 and in a safe state to initiate the GC. They must also be included in the calculation of the root set.
 
@@ -143,7 +139,7 @@ themselves in a global thread table at start-up. The thread starting the GC can 
 of the other threads.
 
 The \emph{ambiguous root set} is the set of potential references found on the stack. The stack is a continuous area
-of memory to managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
+of memory managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
 from C++, however we can dereference a stack variable to find its location on the stack. VSL remembers the position
 of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
 scans the all locations in between for ambiguous roots.
@@ -183,7 +179,7 @@ void garbage_collection() {
 
 Each thread will have its own stack, so I had to modify the code to scan all the stacks before garbage
 collection. This is one reason I had to pause work on all threads for GC. If I hadn't, then a thread might
-change add references to heap objects on its stack after those objects have been marked safe to delete.
+add references to heap objects on its stack after those objects have been marked safe to delete, causing corruption.
 
 When a thread is initialised, I save its own stackbase in \texttt{Thread\_data}, and then also save its stackhead
 when it is paused to wait for GC. All these stack ranges are scanned before I start garbage collection:
@@ -207,7 +203,7 @@ void garbage_collection() {
 }
 \end{verbatim}
 
-% TODO
+% TODO: diagram
 \subsection{Garbage collection locks and safety}
 \label{sec:gclock}
 The garbage collector is \emph{stop-the-world}. The thread initiating garbage collection must wait for all
@@ -216,9 +212,11 @@ initiated and act accordingly.
 
 The first idea I had was to trap all calls to allocate memory and check whether garbage collection is needed.
 To do this, I could simply reset all thread segments. Threads would need to allocate eventually and
-would request a new segment, at which point the would need to call the GC. This solution is incomplete however.
+would request a new segment, at which point they would need to call the GC. This solution is incomplete however.
 First of all, a thread might be busy for a long time without needing to allocate. This would cause all other
 threads to be idle waiting for it to finish.
+
+% TODO: deadlock diagram
 
 A bigger issue was the risk of deadlocks. If thread A is waiting for the result of a computation on thread B,
 but thread B was paused waiting for the GC, then the program is deadlocked. Similarly, any effectful computation,
@@ -272,7 +270,7 @@ The \texttt{Gc\_guard} class is accompanied by \texttt{Gc\_lock}. A thread tryin
 acquire a \texttt{Gc\_lock}. The lock will wait until all threads are in a safe state and will prevent
 other threads from acquiring.
 
-TODO: fix this code
+% TODO: fix this code
 \begin{verbatim}
 class Gc_lock {
   std::mutex m;
@@ -333,7 +331,7 @@ Lisp, and VSL in particular, has a mach looser concept of scope.
 In the example above, \texttt{y} is defined before the call of \texttt{f} and will remain defined until the
 call to \texttt{g} returns.
 
-Shallow binding is the mechanism by which this is achieved. Each symbol is mapped to a single value.
+\emph{Shallow binding} is the mechanism by which this is achieved. Each symbol is mapped to a single value.
 When a variable name is bound, e.g. as a function parameter name during a function call or through a
 \texttt{let} statement, its old value is stored by the interpreter and replaced with the new value. At the end of the binding,
 the old value is restored. The main advantage of this method is performance. Old values can simply be saved
@@ -457,6 +455,10 @@ can do so safely, as they will each access their own versions. This eliminates d
 % \section{{\bfseries\sffamily TODO} draw diagram}
 % \label{sec:org3c36132}
 
+<<<<<<< HEAD
+=======
+% TODO
+>>>>>>> e2f99fe0a4f1cb54106bca0dcbba467aefc0e255
 % \subsection{Shallow binding}
 % \label{sec:shallow}
 
