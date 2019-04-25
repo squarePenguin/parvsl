@@ -358,112 +358,58 @@ Many variable names are reused multiple times in a program (e.g \texttt{i, j, co
 Multiple threads binding the same variable will override each other's values.
 
 I wanted to fix this while keeping the same dynamic scoping semantics for backward compatibility.
-One option was to replace shallow binding with functional association lists storing local values,
+One option was implement a form of deep binding with functional association lists storing local values,
 however I was concerned with the performance. Shallow binding has a constant factor, while any
 associative data structure would add non-negligible overheads to a critical area of the
 interpreter (symbol lookup).
 
 My approach was to allocate thread-local storage for symbols.
-Global symbols were unaffected, because rebinding them is illegal in the language. However,
-for non-globals I used a thread-local array to store the real value, and had the global storage
+Global symbols were unaffected, because rebinding them is illegal in the language.
+However, for non-globals I used a thread-local array to store the real value, and had the global storage
 location point to the array location. Each local symbol gets its own unique array index for the lifecycle
 of the program. Then, each thread will reserve that location within its local array for the symbol.
-Then, I created the function:
 
 \begin{verbatim}
-// the original value function
-LispObject value(LispObject symbol);
+thread_local vector locals;
+vector shared_fluids;
 
 LispObject par_value(LispObject symbol) {
+  // [value] returns the symbol's global value
   LispObject val = value(symbol);
+
   if (is_global(symbol))
     return val; // global symbols remain unaffected
 
-  // ASSERT: val is a Location otherwise
-  Location loc = value_to_location(val);
-  return local_value(loc); // get the thread_local value at that location
+  int loc = to_int(val); // val is a location
+
+  if (is_fluid(symbol) and locals[loc] == undefined)
+    // No local value for this fluid. Return the global one.
+    return shared_fluids[loc];
+
+  // get the thread-local value at that location
+  return locals[loc];
 }
 \end{verbatim}
 
 I carefully replaced all calls to \texttt{value} to \texttt{par\_value}. Now, multiple threads accessing the same symbol
-can do so safely, as they will each access their own versions. This eliminates data races entirely.
+can do so safely, as they will each access their own versions. This eliminates data races entirely,
+and shallow binding is unaffected.
 
-% TODO: diagram
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{symbols.pdf}
+  \label{fig:symbols}
+  \caption{Storage of symbols in ParVSL}
+\end{figure}
 
-% \section{Shared memory and global variables}
-% \label{sec:sharedmem}
-% VSL has dynamic scoping and exhibits shallow binding. This means there is a global
-% storage mapping each symbol to exactly one value. A variable is defined as long
-% as the symbol is assigned a value. The user can explicitly mark a symbol as global
-% or fluid. A global symbol only has a global value and cannot be locally bound.
-% A fluid symbol can have both a global value and a locally bound value. The way this
-% is accomplished is by saving the global value on every binding and then restoring it
-% as soon as the binding is over.
-
-% This shallow binding approach is incompatible with a multi-threaded program: a symbol
-% could be locally bound to different values on different threads. One approach to solving the
-% issue is to use a deep-binding approach: passing around an associative list mapping the symbols
-% to values. The approach would add a penalty to performance, however it should be investigated
-% how significant the trade-off is. Instead, I have modified the code to try to keep the
-% shallow-binding.
-
-% Global values work just as before and no modification is needed. For local and
-% fluids however, I added a thread-local storage array. The global storage now only
-% holds a pointer to the array location where the actual value is stored. This way, each thread can
-% hold its own version of the symbol and modify it safely. For fluids, there will still be a global
-% shared value. Since I already used the global storage for the pointer, I added one more global
-% array, where the pointer indicates the global value.
-
-% \section{{\bfseries\sffamily TODO} more comments}
-% \label{sec:org0d92ab1}
-% \begin{verbatim}
-% std::atomic_int num_symbols(0);
-
-% thread_local std::vector<LispObject> fluid_locals;
-% std::vector<LispObject> fluid_globals; // the global values
-
-% LispObject& local_symbol(int loc) {
-%   if (num_symbols > (int)fluid_locals.size()) {
-%     fluid_locals.resize(num_symbols, undefined);
-%   }
-
-%   return fluid_locals[loc];
-% }
-
-% LispObject& symval(LispObject s) {
-%   assert(isSYMBOL(s));
-%   if (is_global(s)) {
-%     // This value is in the same location as in VSL on the heap.
-%     return global_value(s);
-%   }
-
-%   // If it is not a global value, then it is a location,
-%   // represented as an integer.
-%   size_t loc = get_int(global_value(s));
-%   LispObject& res = local_symbol(loc);
-%   // Here I assume undefined is a sort of "reserved value",
-%   // meaning it can only exist when the object is not shallow_bound.
-%   // This helps me distinguish between fluids that are actually global
-%   // and those that have been bound. When the local value is undefined,
-%   // I refer to the global value.
-%   if (is_fluid(s) && res == undefined) {
-%       return fluid_globals[loc];
-%   }
-%   // This is either local or locally bound fluid
-%   return res;
-% }
-% \end{verbatim}
-% \section{{\bfseries\sffamily TODO} draw diagram}
-% \label{sec:org3c36132}
-
-<<<<<<< HEAD
-=======
-% TODO
->>>>>>> e2f99fe0a4f1cb54106bca0dcbba467aefc0e255
-% \subsection{Shallow binding}
-% \label{sec:shallow}
-
-% To implement shallow binding
+In figure \ref{fig:symbols} I show a full example of how symbols are stored. The first symbol is \texttt{g}, which
+is a \emph{global} symbol. It's value is stored directly in the global heap (like in the original VSL). The symbol \texttt{x}
+is \emph{fluid}. It's heap value simply indicates a location (\texttt{loc 2}). We use the index to find the actual value
+in thread-local storage. Threads 1 stores the string \texttt{"George"} while thread 2 stores the integer \texttt{42}.
+Thread 3 has not bound any local value to the symbol so it is \texttt{undefined}. However, it can still access the
+global value in \verb|shared_fluids|, the string \verb|"John"|. Finally, symbol \verb|y| is \emph{local}. It is
+undefined in \verb|shared_fluids| but otherwise behaves the same as \verb|x|, storing its thread-local values at
+index \verb|1|.
 
 \subsection{Lock-free hashtable for symbol lookup}
 \label{sec:hashtable}
