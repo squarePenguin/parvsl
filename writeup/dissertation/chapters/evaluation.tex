@@ -391,22 +391,19 @@ I have plotted the speed-up boost offered for a number of array lengths, dependi
 of workers.
 
 
-\begin{center}
+\begin{table}
+\centering
 \begin{tabular}{rrrrr}
- & 100 & 250 & 500 & 1000\\
+ & 100000 & 250000 & 500000 & 1000000\\
 \hline
 1 & 2.351 & 5.282 & 11.152 & 22.840\\
 2 & 1.563 & 3.409 & 5.850 & 11.706\\
-3 &  &  &  & \\
-4 &  &  &  & \\
-5 &  &  &  & \\
-6 &  &  &  & \\
-7 & 1.319 & 2.554 & 4.906 & 9.054\\
-8 &  &  &  & \\
+8 & 1.319 & 2.554 & 4.906 & 9.054\\
 16 & 1.071 & 2.137 & 3.995 & 7.514\\
- &  &  &  & \\
 \end{tabular}
-\end{center}
+\caption{Parallel merge sort times by number of workers}
+\label{table:parmergesort}
+\end{table}
 
 \section{Parallel building of Reduce}
 
