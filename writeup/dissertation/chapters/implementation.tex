@@ -411,14 +411,8 @@ I made sure no more extra copying or construction of these strings was done than
 necessary. I reverted my change in this case, but I note it as an interesting example
 of the trade-off C++ features can bring.
 
-% times
-% vsl 0m14.353s
-%     0m13.764s
-
 \section{Symbol access}
 \label{sec:symbols}
-\label{sec:datarace}
-The interpreter is the core of VSL. It runs a read-eval-print loop which makes heavy use of global state and side effects.
 
 All named objects in the lifecycle of the program are \emph{symbols}. All global and local variables, including
 special ones (like \texttt{true} or \texttt{nil}) and function arguments are symbols. A global hash-table keeps track of
@@ -522,13 +516,59 @@ global value in \verb|shared_fluids|, the string \verb|"John"|. Finally, symbol 
 undefined in \verb|shared_fluids| but otherwise behaves the same as \verb|x|, storing its thread-local values at
 index \verb|1|.
 
-% \begin{center}
-% \begin{tabular}{llll}
-%  & VSL & MUTEX & LOCK-free\\
-% \hline
-%  & 1m55s & 2m10s & 2m4s\\
-% \end{tabular}
-% \end{center}
+\section{Data races in the interpreter}
+\label{sec:datarace}
+
+The interpreter is the core of VSL. It runs a read-eval-print loop which makes heavy use of global state and side effects.
+Running VSL in parallel involves, in effect, running an interpreter in each thread. The spawned threads do not
+run a print-eval-print loop, instead they run a computation, save the result, then terminate. However,
+in ParVSL I allow these threads to execute any code the main thread can, with no restriction. This means
+all threads can use and modify global state and interact with standard input, output and files and
+thus can conflict with each other.
+
+% TODO: maybe not here?
+% Retrofitting multi-threading into a system designed without parallelism in mind is bound to bring issues.
+% Many assumptions in original code were violated when running multiple threads. To find and fix all the issues
+% I had to thoroughly understand every part of the system, which took time. Multi-threaded code is non-deterministic
+% by nature so many issues would only show up in testing some times when the threads would conflict in just the
+% right way. Tested behaviour was not always be reproducible, making debugging difficult.
+
+There are plenty of global variables holding state in VSL. I slowly discovered which ones represented local
+state. Many of those handle the global heap, and I discussed them in sections \ref{sec:storage} and \ref{sec:gc}.
+Another example is \verb|unwind_flag|, which is heavily used for Lisp control flow. It is modified to indicate
+an exception, to implement \verb|goto| and \verb|return| instructions, and to indicate early program exit,
+among other uses. Each thread needs its own version of this global flag, otherwise they will mess each
+other's control flow, so I made it \emph{thread-local}.
+
+A third case is file handling. Globals variables indicate which file is in use, and hold buffers for reading
+and writing. Again, I had to make all these thread-local. On the other hand, there are other variables holding
+truly global information, like pointers to and status of all the open files. At one point I was over-zealous in
+my modifications and made a variable thread-local which should have stayed global. It looked as if it indicated
+the direction of the current file, however it turned out to be a bitmap of all the files in the system. The fact
+that VSL makes creative uses of integers for optimisation reasons effectively hides information from the type system.
+It took me hours of debugging until I discovered how the variable was used to understand the fix. I also modified
+the variable to use a proper \emph{bitset} data structure, enhancing readability. As a bonus, ParVSL can now
+support a much larger number of open files than the 32 imposed by the size of integers.
+
+Those globals which are not thread-local still pose the problem of data races. For instance, multiple threads
+may try to read from or write to the same file. ParVSL cannot avoid contention altogether: those conflicting
+operations will be serialised non-deterministically. However, it is important to prevent these data races at
+the C++ level, because they cause undefined behaviour, ultimately leading to anything from spurious crashes
+to more subtle data corruption (which is a nightmare to debug).
+
+I modified all functions for opening, closing, or modifying a file to use mutex locks, with one mutex per file.
+Opening and closing files is are not on the critical path of the interpreter so I was less concerned with speed.
+However, reading and writing can be part of the main loop. Many programs will run from a file, not standard input,
+and it is common to print regularly to standard output or file. To manage this, I added extra per-thread buffers
+to handle single character reads and writes. Only flush operation is synchronised with the file mutex when it
+flushes these buffers (or fills them in the case of reading).
+
+Finally there is the issue shared data in Lisp. The user can cause data races by modifying the same global symbol
+from multiple threads, or using other side-effectful features such as modifying a list in place. I could lock a
+mutex for any such operation to ensure safety, however such a change would add a massive overhead to ParVSL.
+I have decided to leave this issue as a responsibility to the ParVSL user. I discuss in section \ref{sec:threads}
+how I expose mutex locks in ParVSL. My choice means that the user can optimise their code to minimise
+lock usage, at the expense of safety.
 
 \section{Threads}
 \label{sec:threads}
@@ -604,3 +644,5 @@ Saving state to disk is an operation happening at the end of the program.
 
 My implementation on preserve preservation only allows the operation on the main thread, and will wait
 for all spawned threads to finish running and join.
+
+% todo: talk about having to copy return values

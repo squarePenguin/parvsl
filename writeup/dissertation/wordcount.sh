@@ -10,4 +10,7 @@ for chapter in "${chapters[@]}"; do
     total=$((total + wordcount))
 done
 
-echo "total: ${total}"
+echo "total chapters: ${total}"
+
+all=$(detex diss.tex | tr -cd "0-9A-Za-z \n" | wc -w)
+echo "total: ${all}"
