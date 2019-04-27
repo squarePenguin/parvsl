@@ -235,6 +235,7 @@ end;
 
 
 \subsection{Managing threads}
+\label{ssec:managethreads}
 
 With the queue implemented we can design the worker threads. The starting thread
 initialises the queue and starts all the workers as individual threads. It can start
@@ -279,6 +280,7 @@ core to 100\% until forcefully preempted by the OS. It would also prevent other 
 started by the user from doing work.
 
 \subsection{Waiting for a job's result}
+\label{ssec:waitjob}
 
 In ParVSL, the \texttt{thread} function takes another function to execute on the new thread,
 along with the arguments for that function. The return value of the function call is

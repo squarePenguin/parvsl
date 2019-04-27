@@ -335,19 +335,17 @@ int mutex() {
 
 std::mutex& get_mutex(int id) {
     std::lock_guard<Rw_lock::Reader_lock> lock{mutex_rwlock.reader_lock()};
-    return mutexes.find(id)->second; // will crash if not found
+    return mutexes.find(id)->second;
 }
 
 void mutex_lock(int mid) {
     par::Gc_guard guard;
     auto &m = get_mutex(mid);
-    // std::cerr << "Locking " << m.native_handle() << std::endl;
     m.lock();
 }
 
 void mutex_unlock(int mid) {
     auto &m = get_mutex(mid);
-    // std::cerr << "Unlocking " << m.native_handle() << std::endl;
     m.unlock();
 }
 
