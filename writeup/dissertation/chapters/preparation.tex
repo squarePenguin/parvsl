@@ -30,7 +30,7 @@ However, I have been slowly transitioning the code to idiomatic C++ as I analyse
 and became confident those changes wouldn't affect the semantics of the program.
 
 \section{Throughput vs latency}
-When optimising for performance in a programming language, we have to analyse the tradeoff between
+When optimising for performance in a programming language, we have to analyse the trade-off between
 total throughput and latency. Optimising for latency means minimising the duration of any individual
 task in the program, and increasing availability. Optimising for throughput involves minimising the
 total running time of the program. For example, a web server would benefit more from reducing latency
@@ -49,6 +49,16 @@ same size as current available memory is malloc-ed, doubling the amount availabl
 never freed until the end of the program. They are sorted by their pointer locations,
 and carefully \emph{joined} together to maintain the abstract model of contiguous memory. Binary search
 is used to identify the block containing a location.
+
+% TODO: read-eval-print loop
+% TODO: critical path
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{vslalloc.pdf}
+    \label{fig:vslalloc}
+    \caption{Memory allocations in VSL}
+\end{figure}
 
 \section{Garbage collector}
 An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer

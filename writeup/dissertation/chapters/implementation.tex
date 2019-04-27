@@ -14,15 +14,15 @@ ld"
 \end{verbatim}
 
 We can immediately observe the effects of parallelism in action. The interpreter is not thread-safe and data races
-on global variables (including printing to the same stream) lead to undefined behaviour. Printing
-still seems to work, however most other functions would fail. The spawned threads can only handle strings
+on global variables (including printing to the same stream) lead to undefined behaviour. Although printing
+still seems to work, most other functions would fail. The spawned threads can only handle strings
 and will crash on handling numbers or symbols, or when trying to allocate anything.
-There is no inter-thread communication, exception safety, and any garbage collection would produce a segmentation
+There is no inter-thread communication or exception safety, and any garbage collection would produce a segmentation
 fault. To be able to write a more complicated test, I need to make changes in all areas of the interpreter.
 
-To manage the threads, I made further use of the C++11 standard library. I created a global hashmap storing
+To manage the threads, I made further use of the C++11 standard library. I devised a global hashmap storing
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
-identifier, which is returned to the user. The user can then use the identifier to join the thread.
+identifier, which is returned to the user. Subsequently, the user can then use the identifier to join the thread.
 
 % \subsection{RAII classes}
 % \label{sec:raii}
@@ -96,9 +96,9 @@ any advantage multi-threading brings to the language.
 \subsection{Memory allocation}
 \label{sec:malloc}
 I wanted to allow multiple threads in parallel without affecting the performance
-of allocations. To do this I had to use a lock-free approach. To do this, I further
+of allocations. To do this I had to use a lock-free approach. As such, I further
 split the memory into regions, which I call \emph{segments}. A segment is a thread-local region
-for allocation in memory.
+for allocation on the heap.
 
 Just like before, memory is allocated to the segments in a continuous
 fashion. A pointer indicates the start of the non-allocated part of the segment
@@ -119,6 +119,13 @@ variable accessed without any locks.
 If the requested memory is larger than the segment size (e.g a large string or number),
 the current segment is sealed, then the large object will occupy its own custom segment,
 and the thread will then have to request a new segment.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{parvslalloc.pdf}
+  \label{fig:vslalloc}
+  \caption{Memory allocations in ParVSL}
+\end{figure}
 
 There is a trade-off involved when choosing the segment size. If the size is too small,
 there will be a lot of contention on requesting segments, leading back to the original
@@ -217,18 +224,30 @@ would request a new segment, at which point they would need to call the GC. This
 First of all, a thread might be busy for a long time without needing to allocate. This would cause all other
 threads to be idle waiting for it to finish.
 
-% TODO: deadlock diagram
-
 A bigger issue was the risk of deadlocks. If thread A is waiting for the result of a computation on thread B,
 but thread B was paused waiting for the GC, then the program is deadlocked. Similarly, any effectful computation,
 like waiting for user input will prevent the collection from starting.
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{gcdeadlock.pdf}
+  \label{fig:gcdeadlock}
+  \caption{Possible deadlock when starting Garbage Collection}
+\end{figure}
+
 \begin{verbatim}
 // global variables for synchronising garbage collection
 std::atomic_int num_threads(0);
+
+// number of threads ready for GC
 std::atomic_int safe_threads(0);
+
+// to wait for all threads to be GC-safe
 std::condition_variable gc_wait_all;
+
+// to notify all threads that GC is completed
 std::condition_variable gc_cv;
+
 std::atomic_bool gc_on(false);
 \end{verbatim}
 
@@ -267,9 +286,9 @@ public:
 }
 \end{verbatim}
 
-The \texttt{Gc\_guard} class is accompanied by \texttt{Gc\_lock}. A thread trying to initiate the GC will have to
-acquire a \texttt{Gc\_lock}. The lock will wait until all threads are in a safe state and will prevent
-other threads from acquiring.
+The \texttt{Gc\_guard} class is accompanied by \texttt{Gc\_lock}. A thread trying to initiate the GC has to
+acquire a \texttt{Gc\_lock}. The lock will wait until all threads are in a safe state. It also prevents
+other threads from acquiring it until it is released.
 
 % TODO: fix this code
 \begin{verbatim}
@@ -312,19 +331,19 @@ not exist, it will be created. Multiple threads looking up symbols will cause co
 If two threads try to allocate the same symbol name at the same time, they will invalidate
 the table.
 
-As before, the naive solution would be to implement a mutex lock on the entire
+As before, the na\"ive solution would be to implement a mutex lock on the entire
 lookup function.
 
 To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access
 to either a single writing thread, or all the reading threads. This would would allow multiple
-threads to lookup symbols at the same time, however, as soon as one one thread has to create a
+threads to lookup symbols at the same time. However, as soon as one one thread has to create a
 symbol, all the readers have to wait for it to finish.
 
 Moreover, the lookup function is two-step: first it tries to find a symbol, then it creates one
-if it didn't find any. If two threads lookup the same symbol at the same time, it is possible for
-both of them to end try to create it at the same time. The reader-writer lock would not prevent this!
-It would serialise the writes, so it does prevent undefined behaviour in C++, however it does still
-create the symbol twice. The pointer to the symbol that the first thread returned from the function
+if it did not find any. In the case of two threads looking up the same symbol, it is possible for
+both of them to end try to create it at the same time. The reader-writer lock would not prevent this.
+It serialises the writes, so it does prevent undefined behaviour in C++, however it may
+still create the same symbol twice. The pointer to the symbol that the first thread returned from the function
 would become invalid.
 
 I have found a third approach, based on the Compare-And-Swap (CAS) instruction which solves the issue
@@ -405,7 +424,7 @@ While modifying this code, I saw the opportunity to change C-style string to C++
 standard library ones. The lookup function, for example, actually takes a char array
 pointer and the string length as separate arguments. I even identified a bug
 in VSL where the wrong length was passed as a hard-coded number, and it prompted
-me to use the more modern \verb|std::string| class. To my surprise, this change alone
+me to use the more modern \verb|std::string| class. Surprisingly, this change alone
 slowed down ParVSL, as can be seen in the last row of Table \ref{fig:lockfree}.
 I made sure no more extra copying or construction of these strings was done than
 necessary. I reverted my change in this case, but I note it as an interesting example
@@ -437,7 +456,7 @@ Lisp, and VSL in particular, has a mach looser concept of scope.
 In the example above, \texttt{y} is defined before the call of \texttt{f} and will remain defined until the
 call to \texttt{g} returns.
 
-\emph{Shallow binding} is the mechanism by which this is achieved. Each symbol is mapped to a single value.
+\emph{Shallow binding} is the mechanism through which this is achieved. Each symbol is mapped to a single value.
 When a variable name is bound, e.g. as a function parameter name during a function call or through a
 \texttt{let} statement, its old value is stored by the interpreter and replaced with the new value. At the end of the binding,
 the old value is restored. The main advantage of this method is performance. Old values can simply be saved
@@ -463,16 +482,16 @@ Many variable names are reused multiple times in a program (e.g \texttt{i, j, co
 Multiple threads binding the same variable will override each other's values.
 
 I wanted to fix this while keeping the same dynamic scoping semantics for backward compatibility.
-One option was implement a form of deep binding with functional association lists storing local values,
-however I was concerned with the performance. Shallow binding has a constant factor, while any
-associative data structure would add non-negligible overheads to a critical area of the
-interpreter (symbol lookup).
+One option was to implement a form of deep binding with functional association lists storing local values,
+yet performance was a concern. While shallow binding has a constant factor, deep binding requires
+an associative data structure which would add non-negligible overheads to a critical area of the
+interpreter.
 
 My approach was to allocate thread-local storage for symbols.
 Global symbols were unaffected, because rebinding them is illegal in the language.
 However, for non-globals I used a thread-local array to store the real value, and had the global storage
-location point to the array location. Each local symbol gets its own unique array index for the lifecycle
-of the program. Then, each thread will reserve that location within its local array for the symbol.
+location point to the array location. A globally unique array index is reserved for each local symbol.
+All threads reserve that location within their local arrays for the symbol.
 
 \begin{verbatim}
 thread_local vector locals;
@@ -519,7 +538,8 @@ index \verb|1|.
 \section{Data races in the interpreter}
 \label{sec:datarace}
 
-The interpreter is the core of VSL. It runs a read-eval-print loop which makes heavy use of global state and side effects.
+The interpreter is the core of VSL. It runs a \emph{read-eval-print} loop which makes heavy
+use of global state and side effects.
 Running VSL in parallel involves, in effect, running an interpreter in each thread. The spawned threads do not
 run a print-eval-print loop, instead they run a computation, save the result, then terminate. However,
 in ParVSL I allow these threads to execute any code the main thread can, with no restriction. This means
@@ -534,30 +554,31 @@ thus can conflict with each other.
 % right way. Tested behaviour was not always be reproducible, making debugging difficult.
 
 There are plenty of global variables holding state in VSL. I slowly discovered which ones represented local
-state. Many of those handle the global heap, and I discussed them in sections \ref{sec:storage} and \ref{sec:gc}.
-Another example is \verb|unwind_flag|, which is heavily used for Lisp control flow. It is modified to indicate
-an exception, to implement \verb|goto| and \verb|return| instructions, and to indicate early program exit,
+state. Many of those handle the global heap, and are discussed in sections \ref{sec:storage} and \ref{sec:gc}.
+Another example is \verb|unwind_flag|, which is heavily used for Lisp control flow. Among other uses, it is
+mutated to indicate an exception, to implement \verb|goto| and \verb|return| instructions,
+as weel as to indicate early program exit,
 among other uses. Each thread needs its own version of this global flag, otherwise they will mess each
 other's control flow, so I made it \emph{thread-local}.
 
-A third case is file handling. Globals variables indicate which file is in use, and hold buffers for reading
+A third case is file handling. Global variables indicate which file is in use, and hold buffers for reading
 and writing. Again, I had to make all these thread-local. On the other hand, there are other variables holding
 truly global information, like pointers to and status of all the open files. At one point I was over-zealous in
-my modifications and made a variable thread-local which should have stayed global. It looked as if it indicated
-the direction of the current file, however it turned out to be a bitmap of all the files in the system. The fact
+my modifications and made a variable thread-local which should have stayed global. Although tt looked as if it indicated
+the direction of the current file, it turned out to be a bitmap of all the files in the system. The fact
 that VSL makes creative uses of integers for optimisation reasons effectively hides information from the type system.
-It took me hours of debugging until I discovered how the variable was used to understand the fix. I also modified
-the variable to use a proper \emph{bitset} data structure, enhancing readability. As a bonus, ParVSL can now
-support a much larger number of open files than the 32 imposed by the size of integers.
+After a significant time spent debugging, I realised that the variable was used differently and the solution became apparent.
+I also modified the variable to use a proper \emph{bitset} data structure, enhancing readability.
+As a bonus, ParVSL can now support a much larger number of open files than the 32 imposed by the size of integers.
 
 Those globals which are not thread-local still pose the problem of data races. For instance, multiple threads
 may try to read from or write to the same file. ParVSL cannot avoid contention altogether: those conflicting
 operations will be serialised non-deterministically. However, it is important to prevent these data races at
 the C++ level, because they cause undefined behaviour, ultimately leading to anything from spurious crashes
-to more subtle data corruption (which is a nightmare to debug).
+to more subtle data corruption.
 
-I modified all functions for opening, closing, or modifying a file to use mutex locks, with one mutex per file.
-Opening and closing files is are not on the critical path of the interpreter so I was less concerned with speed.
+I changed all functions for opening, closing, or altering a file to use mutex locks, with one mutex per file.
+Opening and closing files are not on the critical path of the interpreter so time was less of a concern.
 However, reading and writing can be part of the main loop. Many programs will run from a file, not standard input,
 and it is common to print regularly to standard output or file. To manage this, I added extra per-thread buffers
 to handle single character reads and writes. Then, I only synchronise threads when flushing the buffers, reducing
@@ -569,12 +590,12 @@ contention. In my testing, these changes did not slow down ParVSL in any measura
 At the start of the project I bolted on to ParVSL a small, broken, but very much useful feature to evaluate
 Lisp code in a new thread, as described in section \ref{sec:babythreads}. I ran a number of small tests
 and found where this functionality broke the interpreter, then reworked those parts of the Lisp system
-until it successfully passed those tests. At the same time, I adapted a large suite of regression tests
+until it successfully passed the tests. At the same time, I adapted a large suite of regression tests
 from Reduce to ensure single-threaded behaviour was unaffected and performance didn't degrade significantly.
-Now, it is time to introduce all the necessary functionality and primitives into the language to make
-multi-threading not only possible, but useful and accessible.
+Once I was confident that ParVSL could run multi-threaded I started implementing the extra functionality
+required to make parallel programs practical.
 
-To start a thread, the user simply needs to call the \verb|thread| function.
+To start a thread, the user needs to call the \verb|thread| function.
 Originally, the function only took a Lisp expression as argument and evaluated it. This was highly impractical,
 as the expression was passed unevaluated and data could not be passed naturally. The only way to allow
 communication was to write the data into a global symbol and have the code executed access that symbol.
