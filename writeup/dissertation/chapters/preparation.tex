@@ -1,5 +1,5 @@
 \section{ParVSL}
-I have forked the the original VSL project into a new language which I call Parallel VSL, or ParVSL.
+I have forked the the original VSL project into a new language which I named Parallel VSL, or ParVSL.
 ParVSL is fully backwards compatible with VSL and will be tested against it for performance.
 
 VSL was a good candidate for this project because it featured a complete, working Lisp implementation while being
@@ -36,7 +36,7 @@ task in the program, and increasing availability. Optimising for throughput invo
 total running time of the program. For example, a web server would benefit more from reducing latency
 of any individual request.
 
-In a CAS program the user is most likely to care about throughput, i.e. compute the output of large
+In a CAS program the user is most likely to care about throughput, i.e. compute the outputs of large
 problem sizes as quickly as possible. The program is single-user and has a simple interface. The only case
 for low latency is in the responsiveness of the graphical user interface. This is already provided by the
 operating system so our main goal is directed towards minimising throughput in the application.
@@ -61,7 +61,7 @@ is used to identify the block containing a location.
 \end{figure}
 
 \section{Garbage collector}
-An important feature of Lisp languages is their garbage collectors. Garbage collectors allow the programmer
+An important feature of Lisp languages is the \emph{garbage collector}. Garbage collectors allow the programmer
 to design code without having to worry about the lifecycle of their data, the internal memory model and
 managing pointers. This makes Lisp code significantly easier to write, leaving the burden of providing safety and
 efficiency to the compiler.
@@ -81,7 +81,7 @@ and filling them with objects of the right size involves extra book-keeping whic
 it is impossible to guarantee the gaps are filled efficiently, because the garbage collector cannot predict future
 memory allocations, and thus heuristics have to be employed.
 
-VSL avoids this problem entirely by using a copying garbage collector. This means it compacts memory by moving
+VSL avoids this problem entirely by using a \emph{copying} garbage collector. This means it compacts memory by moving
 traceable objects to a new region. The unreachable objects are simply not moved and they will eventually be overwritten.
 This method has the advantage that it fully compacts memory, fixing the issue of fragmentation in an efficient,
 straight-forward way. The main trade-off is the total memory usage. A region of memory at least
@@ -97,7 +97,8 @@ solving large problems as fast as possible. A large compaction stage is more eff
 switching between running code and collecting garbage and minimises fragmentation.
 This makes the copying approach suitable for the language.
 
-Cheney's algorithm \cite{cheney} is a method of stop-the-world copying garbage collection. The virtual \emph{heap} is divided into
+Cheney's algorithm \cite{cheney} is a method of \emph{stop-the-world} copying garbage collection.
+The virtual \emph{heap} is divided into
 two halves, and only one half is in use for allocations. The other half is considered free and used during garbage
 collection. When the first half is full and garbage collection is triggered, all traceable objects are copied over
 to the second half. Then, the two halves are swapped.

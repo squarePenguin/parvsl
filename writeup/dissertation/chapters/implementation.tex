@@ -71,8 +71,8 @@ identifier, which is returned to the user. Subsequently, the user can then use t
 \label{sec:storage}
 All the memory is global and shared, and multiple threads will often try
 to allocate concurrently, causing contention. A naive solution to this problem
-would have been to use a mutex lock on allocations. While this would be easy to
-implement, it would also severely degrade performance. Locks are expensive even
+would have been to use a mutex lock on allocations. While this is easy to
+implement, it can severely degrade performance. Locks are expensive even
 in single-threaded scenarios with no contention, and allocations are very common
 when evaluating Lisp. This is especially the case in an interpreted Lisp where no
 allocations are optimised away. Simply reading the code to evaluate allocates
@@ -92,6 +92,8 @@ any advantage multi-threading brings to the language.
 % \end{tabular}
 % \end{center}
 
+% VSL real	1m21.656s
+% VSL with mutex lock 1m34.577s
 
 \subsection{Memory allocation}
 \label{sec:malloc}

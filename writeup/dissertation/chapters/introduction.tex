@@ -29,16 +29,16 @@ The idea of using parallel computing to speed up computer algebra computing has 
 up in research papers for many years \cite{GabrielQML,multilisp,multilisp-implementation},
 but much of the activity
 pre-dates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
-they now provide. Moreover, advancements in single-core CPU performance has slowed down
+which they now provide. Moreover, advancements in single-core CPU performance has slowed down
 significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
 area of improvement in these new CPUs is their core count and number of hardware threads.
-Binding the performance of Reduce to single-threaded performance is likely to lead to
-a limitation in speed gains from new hardware. This project involves proving the infrastructure
+Therefore, binding the performance of Reduce to single-threaded performance is limit the speed gains
+brought by new hardware. This project involves proving the infrastructure
 Reduce will need to take full advantage of today's hardware.
 
 \section{Code examples}
 
-To help explain the concepts I introduce, I will use code fragments to show the algorithms.
+To help explain the concepts that I introduce, code fragments will be used to show the algorithms.
 These fragments will be a simplification of the original code, in order to remove the need
 for context within the rest of the codebase. To that end, the names and function interfaces
 are different from the real implementation. More complete versions of the code fragments
@@ -47,9 +47,9 @@ I showcase can be found in the Appendix \ref{ch:appendix-code}.
 For examples relating to the implementation of the interpreter, I will be using C++.
 For work related to my evaluation, I will be showcasing the ParVSL language, which is a type
 of Lisp. Reduce implements an additional language running on top of Lisp, called RLisp.
-I have tried my best to keep RLisp examples short and as readable
-as possible. Where I think the syntax of the language get in the way of readability, I
-switch to pseudo-code to aid my explanations.
+The RLisp examples are kept short and as readable as possible.
+Consequently, when the syntax of the language gets in the way of readability,
+pseudo-code is used to aid the explanations.
 
 % TODO: Write Achievements (see Arthur's comments)
 % \section{Achievements}
