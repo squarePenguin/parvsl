@@ -50,6 +50,18 @@ never freed until the end of the program. They are sorted by their pointer locat
 and carefully \emph{joined} together to maintain the abstract model of contiguous memory. Binary search
 is used to identify the block containing a location.
 
+% All the memory is global and shared, and multiple threads will often try
+% to allocate concurrently, causing contention. A naive solution to this problem
+% would have been to use a mutex lock on allocations. While this is easy to
+% implement, it can severely degrade performance. Locks are expensive even
+% in single-threaded scenarios with no contention, and allocations are very common
+% when evaluating Lisp. This is especially the case in an interpreted Lisp where no
+% allocations are optimised away. Simply reading the code to evaluate allocates
+% \(O(n)\) times for code of length \(n\). That is because code in Lisp code is data.
+% Each instruction is a list data structure, with all elements allocated.
+% Serialising allocations is guaranteed to slow down the language enough to cancel
+% any advantage multi-threading brings to the language.
+
 % TODO: read-eval-print loop
 % TODO: critical path
 

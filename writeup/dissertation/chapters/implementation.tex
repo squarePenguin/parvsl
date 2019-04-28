@@ -67,19 +67,9 @@ identifier, which is returned to the user. Subsequently, the user can then use t
 % if there is an exception etc make sure it will always happen
 % previous code spent time testing error flags
 
-\section{Storage management}
-\label{sec:storage}
-All the memory is global and shared, and multiple threads will often try
-to allocate concurrently, causing contention. A naive solution to this problem
-would have been to use a mutex lock on allocations. While this is easy to
-implement, it can severely degrade performance. Locks are expensive even
-in single-threaded scenarios with no contention, and allocations are very common
-when evaluating Lisp. This is especially the case in an interpreted Lisp where no
-allocations are optimised away. Simply reading the code to evaluate allocates
-\(O(n)\) times for code of length \(n\). That is because code in Lisp code is data.
-Each instruction is a list data structure, with all elements allocated.
-Serialising allocations is guaranteed to slow down the language enough to cancel
-any advantage multi-threading brings to the language.
+% \section{Storage management}
+% \label{sec:storage}
+
 
 % \section{{\bfseries\sffamily TODO} Memory Allocation}
 % Indeed, we can easily see the impact when trying to build reduce:
@@ -95,8 +85,10 @@ any advantage multi-threading brings to the language.
 % VSL real	1m21.656s
 % VSL with mutex lock 1m34.577s
 
-\subsection{Memory allocation}
+\section{Memory allocation}
 \label{sec:malloc}
+\label{sec:storage}
+
 I wanted to allow multiple threads in parallel without affecting the performance
 of allocations. To do this I had to use a lock-free approach. As such, I further
 split the memory into regions, which I call \emph{segments}. A segment is a thread-local region
@@ -116,16 +108,13 @@ requested.
 I carefully modified all the areas where allocations are preformed to use the segment fringe
 instead of the global fringe. The global fringe is only moved to assign a new segment. Writes
 to the global fringe are executed under a mutex lock, while the segment fringe is a thread local
-variable accessed without any locks.
-
-If the requested memory is larger than the segment size (e.g a large string or number),
-the current segment is sealed, then the large object will occupy its own custom segment,
-and the thread will then have to request a new segment.
+variable accessed without any locks. If the requested memory is larger than the segment size
+(e.g a large string or number), it is allocated outside any segment, using the global fringe.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=1\linewidth]{parvslalloc.pdf}
-  \label{fig:vslalloc}
+  \label{fig:parvslalloc}
   \caption{Memory allocations in ParVSL}
 \end{figure}
 
@@ -230,13 +219,6 @@ A bigger issue was the risk of deadlocks. If thread A is waiting for the result 
 but thread B was paused waiting for the GC, then the program is deadlocked. Similarly, any effectful computation,
 like waiting for user input will prevent the collection from starting.
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=1\linewidth]{gcdeadlock.pdf}
-  \label{fig:gcdeadlock}
-  \caption{Possible deadlock when starting Garbage Collection}
-\end{figure}
-
 \begin{verbatim}
 // global variables for synchronising garbage collection
 std::atomic_int num_threads(0);
@@ -257,6 +239,13 @@ To deal with the issue of blocking calls, I defined another state threads can be
 is in a safe state if it has saved all the information the garbage collector needs to begin (e.g stackbase
 and stackhead) and guarantees not to run any code that invalidates the garbage collection. Threads go into a safe
 state whenever they get paused for GC. However, they can also be in safe state when waiting for a blocking call.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{gcdeadlock.pdf}
+  \label{fig:gcdeadlock}
+  \caption{Possible deadlock when starting Garbage Collection}
+\end{figure}
 
 I created a special RAII class to handle both scenarios, which I called \texttt{Gc\_guard}. The class only has a constructor
 and a destructor and is a way for the thread to promise it is in a safe state.
@@ -617,30 +606,31 @@ print result;
 \end{verbatim}
 
 My implementation minimises overhead. The list of arguments is managed on the heap which is visible by all
-threads, so a simple pointer is enough to pass them. For returning values, I must keep track of all
-unjoined threads and their return values. I do this with a simple hashtable, mapping thread ids to their
-return values. When a thread returns from its function, I update the hashtable with the returned value.
-When the user joins a thread, I look up the value in the table, return it, then erase the mapping. All threads
-have unique ids for the lifetime of the program, so there will never be conflicts in the hashtable.
+threads, so a simple pointer is enough to pass them. Furthermore, all unjoined threads and corresponding return values
+need to be tracked.
+A hashmap from thread ids to return values is updated when thread execution is completed.
+Consequently, when \verb|thread_join| is called this value is returned and removed from the hashmap. All threads
+have unique ids for the lifetime of the program, so there are never any conflicts in the hashtable.
 Starting and joining a thread are synchronised under a mutex lock to prevent data races.
 
-I must also be careful to prevent the garbage collector from collecting these parameters and return values.
+I was careful to prevent the garbage collector from collecting these parameters and return values.
 Starting a thread is GC-safe: garbage collection will not initiate while a new thread is starting up. This ensures
 that threads are always in a safe state and registered in the thread-table correctly during garbage collection.
 At that point, function parameters are tracked just like regular variables so they will be safe from GC.
-However, return values are stored past the lifetime of their respective threads. To deal with them, I add them
-to the root set at the beginning of garbage collection.
+However, return values are stored past the lifetime of their respective threads, so I add them
+to the unambiguous root set at the beginning of garbage collection.
 
-The handling of both of these root sets has to account for multiple running threads. All the new
+The handling of root sets has to account for multiple running threads. All the new
 thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
-own stack so all the stacks have to be accounted for in the ambiguous root set. The latter is more complicated.
-All threads have to be paused before garbage collection can begin so that they do not interfere
+own stack so all the stacks have to be accounted for in the ambiguous root set. The latter is more complicated:
+all threads have to be paused before garbage collection can begin so that they do not interfere
 with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
-However, if we are not careful, this can easily cause a deadlock (e.g: thread A waits for a signal from
-thread B, but thread B is waiting for garbage collection). To solve such issues, I need to make two
-changes. First, I must modify the functions in the interpreter to poll the global flag. Then I have
-to make all waiting calls put a thread into a \emph{safe} state before sleeping, so that the garbage collector
-can proceed with the thread.
+However, without careful consideration, this can easily cause a deadlock. I implemented three mechanisms
+for a thread to check for garbage collection. The first one is when it tries to allocate. Then, it
+polls the global flag in the interpreter, so that time-consuming loops which do not allocate do not
+delay the garbage collector for too long. Finally, I used the \verb|GC_guard| described in section
+\ref{sec:gclock} to prevent any waiting call (such as opening a file, or joining a thread) from
+causing a deadlock.
 
 \subsection{Mutual exclusion and condition variables}
 
@@ -654,7 +644,7 @@ mutex_lock(m);
 mutex_unlock(m);
 \end{verbatim}
 
-The mutexes are created in C++ and stored in a lock-free hash-table, each with a unique id. I used the lock-free
+The mutexes are created in C++ and stored in a lock-free hashtable, each with a unique id. I used the lock-free
 hashtable implementation to allow mutex different mutexes to be accessed in parallel. I also
 make use of the \verb|GC_guard| when \verb|mutex_lock| is called. This is to ensure that the blocking
 call to lock the mutex does not cause a deadlock during garbage collection.
@@ -666,10 +656,14 @@ I could lock a mutex for any such operation to ensure safety, however such a cha
 I have decided to leave this issue as a responsibility to the ParVSL user.
 My choice means that the user can optimise their code to minimise lock usage, at the expense of safety.
 
-The second primitive I added was \emph{condition variables}. They provide a way a very useful way for
+One way to ensure safety would be to lock the mutex for any such operations, but this change would add a
+too much overhead to ParVSL. With this in mind, the decision was made to leave this issue as a responsibility
+of the ParVSL user, since they can manage the trade-off between safety and lock usage minimisation.
+
+The second primitive that I added was \emph{condition variables}. They provide a useful way for
 threads to signal each other, enabling an efficient way to perform common parallel processes such as
-waiting for a task to finish. I stored the condition variables the same way as the mutexes, in a lock-free
-hashtable, and the wait operation uses the \verb|GC_guard| to check for garbage collection.
+waiting for a task to finish. I stored the condition variables the same way as the mutexes (i.e. in a lock-free
+hashtable) and the wait operation uses the \verb|GC_guard| to check for garbage collection.
 
 I included a few more helpful function such as \verb|hardware_threads| to check the number of hardware
 threads on the current system and \verb|yield| to allow the system to reschedule the thread, and
@@ -686,32 +680,29 @@ They can also be used to implement other common threading gadgets, such as atomi
 
 One important feature of the language is the ability to preserve the state of the world at any
 time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
-preserving when some of the threads are running a computation is tricky to define properly. To simplify
+preserving when some of the threads are running a computation is cannot be easily defined. To simplify the
 matter, I have decided that all threads have to be joined before preserving. This way, the state of
 the world is consistent and relatively easy to restore. I have modified parts of the code to write
-all the thread-local data back into global storage and then restore it when reloading. This way the same
+all the thread-local data back into global storage and then restore it when reloading. As such, the same
 file format is preserved, and I have not broken compatibility between single and multi-threaded images.
 
-Implementing ParVSL, I introduced additional state and book-keeping to manage the extra complexity.
+While implementing ParVSL, I introduced additional state and book-keeping to manage the extra complexity.
 When preserving in VSL, all this state is stored to a file by compressing a bit for bit copy of the
-content. The main use for this is saving the results of computations and function definitions.
-The REDUCE build is stored in the same way. After building all the necessary files,
-it preserves the current state inside an image. Loading the image on startup of VSL will effectively
-start REDUCE.
+content. Its main use is saving the results of computations and function definitions.
+The Reduce build is stored in the same way: all the necessary files are executed and the resulting
+state is saved inside an image. Loading the image on startup of VSL will effectively start Reduce.
 
-I wanted to keep the VSL image format in ParVSL so that I would not break compatibility between the two.
-I note that preserving a running multi-threaded program would be impossible without making major changes
-to the image format and major redesign of the code. Calling \texttt{preserve} also stops the pr
-
-If a thread attempts to preserve while others
+I wanted to keep the VSL image format in ParVSL so that compatibility between the two would not be broken.
+Of note is that preserving a running multi-threaded program would be impossible without making major changes
+to the image format and major redesign of the code. If a thread attempts to preserve while others
 are running, the contents of the final image will be non-deterministic and generally undesirable,
-even if I were to resolve all data races. At the same time, I found little benefit to implementing such
-a feature, as the ability to preserve is useful to retain results of computations, not intermediate states.
+even if all data races were resolved. At the same time, I found little benefit to implementing such
+a feature, as the ability to preserve is useful in retaing the results of computations, not intermediate states.
 Saving state to disk is used at the end of the program.
 
-My implementation on preserve preservation only allows the operation on the main thread, and will wait
-for all spawned threads to finish running and join. Once there is only one thread running, all the
-thread-local data can be treated as if it were global again, and stored in the same locations that
+My implementation of \verb|preserve| will wait
+for all spawned threads to finish running and join. Once there is only one thread running all the
+thread-local data can be treated as global again and stored in the same locations that
 VSL uses. When restoring from an image, this data is moved back into thread-local storage. The image
 format is not affected.
 
