@@ -96,7 +96,7 @@ for allocation on the heap.
 
 Just like before, memory is allocated to the segments in a continuous
 fashion. A pointer indicates the start of the non-allocated part of the segment
-(the \emph{segment fringe}.), while another tells us the end of the segment
+(the \emph{segment fringe}), while another tells us the end of the segment
 (the \emph{segment limit}).
 
 Now, contention is reduced to getting a new segment. Each thread only allocates within
@@ -129,78 +129,78 @@ total memory, I have found a good compromise for segments of a few kilobytes eac
 \section{Garbage collection}
 \label{sec:gc}
 The \emph{garbage collector} (GC) has to account for the state of all threads. These threads have to be synchronised
-and in a safe state to initiate the GC. They must also be included in the calculation of the root set.
+and in a \emph{safe} state to initiate the GC. They must also be included in the calculation of the root set.
 
 I store all the thread-local information required for synchronisation in a class called \texttt{Thread\_data}. This
 class is populated when a thread is started and updated before and after a GC cycle. All threads register
 themselves in a global thread table at start-up. The thread starting the GC can use this table to check the status
 of the other threads.
 
-The \emph{ambiguous root set} is the set of potential references found on the stack. The stack is a continuous area
-of memory managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
-from C++, however we can take the address of a stack variable to find its location and hence approximate the
-stack pointer's value. VSL remembers the position
-of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
-scans the all locations in between for ambiguous roots.
+% The \emph{ambiguous root set} is the set of potential references found on the stack. The stack is a continuous area
+% of memory managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
+% from C++, however we can take the address of a stack variable and hence approximate the
+% stack pointer's value. VSL remembers the position
+% of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
+% scans all locations in between for ambiguous roots.
 
-\begin{verbatim}
-uintptr_t C_stackbase;
+% \begin{verbatim}
+% uintptr_t C_stackbase;
 
-int main() {
-  // t is any variable on the stack, before execution of VSL code begins
-  int t;
+% int main() {
+%   // t is any variable on the stack, before execution of VSL code begins
+%   int t;
 
-  // When starting VSL, we store the base of the stack
-  // Here we need to cast the reference to an in type
-  // then align to the size of a LispObject
-  C_stackbase = ((intptr_t)&t & -sizeof(LispObject));
-}
+%   // When starting VSL, we store the base of the stack
+%   // Here we need to cast the reference to an in type
+%   // then align to the size of a LispObject
+%   C_stackbase = ((intptr_t)&t & -sizeof(LispObject));
+% }
 
-void garbage_collection() {
-  int t;
-  // before GC, we note the head of the stack
-  uintptr_t C_stackhead = ((uintptr_t)&t & -sizeof(LispObject));
+% void garbage_collection() {
+%   int t;
+%   // before GC, we note the head of the stack
+%   uintptr_t C_stackhead = ((uintptr_t)&t & -sizeof(LispObject));
 
-  // scan the stack from its head to base (the stack grows downwards)
-  for (uintptr_t s = C_stackhead;
-       s < C_stackbase;
-       s += sizeof(LispObject))
-  {
-    if (in_heap(s)) { // check if s points within our virtual heap
-      // we found an ambiguous root
-      set_pinned(s);
-    }
-  }
+%   // scan the stack from its head to base (the stack grows downwards)
+%   for (uintptr_t s = C_stackhead;
+%        s < C_stackbase;
+%        s += sizeof(LispObject))
+%   {
+%     if (in_heap(s)) { // check if s points within our virtual heap
+%       // we found an ambiguous root
+%       set_pinned(s);
+%     }
+%   }
 
-  inner_garbage_collection();
-}
-\end{verbatim}
+%   inner_garbage_collection();
+% }
+% \end{verbatim}
 
 Each thread will have its own stack, so I had to modify the code to scan all the stacks before garbage
-collection. This is one reason I had to pause work on all threads for GC. If I hadn't, then a thread might
-add references to heap objects on its stack after those objects have been marked safe to delete, causing corruption.
+collection. This is one reason I had to pause work on all threads for GC. If I didn't it would be possible
+for a thread to add references to the heap on its stack after those locations were marked safe to delete,
+causing corruption.
 
-When a thread is initialised, I save its own stackbase in \texttt{Thread\_data}, and then also save its stackhead
+When a thread is initialised, I save its own stack base in \texttt{Thread\_data}, and then also save its stack head
 when it is paused to wait for GC. All these stack ranges are scanned before I start garbage collection:
 
+\begin{figure}[H]
 \begin{verbatim}
 void garbage_collection() {
-  for (auto thread: thread_table) {
-    // scan the stack from its head to base (the stack grows downwards)
-    for (uintptr_t s = thread.C_stackhead;
-         s < thread.C_stackbase;
-         s += sizeof(LispObject))
-    {
-      if (in_heap(s)) { // check if s points within our virtual heap
-        // we found an ambiguous root
-        set_pinned(s);
+  for (auto thread: thread_table)
+    // scan the stack from its head to base
+    for (uintptr_t s = thread.c_stack_head;
+                   s < thread.c_stack_base;
+                   s += sizeof(LispObject))
+      if (in_heap(s)) { // check if s points to the virtual heap
+        set_pinned(s); // found an ambiguous root
       }
-    }
-  }
-
-  inner_garbage_collection();
+  ...
 }
 \end{verbatim}
+\caption{Scan the scan of each thread for pinned items before GC.}
+\label{code:parstackscan}
+\end{figure}
 
 % TODO: diagram
 \subsection{Garbage collection locks and safety}
@@ -209,36 +209,21 @@ The garbage collector is \emph{stop-the-world}. The thread initiating garbage co
 threads to be ready. Similarly, all threads must regularly check whether a garbage collection cycle was
 initiated and act accordingly.
 
+% The alternative, a \emph{real-time} garbage collector would require
+% a major redesign using additional interlocks for data access. Implementing one efficiently probably merits its
+% own project. For the small thread counts of current day computers I believe stop-the-world to be
+% adequate (the main drawback of stop-the-world is not overall speed but latency, which I am less concerned with),
+% although this may change as core counts increase.
+
 The first idea I had was to trap all calls to allocate memory and check whether garbage collection is needed.
 To do this, I could simply reset all thread segments. Threads would need to allocate eventually and
-would request a new segment, at which point they would need to call the GC. This solution is incomplete however.
-First of all, a thread might be busy for a long time without needing to allocate. This would cause all other
+would request a new segment, at which point they would need to call the GC. However, this solution is incomplete:
+a thread might be busy for a long time without needing to allocate. This would cause all other
 threads to be idle waiting for it to finish.
 
 A bigger issue was the risk of deadlocks. If thread A is waiting for the result of a computation on thread B,
 but thread B was paused waiting for the GC, then the program is deadlocked. Similarly, any effectful computation,
 like waiting for user input will prevent the collection from starting.
-
-\begin{verbatim}
-// global variables for synchronising garbage collection
-std::atomic_int num_threads(0);
-
-// number of threads ready for GC
-std::atomic_int safe_threads(0);
-
-// to wait for all threads to be GC-safe
-std::condition_variable gc_wait_all;
-
-// to notify all threads that GC is completed
-std::condition_variable gc_cv;
-
-std::atomic_bool gc_on(false);
-\end{verbatim}
-
-To deal with the issue of blocking calls, I defined another state threads can be in: \emph{safe for GC}. A thread
-is in a safe state if it has saved all the information the garbage collector needs to begin (e.g stackbase
-and stackhead) and guarantees not to run any code that invalidates the garbage collection. Threads go into a safe
-state whenever they get paused for GC. However, they can also be in safe state when waiting for a blocking call.
 
 \begin{figure}[H]
   \centering
@@ -247,66 +232,124 @@ state whenever they get paused for GC. However, they can also be in safe state w
   \caption{Possible deadlock when starting Garbage Collection}
 \end{figure}
 
-I created a special RAII class to handle both scenarios, which I called \texttt{Gc\_guard}. The class only has a constructor
-and a destructor and is a way for the thread to promise it is in a safe state.
+I implemented three mechanisms
+for a thread to check for garbage collection. The first one is when it tries to allocate. Then, it
+polls the global flag in the interpreter, so that time-consuming loops which do not allocate do not
+delay the garbage collector for too long. Finally, I used the \verb|GC_guard| described in section
+\ref{sec:gclock} to prevent any waiting call (such as opening a file, or joining a thread) from
+causing a deadlock.
 
+I used the following shared global state to synchronise threads for GC:
+\begin{verbatim}
+  std::atomic_int num_threads(0);
+
+  // number of threads ready for GC
+  std::atomic_int safe_threads(0);
+
+  // to wait for all threads to be GC-safe
+  std::condition_variable gc_wait_cv;
+
+  // to notify all threads that GC is completed
+  std::condition_variable gc_done_cv;
+
+  // flag indicating gc is running (or pending)
+  std::atomic_bool gc_on(false);
+\end{verbatim}
+
+To deal with the issue of blocking calls, I defined another state threads can be in: \emph{safe for GC}. A thread
+is in a safe state if it has saved all the information the garbage collector needs to begin (e.g stack base
+and stack head) and guarantees not to run any code that invalidates the garbage collection. Threads go into a safe
+state whenever they get paused for GC. However, they can also be in safe state when waiting for a blocking call.
+
+I created a special \emph{RAII} class to handle both scenarios, which I called \verb|Gc_guard|.
+The class only has a constructor and a destructor and is a way for the thread to promise it is in a safe state.
+
+\begin{figure}[H]
 \begin{verbatim}
 class Gc_guard {
-public:
+  // Global mutex shared by Gc_guard instance.
+  static std::mutex gc_guard_mutex;
+
   Gc_guard() {
-    int stack_var;
-    // save the stackhead
-    thread_data.C_stackhead =
-      (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
-    paused_threads += 1;
+    td.c_stack_head = approximate_stack_pointer();
 
-    // notify the gc thread that this thread is in a safe state
-    gc_wait_all.notify_one();
+    // This thread is now safe for GC.
+    safe_threads += 1;
+
+    // Notify the thread waiting for garbage collection.
+    gc_wait_cv.notify_one();
   }
-   ~Gc_guard() {
-    std::mutex m;
-    std::unique_lock<std::mutex> lock(m);
 
-    // wait here for gc to finish
-    gc_cv.wait(lock, []() { return !gc_on; });
-    paused_threads -= 1;
+  ~Gc_guard() {
+    std::unique_lock<std::mutex> lock(gc_guard_mutex);
 
-    // invalidate the stackhead
-    thread_data.C_stackhead = nullptr;
+    // Wait until GC is done.
+    gc_done_cv.wait(lock, []() { return !gc_on; });
+
+    // Thread is not longer safe for GC.
+    safe_threads -= 1;
+
+    // Thread stack head will be invalidated when execution resumes.
+    thread_data.c_stack_head = nullptr;
   }
+};
+\end{verbatim}
+\caption{\texttt{Gc\_guard} makes a thread safe for GC.}
+\label{code:gc-guard}
+\end{figure}
+
+The \verb|Gc_guard| is designed to be used before any blocking call. For example,
+to fix the issue in figure \ref{fig:gcdeadlock}, we simply need to modify the
+code in thread 2 as follows:
+
+\begin{verbatim}
+...
+{
+  Gc_guard gc_guard; // thread is now safe for GC
+  mutex_lock(m); // this operation may block.
+
+  // Gc_guard destructor will block here until GC is completed.
 }
+...
 \end{verbatim}
 
 The \texttt{Gc\_guard} class is accompanied by \texttt{Gc\_lock}. A thread trying to initiate the GC has to
-acquire a \texttt{Gc\_lock}. The lock will wait until all threads are in a safe state. It also prevents
-other threads from acquiring it until it is released.
+acquire a \texttt{Gc\_lock}. This lock makes further use of a mutex lock for mutual exclusion.
+Additionally, it waits until all threads are in a safe state.
 
-% TODO: fix this code
+\begin{figure}[H]
 \begin{verbatim}
 class Gc_lock {
-  std::mutex m;
-  std::unique_lock<std::mutex> lock;
-  Gc_guard gc_guard;
-public:
-  Gc_lock() : m(), lock(m) {
-    int stack_var = 0;
-    thread_data.C_stackhead =
-      (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+  // Global lock shared by Gc_lock instances.
+  static std::mutex gc_lock_mutex;
 
-    paused_threads += 1;
-    gc_wait_all.wait(lock, []() {
+  // Prevents other threads from acquiring the Gc_lock.
+  std::unique_lock<std::mutex> lock;
+
+  // The GC thread needs to be in a safe state as well.
+  Gc_guard gc_guard;
+
+  // Initialise the lock and guard before Gc_lock is constructed.
+  Gc_lock() : lock(gc_lock_mutex), gc_guard() {
+    gc_on = true;
+
+    // Wait until all threads are in a safe state.
+    gc_wait_cv.wait(lock, []() {
       return paused_threads == num_threads;
     });
   }
 
   ~Gc_lock() {
-    paused_threads -= 1;
     gc_on = false;
-    thread_data.C_stackhead = nullptr;
-    gc_cv.notify_all();
+
+    // Notify all threads that GC is over.
+    gc_done_cv.notify_all();
   }
 };
 \end{verbatim}
+\caption{Garbage collection must be done under the \texttt{Gc\_lock}.}
+\label{code:gc-lock}
+\end{figure}
 
 % \section{{\bfseries\sffamily TODO} just having a non-stop gc would be its own project}
 % \label{sec:org55eb9ba}
@@ -620,17 +663,8 @@ At that point, function parameters are tracked just like regular variables so th
 However, return values are stored past the lifetime of their respective threads, so I add them
 to the unambiguous root set at the beginning of garbage collection.
 
-The handling of root sets has to account for multiple running threads. All the new
-thread-local storage was added to the unambiguous root set. Additionally, each thread is running its
-own stack so all the stacks have to be accounted for in the ambiguous root set. The latter is more complicated:
-all threads have to be paused before garbage collection can begin so that they do not interfere
-with memory. A simple way to do this is to enable a global flag which all threads check on a regular basis.
-However, without careful consideration, this can easily cause a deadlock. I implemented three mechanisms
-for a thread to check for garbage collection. The first one is when it tries to allocate. Then, it
-polls the global flag in the interpreter, so that time-consuming loops which do not allocate do not
-delay the garbage collector for too long. Finally, I used the \verb|GC_guard| described in section
-\ref{sec:gclock} to prevent any waiting call (such as opening a file, or joining a thread) from
-causing a deadlock.
+% TODO: repeats section with locks. just refer to it
+% The latter is more complicated:
 
 \subsection{Mutual exclusion and condition variables}
 
