@@ -24,67 +24,6 @@ To manage the threads, I made further use of the C++11 standard library. I devis
 all the running threads. Creating and joining a thread is done under a mutex lock. Each thread is assigned its own unique
 identifier, which is returned to the user. Subsequently, the user can then use the identifier to join the thread.
 
-% \subsection{RAII classes}
-% \label{sec:raii}
-% The RAII (Resource Allocation Is Initialisation) design pattern is common in C++ \cite{effective-cpp}.
-% It is a programming technique which binds the lifetime of resources to an object's lifetime. Normally,
-% C and C++ are manually managed, meaning all resources have to be carefully tracked by the programmer.
-% This makes it easy to introduce bugs when there is an attempted access to an unallocated resource,
-% or leaks when a resource is not released after use. C++ classes offer a solution to this problem.
-% Classes have both constructors and destructors, and these are automatically called when the object
-% is created and when it becomes unavailable, respectively.
-
-% \begin{verbatim}
-% {
-%   // obj1, obj2 are constructed here, unlike Java,
-%   // where it would be a null reference.
-%   Foo obj1;
-%   Bar obj2;
-% } // End of scope, obj2 is destructed, followed by obj1.
-% Foo *obj3 = new Foo(); // Foo constructor called here.
-% delete obj3; // Foo destructor is called here on obj3.
-% \end{verbatim}
-
-% We can use this mechanism to implement RAII. We simply make sure
-% the underlying resource is allocated in the constructor and deallocated in the destructor.
-% Smart pointers like \texttt{std::unique\_ptr} are a good showcase of the power of RAII. As soon as the
-% smart pointer objects become inaccessible (e.g by going out of scope), the underlying pointer
-% is safely deleted, providing a primitive (but very effective) form of automatic reference counting.
-
-% When changing the codebase to use C++ features I found various opportunities to apply the RAII pattern,
-% when managing threads, shallow binding and garbage collection.
-
-% Thread objects in C++ are not implemented in a RAII style in the standard library. When a thread object
-% is destructed, it must be in an \emph{unjoinable} state. A thread is unjoinable if it either has joined or
-% it has been detached. If an unjoinable thread is ever destructed it will cause the entire C++ program to
-% terminate.
-
-% I have wrapped all threads in a \texttt{ThreadRAII} class, so that whenever they go out of scope they are automatically
-% joined (when still in a joinable state). This guarantees there will be no premature termination in the case the
-% user does not handle the thread correctly and that the ParVSL interpreter will exit cleanly.
-
-% TODO: more robust code
-% if there is an exception etc make sure it will always happen
-% previous code spent time testing error flags
-
-% \section{Storage management}
-% \label{sec:storage}
-
-
-% \section{{\bfseries\sffamily TODO} Memory Allocation}
-% Indeed, we can easily see the impact when trying to build reduce:
-
-% \begin{center}
-% \begin{tabular}{llll}
-%  & VSL & MUTEX & SEGMENT\\
-% \hline
-%  &  &  & 2m1s\\
-% \end{tabular}
-% \end{center}
-
-% VSL real	1m21.656s
-% VSL with mutex lock 1m34.577s
-
 \section{Memory allocation}
 \label{sec:malloc}
 \label{sec:storage}
@@ -136,46 +75,6 @@ class is populated when a thread is started and updated before and after a GC cy
 themselves in a global thread table at start-up. The thread starting the GC can use this table to check the status
 of the other threads.
 
-% The \emph{ambiguous root set} is the set of potential references found on the stack. The stack is a continuous area
-% of memory managed by incrementing and decrementing a stack pointer. The stack pointer is normally not accessible
-% from C++, however we can take the address of a stack variable and hence approximate the
-% stack pointer's value. VSL remembers the position
-% of the stack at the beginning of the execution and calculates this again before garbage collection. Then it
-% scans all locations in between for ambiguous roots.
-
-% \begin{verbatim}
-% uintptr_t C_stackbase;
-
-% int main() {
-%   // t is any variable on the stack, before execution of VSL code begins
-%   int t;
-
-%   // When starting VSL, we store the base of the stack
-%   // Here we need to cast the reference to an in type
-%   // then align to the size of a LispObject
-%   C_stackbase = ((intptr_t)&t & -sizeof(LispObject));
-% }
-
-% void garbage_collection() {
-%   int t;
-%   // before GC, we note the head of the stack
-%   uintptr_t C_stackhead = ((uintptr_t)&t & -sizeof(LispObject));
-
-%   // scan the stack from its head to base (the stack grows downwards)
-%   for (uintptr_t s = C_stackhead;
-%        s < C_stackbase;
-%        s += sizeof(LispObject))
-%   {
-%     if (in_heap(s)) { // check if s points within our virtual heap
-%       // we found an ambiguous root
-%       set_pinned(s);
-%     }
-%   }
-
-%   inner_garbage_collection();
-% }
-% \end{verbatim}
-
 Each thread will have its own stack, so I had to modify the code to scan all the stacks before garbage
 collection. This is one reason I had to pause work on all threads for GC. If I didn't it would be possible
 for a thread to add references to the heap on its stack after those locations were marked safe to delete,
@@ -202,18 +101,11 @@ void garbage_collection() {
 \label{code:parstackscan}
 \end{figure}
 
-% TODO: diagram
 \subsection{Garbage collection locks and safety}
 \label{sec:gclock}
 The garbage collector is \emph{stop-the-world}. The thread initiating garbage collection must wait for all
 threads to be ready. Similarly, all threads must regularly check whether a garbage collection cycle was
 initiated and act accordingly.
-
-% The alternative, a \emph{real-time} garbage collector would require
-% a major redesign using additional interlocks for data access. Implementing one efficiently probably merits its
-% own project. For the small thread counts of current day computers I believe stop-the-world to be
-% adequate (the main drawback of stop-the-world is not overall speed but latency, which I am less concerned with),
-% although this may change as core counts increase.
 
 The first idea I had was to trap all calls to allocate memory and check whether garbage collection is needed.
 To do this, I could simply reset all thread segments. Threads would need to allocate eventually and
@@ -350,12 +242,6 @@ class Gc_lock {
 \caption{Garbage collection must be done under the \texttt{Gc\_lock}.}
 \label{code:gc-lock}
 \end{figure}
-
-% \section{{\bfseries\sffamily TODO} just having a non-stop gc would be its own project}
-% \label{sec:org55eb9ba}
-% reference java, etc. but what I have is good enough
-% interlocks add overhead, but w do not need real-time performance
-% not many threads
 
 \section{Lock-free hashtable for symbol lookup}
 \label{sec:hashtable}
@@ -501,6 +387,7 @@ let varName = expr1 in expr2
 
 can be implemented as:
 
+\begin{figure}
 \begin{verbatim}
 void implement_let(string varName, LispObject expr1, LispObject expr2) {
   LispObject symbol = lookup_symbol(varName);
@@ -510,6 +397,9 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
   value(symbol) = oldVal;            // restore old value
 }
 \end{verbatim}
+\caption{Implementation of \texttt{let} in VSL.}
+\label{code:let-vsl}
+\end{figure}
 
 This mechanism was not designed with concurrency in mind, and is not thread-safe.
 Many variable names are reused multiple times in a program (e.g \texttt{i, j, count}, etc).
@@ -569,6 +459,23 @@ global value in \verb|shared_fluids|, the string \verb|"John"|. Finally, symbol 
 undefined in \verb|shared_fluids| but otherwise behaves the same as \verb|x|, storing its thread-local values at
 index \verb|1|.
 
+I redesigned shallow binding to use a RAII style class, called \verb|Shallow_bind| deals with all the changes
+described above, while providing more safety guarantees, thus leading to more robust code. It checks if the symbol is global and prevents binding,
+it handles thread-local storage and it always restores the old value correctly in its destructor, including the
+case of exceptions. Previous code mspent time testing error flags, manually restoring the old value in every place.
+For example, the code in \ref{code:let-vsl} was rewritten as:
+\begin{figure}
+\begin{verbatim}
+void implement_let(string varName, LispObject expr1, LispObject expr2) {
+  LispObject symbol = lookup_symbol(varName);
+  Shallow_bind bind_var{symbol, eval(expr1)};
+  eval(expr2); // evaluate the rest of the code
+}
+\end{verbatim}
+  \caption{Implementation of \texttt{let} in ParVSL.}
+  \label{code:let-parvsl}
+\end{figure}
+
 \section{Data races in the interpreter}
 \label{sec:datarace}
 
@@ -579,13 +486,6 @@ run a print-eval-print loop, instead they run a computation, save the result, th
 in ParVSL I allow these threads to execute any code the main thread can, with no restriction. This means
 all threads can use and modify global state and interact with standard input, output and files and
 thus can conflict with each other.
-
-% TODO: maybe not here?
-% Retrofitting multi-threading into a system designed without parallelism in mind is bound to bring issues.
-% Many assumptions in original code were violated when running multiple threads. To find and fix all the issues
-% I had to thoroughly understand every part of the system, which took time. Multi-threaded code is non-deterministic
-% by nature so many issues would only show up in testing some times when the threads would conflict in just the
-% right way. Tested behaviour was not always be reproducible, making debugging difficult.
 
 There are plenty of global variables holding state in VSL. I slowly discovered which ones represented local
 state. Many of those handle the global heap, and are discussed in sections \ref{sec:storage} and \ref{sec:gc}.
@@ -663,9 +563,6 @@ At that point, function parameters are tracked just like regular variables so th
 However, return values are stored past the lifetime of their respective threads, so I add them
 to the unambiguous root set at the beginning of garbage collection.
 
-% TODO: repeats section with locks. just refer to it
-% The latter is more complicated:
-
 \subsection{Mutual exclusion and condition variables}
 
 It is not enough for the user to be able to spawn threads. ParVSL has a shared memory model so at a minimum
@@ -707,8 +604,6 @@ These primitives are versatile enough to enable parallel algorithm, as I will sh
 They can also be used to implement other common threading gadgets, such as atomics and futures
 (see \ref{ssec:managethreads} and \ref{ssec:waitjob}).
 
-% TODO: diagram
-
 \section{Saving state to disk and reloading}
 \label{sec:preserve}
 
@@ -739,5 +634,3 @@ for all spawned threads to finish running and join. Once there is only one threa
 thread-local data can be treated as global again and stored in the same locations that
 VSL uses. When restoring from an image, this data is moved back into thread-local storage. The image
 format is not affected.
-
-% todo: talk about having to copy return values

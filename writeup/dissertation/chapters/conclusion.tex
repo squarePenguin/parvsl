@@ -45,3 +45,11 @@ While it would take more work, most of the lessons from writing ParVSL could be 
 to ParCSL.
 
 % TODO: talk about semantics
+
+
+% TODO: maybe not here?
+% Retrofitting multi-threading into a system designed without parallelism in mind is bound to bring issues.
+% Many assumptions in original code were violated when running multiple threads. To find and fix all the issues
+% I had to thoroughly understand every part of the system, which took time. Multi-threaded code is non-deterministic
+% by nature so many issues would only show up in testing some times when the threads would conflict in just the
+% right way. Tested behaviour was not always be reproducible, making debugging difficult.
