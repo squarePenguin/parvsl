@@ -51,10 +51,16 @@ The RLisp examples are kept short and as readable as possible.
 Consequently, when the syntax of the language gets in the way of readability,
 pseudo-code is used to aid the explanations.
 
-% TODO: Write Achievements (see Arthur's comments)
-% \section{Achievements}
-% \label{sec:achievements}
+\section{Achievements}
+\label{sec:achievements}
 
-% My project involved modifications to several thousand lines of C/C++ code, upgrading it to
-% make better idiomatic use of C++ as well as adding concurrency support. It has also used raw
-% Lisp code in bracket notation, along with the
+My project involved modifications to several thousand lines of C/C++ code, upgrading it to
+make better idiomatic use of C++ as well as adding concurrency support. It has also used raw
+Lisp code in bracket notation, along with the rebuilding of Reduce, which starts off as Lisp,
+but is almost entirely written in its own language. Reduce as a whole is around half a million
+lines of code and my system fully supports it. I have also coded demonstration programs to
+show how, given the thread support I now provide it with, it can take advantage of modern
+multi-core processors to improve performance. The existing set of Reduce test scripts have provided me
+with significant examples to demonstrate correctness and analyse the overheads of
+concurrency support on all the major platforms (Linux, Windows and MacOS), with some surprising
+differences between them.
