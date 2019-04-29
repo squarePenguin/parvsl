@@ -60,7 +60,6 @@ to contain exceptions. While these two cases have been manually fixed, there are
 such potential problems within the Reduce packages which will have to be cleaned up.
 % Identifying when odd behaviour was down to my code or whether it revealed
 
-
 \subsection{Benchmarks}
 
 In addition to helping me find issues in ParVSL, building REDUCE also provided for a
@@ -113,7 +112,8 @@ value should be equal to the number of calls.
   (mutex_unlock x_mutex))
 
 (dotimes (i 10000) (thread '(incr_x)))
-(print x) % 10000
+(print x)
+> 10000
 \end{verbatim}
 
 When modifying the garbage collector, I had issues when multiple
@@ -187,7 +187,7 @@ from a simple queue, with the following functions:
 \item \texttt{queue\_empty(q)} checks if the queue is empty
 \end{itemize}
 
-A thread\(_{\text{safe}}\) queue is simply a wrapper on top of the normal queue:
+A thread-safe queue is simply a wrapper on top of the normal queue:
 \begin{verbatim}
 procedure safe_queue();
   {queue(), mutex(), condvar()};
@@ -246,7 +246,9 @@ be joined on exit or when the user manually stops the pool.
 
 The mechanism for stopping the queue is a simple atomic flag. Atomics are not offered as
 a primitive in ParVSL, but can be easily implemented with a mutex lock. There is no direct
-mechanism for interrupting a thread running a task, but workers can check the flag every time
+mechanism for interrupting a thread running a task \footnote{C++ does not provide this as a
+primitive and indeed if a thread was interrupted in the middle of a system call or while
+holding a mutex lock it would cause all sorts of problems.}, but workers can check the flag every time
 before taking a new task from the queue.
 
 Using the blocking call to wait for the next job mean the worker get stuck and prevent
@@ -396,16 +398,72 @@ of workers.
 \begin{table}
 \centering
 \begin{tabular}{rrrrr}
- & 100000 & 250000 & 500000 & 1000000\\
+& \multicolumn{4}{c}{Number of workers} \\
+List size & & & \\
+($\times$ 1000) & 1 & 2 & 8 & 16\\
 \hline
-1 & 2.351 & 5.282 & 11.152 & 22.840\\
-2 & 1.563 & 3.409 & 5.850 & 11.706\\
-8 & 1.319 & 2.554 & 4.906 & 9.054\\
-16 & 1.071 & 2.137 & 3.995 & 7.514\\
+100  & 2.351 & 1.563 & 1.319 & 1.071 \\
+250  & 5.282 & 3.409 & 2.554 & 2.137 \\
+500  & 11.152 &  5.850 & 4.906 & 3.995 \\
+1000 & 22.840 & 11.706 & 9.054 & 7.514 \\
 \end{tabular}
-\caption{Parallel merge sort times by number of workers}
+\caption{Parallel merge sort times by number of workers.}
 \label{table:parmergesort}
 \end{table}
+
+\section{Multiplying polynomials in parallel}
+
+Polynomials are widely used in computer algebra. Being able
+to multiply two polynomials is a fundamental problem in computer
+algebra with for a plethora of applications ranging from
+including symbolic integration and computational geometry,
+so speeding it up with multi-threading could prove to be quite valuable.
+
+At the same time, it is relatively easy to split the multiplication
+algorithm into multiple independent tasks. All the well-known
+multiplication algorithms (i.e. the naive quadratic solution, Karatsuba,
+and using Fast Fourier Transform) have parallel versions.
+The latter are mostly used for multiplying numbers, and Reduce
+uses the quadratic algorithm as it is better suited to sparse and
+more general multi-variate polynomials.
+
+I wrote a parallel implementation of polynomial multiplication in Reduce
+and ran it in ParVSL. It splits the polynomials into odd and even
+terms and thereby splits the problem into four sub-tasks. These can be
+easily computed in separate threads, then joined to obtain the
+resulting polynomial. While the small test case only covers uni-variate
+polynomials the results I show might reasonably be expected to apply to
+more general cases.
+
+\begin{table}
+  \centering
+  \begin{tabular}{rrrrr}
+  Poly size & VSL & ParVSL \\
+  \hline
+  1000 & 0.660 & 0.480 \\
+  2000 & 1.588 & 0.941 \\
+  3000 & 3.280 & 1.729 \\
+  4000 & 5.486 & 2.834 \\
+  5000 & 8.182 & 4.177 \\
+  \end{tabular}
+  \caption{Parallel multiplication of polynomials vs single-threaded.}
+  \label{table:parpolymult}
+\end{table}
+
+% For small polynomials just gaving the thread infrastructure may
+% tend to hurt. After all if you take two quadratics and split them
+% into bits to try to multipoly in parallel you are liable to lose!
+% For big enough polynomials there can be a saving reasonably consistent
+% with the number of threads your CPU can support, and one can then
+% suggest that for heavy algebra users that could really help.
+% [obviously] if one increases the thread count beyoind the level your
+% CPU provides there is no benefit, and possibly ahead of that memory
+% bandwidth starts to get saturated, so one does not really expect a
+% full factor of 8 on an 8-core machine!
+% Your test code does just univariate polys but the results you show
+% might reasonably be expected to apply to more general cases, and
+% polynomial multiplication is such a fundamental operation in algebra
+% that being able to speed it up could really help.
 
 \section{Parallel building of Reduce}
 
@@ -498,7 +556,8 @@ end;
 The generated file makes use of the dynamic scoping mechanism in Lisp. When building the package
 with \texttt{build\_package\_safe}, all accesses to those global symbols will instead access locally
 bound ones. This removes all conflicts between symbol accesses, without needing to modify code in
-the Reduce packages themselves.
+the Reduce packages themselves. It also illustrates how in the future Reduce will need modification
+to cope with concurrency.
 
 The second issue I found was that any package can change the access specifier of a global symbol.
 One package could make a symbol global, while another tries to bind it locally causing an error.
@@ -516,17 +575,18 @@ This meant I was not able to parallelise the building of most Reduce packages.
 Luckily, I did manage to find at least 20 packages which would not conflict in modifying symbol flags.
 I parallelised the building of those, the built the other packages sequentially. The resulting
 running time was \texttt{8.771s}. This showed a 40\% improvement, which is very promising.
-I believe that fixing the issue of shared global names in Reduce could lead to a big improvement
-of build time when using multi-threading.
+I believe that fixing the issue of shared global names in Reduce could lead to a significant improvement
+of build time when using multi-threading. The speed-up in system rebuild time will be valuable for
+developers.
 
 \section{Testing ParVSL on different platforms}
 \label{sec:crossplatform}
 
-My benchmarks so far have focused on x86 Linux, running
+My benchmarks so far focused on x86 Linux, running
 up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the
 C++ compiler supports it. ParVSL further requires C++11 support, however at the
 time of this writing, the standard is already widely supported on all major platforms.
-I have also ran my test on different systems to verify this claim.
+I ran my test on different systems to verify this claim.
 
 I tested three major operating systems: Linux, MacOS, and Windows. I also
 ran the tests on a Raspberry PI to test it on the ARM platform. Compiling on the Raspberry PI
@@ -537,27 +597,34 @@ The other systems successfully compiled and ran all the code.
 The more surprising result is the vast difference in performance between the platforms
 when running ParVSL vs VSL. The following are times
 
-\begin{center}
+\begin{figure}[H]
+  \centering
   \begin{tabular}{lrr}
                        & VSL    & ParVSL \\
   \hline
-  x86 Linux            &   58s & 1m08s \\
-  x86 MacOS            & 1m19s & 3m56s  \\
-  x86 Windows (Cygwin) &   1ms & 10m15 \\
+  x86 Linux            &   58s &  1m08s \\
+  x86 MacOS            & 1m19s &  3m56s  \\
+  x86 Windows (Cygwin) & 1m03s & 10m15s \\
   \end{tabular}
-  % \caption{Building Reduce on different platforms VSL vs ParVSL}
-\end{center}
+  \caption{Building Reduce on different platforms in VSL vs ParVSL}
+  \label{table:cross-platform-reduce}
+\end{figure}
 
 
 \subsection{Thread-local access performance}
 
-The biggest culprit for the performance imact is the system's thread local storage (TLS)
-mechanism.
+Once observed, this can be verified by trying a trivial test program just referencing a
+thread-local variable in a loop. Figure \ref{fig:thread-local}
+shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the other platforms.
 
-\begin{figure}
+\begin{figure}[H]
 \centering
 \includegraphics[width=1\linewidth]{thread_local.png}
 \label{fig:thread-local}
 \end{figure}
 
-As we can observe, simply using thread-local storage can have a big impact on performance.
+The biggest culprit for the performance impact is the system's thread local storage (TLS)
+mechanism. In the best case (i.e on x86 Linux) a thread-local variable is accessed
+similarly to a regular static one. One would hope that Cygwin developers will
+implement a more efficient TLS in the future. Currently, the only two platforms
+with a negligible TLS slowdown are Linux and (native) Windows.
