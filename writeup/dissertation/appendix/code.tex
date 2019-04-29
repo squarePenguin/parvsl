@@ -61,337 +61,434 @@ void collect() {
 \label{sec:gclock-code}
 
 \begin{verbatim}
+namespace {
+std::atomic_int num_threads(0);
+std::atomic_int paused_threads(0);
+std::condition_variable gc_waitall;
+std::condition_variable gc_cv;
+std::atomic_bool gc_on(false);
 
+std::mutex gc_guard_mutex;
+std::mutex gc_lock_mutex;
+}
+
+class Gc_guard {
+public:
+    Gc_guard() {
+        int stack_var = 0;
+        td.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+
+        paused_threads += 1;
+        gc_waitall.notify_one();
+    }
+
+    ~Gc_guard() {
+        std::unique_lock<std::mutex> lock(gc_guard_mutex);
+        gc_cv.wait(lock, []() { return !gc_on; });
+        paused_threads -= 1;
+
+        td.C_stackhead = nullptr;
+    }
+};
+
+class Gc_lock {
+private:
+    std::unique_lock<std::mutex> lock;
+
+public:
+    Gc_lock() : lock(gc_lock_mutex) {
+        int stack_var = 0;
+        td.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+
+        gc_on = true;
+
+        paused_threads += 1;
+        gc_waitall.wait(lock, []() {
+            return paused_threads == num_threads; });
+    }
+
+    ~Gc_lock() {
+        paused_threads -= 1;
+        gc_on = false;
+        td.C_stackhead = nullptr;
+        gc_cv.notify_all();
+    }
+};
+\end{verbatim}
+
+\section{Shallow binding}
+\label{sec:shallowbind-code}
+
+\begin{verbatim}
+class Shallow_bind {
+    private:
+        int loc;
+        LispObject save;
+    public:
+        Shallow_bind(LispObject x, LispObject tval) {
+            if (is_global(x)) {
+                error1("shallow bind global", qpname(x));
+            }
+
+            loc = qfixnum(qvalue(x));
+            LispObject& sv = td.local_symbol(loc);
+            save = sv;
+            sv = tval;
+        }
+
+        Shallow_bind(Shallow_bind&&) noexcept = default;
+
+        ~Shallow_bind() {
+            td.local_symbol(loc) = save;
+        }
+    };
 \end{verbatim}
 
 \section{Lock free symbol lookup}
 \label{sec:lockfree-code}
+
+\begin{verbatim}
+/**
+* [search_bucket] searches a particular bucket in the symbol table
+* It can search the whole bucket, or down to a location.
+* If specifying [stop] make sure it is in the bucket, otherwise it will loop.
+* Returns -1 if not found.
+* */
+LispObject search_bucket(LispObject bucket, const char *name, size_t len, LispObject stop=tagFIXNUM) {
+    for (LispObject w = bucket; w != stop; w = qcdr(w)) {
+        LispObject a = qcar(w);    // Will be a symbol.
+        LispObject n = qpname(a);      // Will be a string.
+        size_t l = veclength(qheader(n)); // Length of the name.
+
+        if (l == len && strncmp(name, qstring(n), len) == 0) {
+            return a;                  // Existing symbol found.
+        }
+    }
+
+    return -1;
+}
+
+LispObject lookup(const char *name, size_t len, int flag)
+{
+    size_t loc = 1;
+    for (size_t i = 0; i < len; i += 1) loc = 13 * loc + name[i];
+    loc = loc % OBHASH_SIZE;
+
+    LispObject bucket = obhash[loc].load(std::memory_order_acquire);
+    LispObject s = search_bucket(bucket, name, len);
+
+    if (s != -1) return s; // found the symbol
+
+    if ((flag & 1) == 0) return undefined;
+    LispObject pn = makestring(name, len);
+    LispObject sym = allocatesymbol(pn);
+
+    LispObject new_bucket = cons(sym, bucket);
+
+    while (!obhash[loc].compare_exchange_strong(bucket, new_bucket, std::memory_order_acq_rel)) {
+        LispObject old_bucket = bucket;
+        bucket = obhash[loc].load(std::memory_order_acquire);
+
+        // Reaching here means bucket is constructed from old_bucket
+        s = search_bucket(bucket, name, old_bucket);
+
+        if (s != -1) return s; // another thread has created the symbol in the meantime
+
+        new_bucket = cons(sym, bucket);
+    }
+
+    // successfully inserted the symbol in the hash, can return it.
+    return sym;
+}
+\end{verbatim}
+
+
 \section{Thread pool}
 \label{sec:threadpool-code}
 
 \begin{verbatim}
-  lisp;
+lisp;
 
-  symbolic procedure queue;
-      {nil, nil};
+symbolic procedure queue;
+    {nil, nil};
 
-  symbolic procedure q_push(q, x);
-      begin scalar back, newback;
-          back := second q;
-          newback := {x};
+symbolic procedure q_push(q, x);
+    begin scalar back, newback;
+        back := second q;
+        newback := {x};
 
-          if null back then <<
-              rplaca(q, newback);
-              rplaca(cdr q, newback); >>
-          else <<
-              rplacd(back, newback);
-              rplaca(cdr q, newback); >>;
-          return q;
-      end;
+        if null back then <<
+            rplaca(q, newback);
+            rplaca(cdr q, newback); >>
+        else <<
+            rplacd(back, newback);
+            rplaca(cdr q, newback); >>;
+        return q;
+    end;
 
-  symbolic procedure q_pop(q);
-      begin scalar front, next;
-          front := first q;
-          if null front then
-              return {}
-          else <<
-              next := cdr front;
-              if null next then rplaca(cdr q, {});
-              rplaca(q, next);
-              return (first front); >>;
-      end;
+symbolic procedure q_pop(q);
+    begin scalar front, next;
+        front := first q;
+        if null front then
+            return {}
+        else <<
+            next := cdr front;
+            if null next then rplaca(cdr q, {});
+            rplaca(q, next);
+            return (first front); >>;
+    end;
 
-  symbolic procedure q_empty(q);
-      null (first q);
+symbolic procedure q_empty(q);
+    null (first q);
 
-  symbolic procedure atomic(val);
-      {mutex(), val};
+symbolic procedure atomic(val);
+    {mutex(), val};
 
-  symbolic procedure atomic_set(a, val);
-  begin
-      scalar m;
-      m := first a;
+symbolic procedure atomic_set(a, val);
+begin
+    scalar m;
+    m := first a;
 
-      mutexlock m;
-      rplaca(cdr a, val);
-      mutexunlock m;
-  end;
+    mutexlock m;
+    rplaca(cdr a, val);
+    mutexunlock m;
+end;
 
-  symbolic procedure atomic_get(a);
-  begin
-      scalar m, res;
-      m := first a;
+symbolic procedure atomic_get(a);
+begin
+    scalar m, res;
+    m := first a;
 
-      mutexlock m;
-      res := cadr a;
-      mutexunlock m;
-      return res;
-  end;
+    mutexlock m;
+    res := cadr a;
+    mutexunlock m;
+    return res;
+end;
 
-  symbolic procedure safeq();
-      {queue(), mutex(), condvar()};
+symbolic procedure safeq();
+    {queue(), mutex(), condvar()};
 
-  symbolic procedure safeq_push(sq, x);
-      begin scalar q, m, cv;
-          q := first sq;
-          m := second sq;
-          cv := third sq;
+symbolic procedure safeq_push(sq, x);
+    begin scalar q, m, cv;
+        q := first sq;
+        m := second sq;
+        cv := third sq;
 
-          % print "safeq push getting mutex";
-          mutexlock m;
-          % print "safeq push got mutex";
-          q_push(q, x);
-          condvar_notify_one cv;
-          % print "safeq push unlocking mutex";
-          mutexunlock m;
-          return sq;
-      end;
+        mutexlock m;
+        q_push(q, x);
+        condvar_notify_one cv;
+        mutexunlock m;
+        return sq;
+    end;
 
-  symbolic procedure safeq_pop(sq);
-      begin scalar q, m, cv, res;
-          q := first sq;
-          m := second sq;
-          cv := third sq;
-          res := nil;
+symbolic procedure safeq_pop(sq);
+    begin scalar q, m, cv, res;
+        q := first sq;
+        m := second sq;
+        cv := third sq;
+        res := nil;
 
-          % print "safeq pop getting mutex";
-          mutexlock m;
-          % print "safeq pop got mutex";
-          % print thread_id ();
-          while q_empty q do condvar_wait(cv, m);
-          res := q_pop q;
-          % print "safeq pop unlocking mutex";
-          mutexunlock m;
-          % print "safeq pop done";
-          return res;
-      end;
+        mutexlock m;
+        while q_empty q do condvar_wait(cv, m);
+        res := q_pop q;
+        mutexunlock m;
+        return res;
+    end;
 
-  % non-blocking call
-  symbolic procedure safeq_trypop(sq);
-      begin scalar q, m, cv, res;
-          q := first sq;
-          m := second sq;
-          cv := third sq;
-          res := nil;
+% non-blocking call
+symbolic procedure safeq_trypop(sq);
+    begin scalar q, m, cv, res;
+        q := first sq;
+        m := second sq;
+        cv := third sq;
+        res := nil;
 
-          % print "safeq trypop getting mutex";
-          mutexlock m;
-          % print "safeq trypop got mutex";
+        mutexlock m;
 
-          if q_empty q then
-              res := nil
-          else
-              res := {q_pop q};
+        if q_empty q then
+            res := nil
+        else
+            res := {q_pop q};
 
-          % print "safeq trypop unlocking mutex";
-          mutexunlock m;
-          return res;
-      end;
+        mutexunlock m;
+        return res;
+    end;
 
-  symbolic procedure safeq_empty(sq);
-      begin scalar r, m;
-          m := second sq;
-          % print "safeq empty getting mutex";
-          mutexlock m;
-          % print "safeq empty got mutex";
-          r := q_empty (first sq);
-          mutexunlock m;
-          return r;
-      end;
+symbolic procedure safeq_empty(sq);
+    begin scalar r, m;
+        m := second sq;
+        mutexlock m;
+        r := q_empty (first sq);
+        mutexunlock m;
+        return r;
+    end;
 
-  symbolic procedure future();
-      {mutex (), nil};
+symbolic procedure future();
+    {mutex (), nil};
 
-  % blocking call to wait for future result
-  symbolic procedure future_get(fut);
-  begin
-      scalar m, state, cv, res;
-      m := first fut;
-      % print "future get getting mutex";
-      mutexlock m;
-      % print "future get got mutex";
+% blocking call to wait for future result
+symbolic procedure future_get(fut);
+begin
+    scalar m, state, cv, res;
+    m := first fut;
+    mutexlock m;
 
-      state := second fut;
+    state := second fut;
 
-      if state = 'done then <<
-          res := third fut;
-          mutexunlock m;
-          return res >>;
+    if state = 'done then <<
+        res := third fut;
+        mutexunlock m;
+        return res >>;
 
-      if state = 'waiting then
-          cv := third fut
-      else <<
-          cv := condvar ();
-          rplacd(fut, {'waiting, cv}) >>;
+    if state = 'waiting then
+        cv := third fut
+    else <<
+        cv := condvar ();
+        rplacd(fut, {'waiting, cv}) >>;
 
-      % print "future waiting cv";
-      condvar_wait(cv, m);
-      % print "future got signaled cv";
-      % ASSERT: promise is fulfilled here
 
-      res := third fut;
-      % print "future get unlocking mutex";
-      mutexunlock m;
+    condvar_wait(cv, m);
+    % ASSERT: promise is fulfilled here
 
-      return res;
-  end;
+    res := third fut;
+    mutexunlock m;
 
-  % non-blocking call for future result
-  % can wait on cv until timeout
-  symbolic procedure future_tryget(fut, timeout);
-  begin
-      scalar m, state, cv, res;
-      m := first fut;
-      % print "future tryget getting mutex";
-      mutexlock m;
-      % print "future tryget got mutex";
+    return res;
+end;
 
-      state := second fut;
+% non-blocking call for future result
+% can wait on cv until timeout
+symbolic procedure future_tryget(fut, timeout);
+begin
+    scalar m, state, cv, res;
+    m := first fut;
+    mutexlock m;
 
-      if state = 'done then
-          res := {third fut}
-      else if timeout = 0 then
-          res := nil
-      else <<
-          if state = 'waiting then
-              cv := third fut
-          else <<
-              cv := condvar ();
-              rplacd(fut, {'waiting, cv}) >>;
+    state := second fut;
 
-          if condvar_wait_for(cv, m, timeout) then
-              res := {third fut}
-          else
-              res := nil >>;
+    if state = 'done then
+        res := {third fut}
+    else if timeout = 0 then
+        res := nil
+    else <<
+        if state = 'waiting then
+            cv := third fut
+        else <<
+            cv := condvar ();
+            rplacd(fut, {'waiting, cv}) >>;
 
-      % print "future tryget unlocking mutex";
-      mutexunlock m;
+        if condvar_wait_for(cv, m, timeout) then
+            res := {third fut}
+        else
+            res := nil >>;
 
-      return res;
-  end;
+    mutexunlock m;
 
-  symbolic procedure future_set(fut, value);
-  begin
-      scalar m, state;
-      m := first fut;
+    return res;
+end;
 
-      % print "future set getting mutex";
-      mutexlock m;
-      % print "future set got mutex";
-      state := second fut;
+symbolic procedure future_set(fut, value);
+begin
+    scalar m, state;
+    m := first fut;
 
-      if state = 'done then
-          error("future already set");
+    mutexlock m;
+    state := second fut;
 
-      if state = 'waiting then
-          condvar_notify_all third fut;
+    if state = 'done then
+        error("future already set");
 
-      rplacd(fut, {'done, value});
+    if state = 'waiting then
+        condvar_notify_all third fut;
 
-      % print "future set unlocking mutex";
-      mutexunlock m;
-  end;
+    rplacd(fut, {'done, value});
+    mutexunlock m;
+end;
 
-  symbolic procedure tp_runjob(tp);
-  begin
-      scalar tp_q, job, resfut, f, args, res;
-      tp_q := first tp;
-      job := safeq_trypop tp_q;
-      if null job then thread_yield ()
-      else <<
-          job := first job;
-          resfut := first job;
-          f := second job;
-          args := third job;
-          res := errorset({'apply, mkquote f, mkquote args}, t);
-          future_set(resfut, res);
-          % print "done job"
-      >>
-  end;
+symbolic procedure tp_runjob(tp);
+begin
+    scalar tp_q, job, resfut, f, args, res;
+    tp_q := first tp;
+    job := safeq_trypop tp_q;
+    if null job then thread_yield ()
+    else <<
+        job := first job;
+        resfut := first job;
+        f := second job;
+        args := third job;
+        res := errorset({'apply, mkquote f, mkquote args}, t);
+        future_set(resfut, res);
+    >>
+end;
 
-  symbolic procedure thread_pool_job(tp_q, status);
-  begin
-      scalar job, resfut, f, args, res, stat;
-      % print "Started worker";
-      job := safeq_trypop tp_q;
-      repeat <<
-          if job then <<
-              % print "got job";
-              job := first job;
-              resfut := first job;
-              f := second job;
-              args := third job;
-              % res := apply(f, args);
-              res := errorset({'apply, mkquote f, mkquote args}, t);
-              future_set(resfut, res);
-              % print "done job";
-          >> else <<
-              % print "yielding";
-              thread_yield ();
-          >>;
-          job := safeq_trypop tp_q;
-          stat := atomic_get status;
-      >> until (stat = 'kill) or (stat = 'stop and null job);
-      % print "shutting down thread_pool worker";
+symbolic procedure thread_pool_job(tp_q, status);
+begin
+    scalar job, resfut, f, args, res, stat;
+    job := safeq_trypop tp_q;
+    repeat <<
+        if job then <<
+            job := first job;
+            resfut := first job;
+            f := second job;
+            args := third job;
+            res := errorset({'apply, mkquote f, mkquote args}, t);
+            future_set(resfut, res);
+        >> else <<
+            thread_yield ();
+        >>;
+        job := safeq_trypop tp_q;
+        stat := atomic_get status;
+    >> until (stat = 'kill) or (stat = 'stop and null job);
 
-      return nil
-  end;
+    return nil
+end;
 
-  symbolic procedure thread_pool(numthreads);
-      begin scalar tp_q, status, threads;
-          tp_q := safeq();
-          status := atomic 'run;
-          threads := {};
-          % print "starting workers";
-          for i := 1:numthreads do threads := thread2('thread_pool_job, {tp_q, status}) . threads;
-          return {tp_q, status, threads};
-      end;
+symbolic procedure thread_pool(numthreads);
+    begin scalar tp_q, status, threads;
+        tp_q := safeq();
+        status := atomic 'run;
+        threads := {};
+        % print "starting workers";
+        for i := 1:numthreads do threads := thread2('thread_pool_job, {tp_q, status}) . threads;
+        return {tp_q, status, threads};
+    end;
 
-  symbolic procedure tp_addjob(tp, f, args);
-  begin
-      scalar tp_q, status, resfut;
-      tp_q := first tp;
-      status := atomic_get (second tp);
+symbolic procedure tp_addjob(tp, f, args);
+begin
+    scalar tp_q, status, resfut;
+    tp_q := first tp;
+    status := atomic_get (second tp);
 
-      if not (status = 'run) then
-          return nil
-      else <<
-          resfut := future ();
-          % print "pushing job";
-          safeq_push(tp_q, {resfut, f, args});
-          return resfut;
-      >>;
-  end;
+    if not (status = 'run) then
+        return nil
+    else <<
+        resfut := future ();
+        % print "pushing job";
+        safeq_push(tp_q, {resfut, f, args});
+        return resfut;
+    >>;
+end;
 
-  symbolic procedure tp_stop(tp);
-  begin
-      scalar threads;
-      % print "tp_stop";
-      atomic_set(second tp, 'stop);
-      % print "atomic set";
-      threads := third tp;
-      for each td in threads do <<
-          % print "joining thread"; print td;
-          jointhread td;
-          % print "joined thread";
-      >>;
-      % print "tp stopped";
-      return nil;
-  end;
+symbolic procedure tp_stop(tp);
+begin
+    scalar threads;
+    atomic_set(second tp, 'stop);
+    threads := third tp;
+    for each td in threads do <<
+        jointhread td;
+    >>;
+    return nil;
+end;
 
-  symbolic procedure tp_kill(tp);
-  begin
-      scalar threads;
-      atomic_set(second tp, 'kill);
-      threads := third tp;
-      for each td in threads do <<
-          % print "joining thread"; print td;
-          jointhread td;
-          % print "joined thread";
-      >>;
-  end;
+symbolic procedure tp_kill(tp);
+begin
+    scalar threads;
+    atomic_set(second tp, 'kill);
+    threads := third tp;
+    for each td in threads do <<
+        jointhread td;
+    >>;
+end;
 
-  % tp := thread_pool();
-
-  end;
+end;
 \end{verbatim}

@@ -422,7 +422,7 @@ so speeding it up with multi-threading could prove to be quite valuable.
 At the same time, it is relatively easy to split the multiplication
 algorithm into multiple independent tasks. All the well-known
 multiplication algorithms (i.e. the naive quadratic solution, Karatsuba,
-and using Fast Fourier Transform) have parallel versions.
+and using Fast Fourier Transform) have parallel versions \cite[Chapter~30.3]{cormen}.
 The latter are mostly used for multiplying numbers, and Reduce
 uses the quadratic algorithm as it is better suited to sparse and
 more general multi-variate polynomials.
