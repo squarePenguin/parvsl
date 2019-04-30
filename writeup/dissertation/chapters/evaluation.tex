@@ -74,7 +74,7 @@ symbolic integration package, and provides a good performance benchmark.
 
 \begin{figure}[h]
   \centering
-  \includegraphics[width=1\linewidth]{single_threaded.png}
+  \includegraphics[width=1\linewidth]{single_threaded.eps}
   \caption{Relative performance of ParVSL on single-threaded tests.}
   \label{fig:single-threaded}
 \end{figure}
@@ -424,20 +424,27 @@ resulting polynomial. While the small test case only covers uni-variate
 polynomials the results I show might reasonably be expected to apply to
 more general cases.
 
-\begin{table}
+% \begin{table}[H]
+%   \centering
+%   \begin{tabular}{rrrrr}
+%   Poly size & VSL & ParVSL \\
+%   \hline
+%   1000 & 0.660 & 0.480 \\
+%   2000 & 1.588 & 0.941 \\
+%   3000 & 3.280 & 1.729 \\
+%   4000 & 5.486 & 2.834 \\
+%   5000 & 8.182 & 4.177 \\
+%   \end{tabular}
+%   \caption{Parallel multiplication of polynomials vs single-threaded.}
+%   \label{tab:parpolymult}
+% \end{table}
+
+\begin{figure}[H]
   \centering
-  \begin{tabular}{rrrrr}
-  Poly size & VSL & ParVSL \\
-  \hline
-  1000 & 0.660 & 0.480 \\
-  2000 & 1.588 & 0.941 \\
-  3000 & 3.280 & 1.729 \\
-  4000 & 5.486 & 2.834 \\
-  5000 & 8.182 & 4.177 \\
-  \end{tabular}
-  \caption{Parallel multiplication of polynomials vs single-threaded.}
-  \label{table:parpolymult}
-\end{table}
+  \includegraphics[width=0.8\linewidth]{polymult.eps}
+  \caption{Running time of polynomial multiplication in parallel vs single-threaded.}
+  \label{fig:parpolymult}
+\end{figure}
 
 % For small polynomials just gaving the thread infrastructure may
 % tend to hurt. After all if you take two quadratics and split them
@@ -609,7 +616,7 @@ shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the 
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=1\linewidth]{thread_local.png}
+\includegraphics[width=1\linewidth]{thread_local.eps}
 \caption{Thread local performance on different platforms.}
 \label{fig:threadlocal}
 \end{figure}

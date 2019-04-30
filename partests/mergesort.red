@@ -58,8 +58,8 @@ begin scalar n, ss, xs, ys;
 end;
 
 fluid '(tp);
-tp := thread_pool(hardwarethreads() - 1);
-% tp := thread_pool(32);
+% tp := thread_pool(hardwarethreads() - 1);
+tp := thread_pool(16);
 
 symbolic procedure parmergesort(xs);
 begin scalar n, ss, xs, ysfut, ys;
@@ -99,11 +99,11 @@ symbolic procedure test(n);
 begin
     scalar l, sorted;
     l := nrand n;
-    sorted := parmergesort l;
+    sorted := mergesort l;
     return nil;
 end;
 
-test(100000);
+test(1000000);
 
 tp_stop tp;
 
