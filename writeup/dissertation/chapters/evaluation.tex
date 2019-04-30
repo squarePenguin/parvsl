@@ -21,11 +21,11 @@ set of tests. These tests involve a large amount of heavy computation, stress te
 many different algorithms, using large amounts of memory and requiring multiple cycles
 of garbage collection.
 
-Between building REDUCE and passing its tests, I can catch development bugs be
+Between building REDUCE and passing its tests, I can detect development bugs and be
 confident that ParVSL retains backwards compatibility. Any error while running the code,
 or any difference in output between VSL is considered a bug. This approach helped me
 find most of the bugs in my code. The disadvantage was that when I had to debug there
-was too much code running and it was difficult to pinpoint to the source of the problem.
+was too much code running and it was difficult to pinpoint the source of the problem.
 
 To aid with this, I had multiple stages to build. The first stage was just building
 the core, while the second involved building the libraries. If an error showed up while
@@ -78,7 +78,7 @@ symbolic integration package, and provides a good performance benchmark.
 \begin{figure}[h]
   \centering
   \includegraphics[width=1\linewidth]{single_threaded.eps}
-  \caption{Relative performance of ParVSL on single-threaded tests.}
+  \caption{Relative performance of ParVSL on single-threaded tests (lower is better).}
   \label{fig:single-threaded}
 \end{figure}
 
@@ -169,15 +169,15 @@ A thread pool is a structure for simplifying parallelism by abstracting away the
 with hardware threads. A thread pool consists of a work queue for pending jobs and a number
 of worker threads which execute those jobs as they become available. The number of workers
 can kept low so that the program never has to spawn more threads
-than there available, and threads can be reused. Once a thread pool is created, the user simply
-needs to submit jobs and they will be automatically parallelised.
+than the operating system limit, and threads can be reused. Once a thread pool is created,
+the user simply needs to submit jobs and they will be automatically parallelised.
 
 \subsection{A thread-safe queue}
 
 The main data structure behind the thread-pool is a thread-safe queue. All threads may push
 jobs to this queue and all working threads pop tasks from it to execute. Jobs can be executed
-in any order, but I used a FIFO queue so that they would be executed in the order they are submitted, which
-seemed the most natural.
+in any order, but I used a FIFO queue so that they would be executed in the order they are submitted,
+which seemed the most natural.
 
 We can implement such a queue easily in ParVSL using a mutex and a condition variable.
 I wrote the following code in RLisp, since the thread pool will be useful in parallelising
@@ -239,15 +239,14 @@ be joined on exit or when the user manually stops the pool.
 
 The mechanism for stopping the queue is a simple atomic flag. Atomics are not offered as
 a primitive in ParVSL, but can be easily implemented with a mutex lock. There is no direct
-mechanism for interrupting a thread running a task \footnote{C++ does not provide this as a
+mechanism for interrupting a thread running a task\footnote{C++ does not provide this as a
 primitive and indeed if a thread was interrupted in the middle of a system call or while
-holding a mutex lock it would cause all sorts of problems.}, but workers can check the flag every time
-before taking a new task from the queue.
+holding a mutex lock it would cause all sorts of problems.}, but workers can check the flag
+every time before taking a new task from the queue.
 
-Using the blocking call to wait for the next job mean the worker get stuck and prevent
-stopping the thread-pool. When the the user tries to stop an empty pool, then all
+When the the user tries to stop an empty pool, all
 the workers will be in a sleeping state, waiting for the queue condition variable to be
-notified, causing a deadlock.
+notified and causing a deadlock.
 
 \begin{verbatim}
 while atomic_get(run_flag) = 'run do
@@ -268,11 +267,11 @@ while atomic_get(run_flag) = 'run do
     thread_yield()
 \end{verbatim}
 
-This approach solves the issue, but it is important to note the \texttt{thread\_yield()} call.
-I have implemented \texttt{thread\_yield()} to directly call the C++ equivalent. This allows the
+This approach solves the issue, but it is important to note the \verb|thread_yield()| call.
+I have implemented \verb|thread_yield()| to directly call the C++ equivalent. This allows the
 system to schedule other threads, making sure a waiting worker does not spin the CPU
-core to 100\% until forcefully preempted by the OS. It would also prevent other threads
-started by the user from doing work.
+core to 100\% until forcefully preempted by the OS. It can also cause starvation as it
+delays other threads from being scheduled.
 
 \subsection{Waiting for a job's result}
 \label{ssec:waitjob}
@@ -443,7 +442,7 @@ more general cases.
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\linewidth]{polymult.eps}
-  \caption{Running time of polynomial multiplication in parallel vs single-threaded.}
+  \caption{Running time of polynomial multiplication in parallel vs single-threaded (lower is better).}
   \label{fig:parpolymult}
 \end{figure}
 
@@ -464,8 +463,8 @@ more general cases.
 
 \section{Parallel building of REDUCE}
 
-The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
-can simply run to build it. The process can be separated into two steps:
+Most of REDUCE is made up of RLISP code, which can be run in VSL or ParVSL
+to generate a build. The process can be separated into two steps:
 building the core of REDUCE, and then building all the additional packages.
 The core, which I will refer to as RCORE, satisfies most of the dependencies
 any of the additional packages need, and only takes a fraction of the time
@@ -484,7 +483,7 @@ REDUCE & 59:93s\\
 A good use of multi-threading would be to speed up this build time by
 arranging to build individual REDUCE packages in parallel. The RCORE base
 should still be built sequentially, as it is much more difficult to
-separate independent tasks. However, the rest of the packages mostly
+separate it into independent tasks. However, the rest of the packages mostly
 only have RCORE as a dependency.
 
 I extracted a list of 64 packages to build. The starting point was the
@@ -522,7 +521,7 @@ didn't always follow good practices. It is outside the scope of this project to
 fix all REDUCE packages, however I tried to work my way around that.
 
 I modified the ParVSL code so that when I enable a compilation flag it tracks all
-reads and writes to global values of fluid or global symbols. Afterwards, I wrote a python
+reads and writes to global values of fluid or global symbols. Afterwards, I wrote a Python
 script which builds each package individually with the build flag on and saved those
 accessed to a file. The script computed all conflicts between packages,
 then generated a REDUCE test file which would remove all global access on building the packages:
@@ -603,10 +602,9 @@ when running ParVSL vs VSL. Table \ref{table:cross-platform-reduce} shows the re
   x86 MacOS            & 1m19s &  3m56s  \\
   x86 Windows (Cygwin) & 1m03s & 10m15s \\
   \end{tabular}
-  \caption{Building REDUCE on different platforms in VSL vs ParVSL}
+  \caption{Building REDUCE on different platforms in VSL vs ParVSL.}
   \label{table:cross-platform-reduce}
 \end{table}
-
 
 \subsection{Thread-local access performance}
 
@@ -617,7 +615,7 @@ shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the 
 \begin{figure}[H]
 \centering
 \includegraphics[width=1\linewidth]{thread_local.eps}
-\caption{Thread local performance on different platforms.}
+\caption{Thread local performance on different platforms (lower is better).}
 \label{fig:threadlocal}
 \end{figure}
 

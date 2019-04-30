@@ -1,5 +1,5 @@
 \section{ParVSL}
-I have forked the the original VSL project into a new language which I named Parallel VSL, or ParVSL.
+I have forked the original VSL project into a new language which I named Parallel VSL, or ParVSL.
 ParVSL is fully backwards compatible with VSL and will be compared against it for performance.
 
 VSL was a good candidate for this project because it featured a complete, working Lisp implementation while being
@@ -71,7 +71,7 @@ path is the most heavily used and should be as efficient as possible. When I mod
 multi-threading, I pay special attention to not encumber it.
 
 \section{Memory allocation}
-Memory is managed by the interpreter. It allocates a large block of memory at the beginning,
+Memory is managed by the interpreter. VSL allocates a large block of memory at the beginning,
 which it then manages as a contiguous array. When running out of memory, an extra block of the
 same size as the one in use is \verb|malloc|-ed, doubling the amount available. These blocks are
 never freed until the end of the program. They are sorted by their pointer locations,
@@ -149,7 +149,7 @@ It treats all values on the stack as potential references, called \emph{ambiguou
 This means we are overestimating the set of roots. Unlike \emph{unambiguous} roots (like the symbol table above), we
 have to be careful when handling these values, and cannot manipulate them as ordinary Lisp objects, which rules out
 copying them over. The solution was
-to \emph{pin} them, i.e. mark them in the heap so they are not moved. Listing \ref{code:scanpinned} 
+to \emph{pin} them, i.e. mark them in the heap so they are not moved. Listing \ref{code:scanpinned}
 shows the process of pinning objects.
 Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
 Additionally, the \texttt{allocate} function will have to check for pinned items on the heap and skip over them.
@@ -212,7 +212,7 @@ of the binding.
 
 Debugging multi-threaded code is especially difficult and I
 needed the right tools to help me find the source of issues. I used
-the \verb|gdb| \cite{gdb} debugger to step through code and try to the source
+the \verb|gdb| \cite{gdb} debugger to step through code and find the source
 of the problem. I used \verb|gprof| \cite{gprof} to profile my code and find
 the areas on the critical path which needed optimisations the most. Finally,
 I used \verb|valgrind| \cite{valgrind} to analyse ParVSL for memory

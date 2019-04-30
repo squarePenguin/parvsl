@@ -398,7 +398,7 @@ let varName = expr1 in expr2
 can be implemented as:
 
 \begin{code}
-\begin{verbatim}
+\begin{minted}[breaklines,mathescape]{c++}
 void implement_let(string varName, LispObject expr1, LispObject expr2) {
   LispObject symbol = lookup_symbol(varName);
   LispObject oldVal = value(symbol); // store the old value
@@ -406,7 +406,7 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
   eval(expr2);                       // evaluate the rest of the code
   value(symbol) = oldVal;            // restore old value
 }
-\end{verbatim}
+\end{minted}
 \caption{Implementation of \texttt{let} in VSL.}
 \label{code:let-vsl}
 \end{code}
@@ -427,7 +427,7 @@ However, for non-globals I used a thread-local array to store the real value, an
 location point to the array location. A globally unique array index is reserved for each local symbol.
 All threads reserve that location within their local arrays for the symbol.
 
-\begin{verbatim}
+\begin{minted}[breaklines,mathescape]{c++}
 thread_local vector locals;
 vector shared_fluids;
 
@@ -447,7 +447,7 @@ LispObject par_value(LispObject symbol) {
   // get the thread-local value at that location
   return locals[loc];
 }
-\end{verbatim}
+\end{minted}
 
 I carefully replaced all calls to \texttt{value} to use \texttt{par\_value} instead.
 Now, multiple threads accessing the same symbol can do so safely,
@@ -462,8 +462,8 @@ and shallow binding is unaffected.
 \end{figure}
 
 In figure \ref{fig:symbols} I show a full example of how symbols are stored. The first symbol is \texttt{g}, which
-is a \emph{global} symbol. It's value is stored directly in the global heap (like in the original VSL). The symbol \texttt{x}
-is \emph{fluid}. It's heap value simply indicates a location (\texttt{loc 2}). We use the index to find the actual value
+is a \emph{global} symbol. Its value is stored directly in the global heap (like in the original VSL). The symbol \texttt{x}
+is \emph{fluid}. Its heap value simply indicates a location (\texttt{loc 2}). We use the index to find the actual value
 in thread-local storage. Threads 1 stores the string \texttt{"George"} while thread 2 stores the integer \texttt{42}.
 Thread 3 has not bound any local value to the symbol so it is \texttt{undefined}. However, it can still access the
 global value in \verb|shared_fluids|, the string \verb|"John"|. Finally, symbol \verb|y| is \emph{local}. It is
@@ -474,15 +474,15 @@ I redesigned shallow binding to use a RAII style class, called \verb|Shallow_bin
 described above, while providing more safety guarantees, thus leading to more robust code. It checks if the symbol is global and prevents binding,
 it handles thread-local storage and it always restores the old value correctly in its destructor, including the
 case of exceptions. Previous code spent time testing error flags, manually restoring the old value in every place.
-For example, the code in \ref{code:let-vsl} was rewritten as:
+For example, the code in listing \ref{code:let-vsl} was rewritten as:
 \begin{code}
-\begin{verbatim}
+\begin{minted}[breaklines,mathescape]{c++}
 void implement_let(string varName, LispObject expr1, LispObject expr2) {
   LispObject symbol = lookup_symbol(varName);
   Shallow_bind bind_var{symbol, eval(expr1)};
   eval(expr2); // evaluate the rest of the code
 }
-\end{verbatim}
+\end{minted}
   \caption{Implementation of \texttt{let} in ParVSL.}
   \label{code:let-parvsl}
 \end{code}
