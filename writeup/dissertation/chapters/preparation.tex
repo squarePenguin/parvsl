@@ -149,8 +149,8 @@ It treats all values on the stack as potential references, called \emph{ambiguou
 This means we are overestimating the set of roots. Unlike \emph{unambiguous} roots (like the symbol table above), we
 have to be careful when handling these values, and cannot manipulate them as ordinary Lisp objects, which rules out
 copying them over. The solution was
-to \emph{pin} them, i.e. mark them in the heap so they are not moved. Listing \ref{code:pinvsl} shows the process of pinning
-objects.
+to \emph{pin} them, i.e. mark them in the heap so they are not moved. Listing \ref{code:scanpinned} 
+shows the process of pinning objects.
 Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
 Additionally, the \texttt{allocate} function will have to check for pinned items on the heap and skip over them.
 When building the entirety of REDUCE, the number of pinned items does not reach 300.
@@ -178,10 +178,8 @@ void garbage_collection() {
   ...
 }
 \end{minted}
-\caption{Scanning the stack for ambiguous references.}
-\label{fig:scanpinned}
-\caption{Scanning the stack before GC to find pinned items.}
-\label{code:pinvsl}
+\caption{Scanning the stack before GC for ambiguous references.}
+\label{code:scanpinned}
 \end{code}
 
 \subsection{Running single-threaded}
@@ -209,12 +207,6 @@ in other languages, allowing the name to be reused.
 \texttt{Let} bindings and function parameters introduce \emph{local} symbols. If the symbol name is already declared global,
 it will result in an error. If it is a fluid and has a global value, that value will be shadowed for the lifetime
 of the binding.
-
-\section{Saving state to disk}
-REDUCE has an important feature which allows the user to preserve the state to disk. A \texttt{preserve} instruction can be
-used to do so, and the user is able to specify a function to run on restart. \verb|preserve| saves the entire state of the
-program, including memory and symbols. The feature involves careful manipulation of the world state and
-maintaining the same image format for backwards compatibility is not trivial.
 
 \section{Debugging tools}
 

@@ -1,8 +1,8 @@
 \section{Integrating threads}
 \label{sec:babythreads}
 After familiarising myself with the VSL codebase I tried to implement the simplest form of
-multi-threading and test out how the language would behave. I added a new function to VSL
-which takes a piece of code as an argument, starts a new thread and joins again with
+multi-threading and test out how the language would behave. I added a new function called \verb|thread|
+to VSL which takes a piece of code as an argument, starts a new thread and joins again with
 the main thread. Once implemented, I could run the first and simplest unit test for ParVSL:
 
 \begin{verbatim}
@@ -15,7 +15,7 @@ ld"
 
 We can immediately observe the effects of parallelism in action. The interpreter is not thread-safe and data races
 on global variables (including printing to the same stream) lead to undefined behaviour. Although printing
-still seems to work, most other functions would fail. The spawned threads can only handle strings
+is possible, most other functions would fail. The spawned threads can only handle strings
 and will crash on handling numbers or symbols, or when trying to allocate anything.
 There is no inter-thread communication or exception safety, and any garbage collection would produce a segmentation
 fault. To be able to write a more complicated test, I need to make changes in all areas of the interpreter.
@@ -31,37 +31,37 @@ identifier, which is returned to the user. Subsequently, the user can then use t
 I wanted to allow multiple threads in parallel without affecting the performance
 of allocations. To do this I had to use a lock-free approach. As such, I further
 split the memory into regions, which I call \emph{segments}. A segment is a thread-local region
-for allocation on the heap.
+for allocation on the heap (see figure \ref{fig:parvslalloc}).
 
 Just like before, memory is allocated to the segments in a continuous
 fashion. A pointer indicates the start of the non-allocated part of the segment
 (the \emph{segment fringe}), while another tells us the end of the segment
 (the \emph{segment limit}).
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{parvslalloc.pdf}
+  \caption{Memory allocations in ParVSL}
+  \label{fig:parvslalloc}
+\end{figure}
+
 Now, contention is reduced to getting a new segment. Each thread only allocates within
 its own segment, so allocations do not require any synchronisation, and they still only
 require incrementing one variable in most cases. If the requested allocation would bring
-the fringe over the segment limit, then the current segment is \emph{sealed} and a new one is
+the segment fringe over the segment limit, then the current segment is \emph{sealed} and a new one is
 requested.
 
-I carefully modified all the areas where allocations are preformed to use the segment fringe
+I carefully modified all the areas where allocations are performed to use the segment fringe
 instead of the global fringe. The global fringe is only moved to assign a new segment. Writes
 to the global fringe are executed under a mutex lock, while the segment fringe is a thread local
 variable accessed without any locks. If the requested memory is larger than the segment size
 (e.g. a large string or number), it is allocated outside any segment, using the global fringe.
 
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=1\linewidth]{parvslalloc.pdf}
-  \label{fig:parvslalloc}
-  \caption{Memory allocations in ParVSL}
-\end{figure}
-
 There is a trade-off involved when choosing the segment size. If the size is too small,
 there will be a lot of contention on requesting segments, leading back to the original
 problem of locking on every allocation. If the segment size is too large, there is a risk
-of threads holding large amounts of memory without using it and causing early garbage collection
-cycles. This is because reclaiming memory is requested when a new segment cannot be created,
+of threads holding large amounts of memory without using it and causing internal fragmentation and
+early garbage collection cycles. This is because reclaiming memory is requested when a new segment cannot be created,
 regardless of how much free space there is in existing segments. While the trade-off depends on the
 total memory, I have found a good compromise for segments of a few kilobytes each.
 
@@ -80,8 +80,9 @@ collection. This is one reason I had to pause work on all threads for GC. If I d
 for a thread to add references to the heap on its stack after those locations were marked safe to delete,
 causing corruption.
 
-When a thread is initialised, I save its own stack base in \texttt{Thread\_data}, and then also save its stack head
-when it is paused to wait for GC. All these stack ranges are scanned before I start garbage collection:
+When a thread is initialised, I save its own stack base in \verb|Thread_data|, and then also save its stack head
+when it is paused to wait for GC. All these stack ranges are scanned before I start garbage collection, as shown
+in \ref{code:parstackscan}.
 
 \begin{code}
 \begin{minted}[breaklines,mathescape]{c++}
@@ -97,15 +98,15 @@ void garbage_collection() {
   ...
 }
 \end{minted}
-\caption{Scan the scan of each thread for pinned items before GC.}
+\caption{Scan the stack of each thread for pinned items before GC.}
 \label{code:parstackscan}
 \end{code}
 
 \subsection{Garbage collection locks and safety}
 \label{sec:gclock}
-The garbage collector is \emph{stop-the-world}. The thread initiating garbage collection must wait for all
-threads to be ready. Similarly, all threads must regularly check whether a garbage collection cycle was
-initiated and act accordingly.
+The thread initiating garbage collection must wait for all
+threads to be ready. Similarly, to prevent starvation, all threads must regularly check
+whether a garbage collection cycle was initiated and make themselves safe.
 
 The first idea I had was to trap all calls to allocate memory and check whether garbage collection is needed.
 To do this, I could simply reset all thread segments. Threads would need to allocate eventually and
@@ -113,25 +114,30 @@ would request a new segment, at which point they would need to call the GC. Howe
 a thread might be busy for a long time without needing to allocate. This would cause all other
 threads to be idle waiting for it to finish.
 
-A bigger issue was the risk of deadlocks. If thread A is waiting for the result of a computation on thread B,
-but thread B was paused waiting for the GC, then the program is deadlocked. Similarly, any effectful computation,
+A bigger issue was the risk of deadlocks. In figure \ref{fig:gcdeadlock}, thread 2 for thread 1 to release
+but thread 1 was paused waiting for the GC, causing a deadlock. Similarly, any effectful computation,
 like waiting for user input will prevent the collection from starting.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\linewidth]{gcdeadlock.pdf}
-  \caption{Possible deadlock when starting Garbage Collection}
+  \caption{Possible deadlock when starting garbage collection}
   \label{fig:gcdeadlock}
 \end{figure}
 
 I implemented three mechanisms
 for a thread to check for garbage collection. The first one is when it tries to allocate. Then, it
 polls the global flag in the interpreter, so that time-consuming loops which do not allocate do not
-delay the garbage collector for too long. Finally, I used the \verb|GC_guard| described in section
-\ref{sec:gclock} to prevent any waiting call (such as opening a file, or joining a thread) from
-causing a deadlock.
+delay the garbage collector for too long. Finall
 
-I used the following shared global state to synchronise threads for GC:
+There are three scenarios in which a thread should check for GC. The first one is when it tries to allocate.
+Then, it should poll a global flag in the interpreter, so that time-consuming loops which do not allocate do not
+delay the garbage collector for too long. Finally, it must handle any blocking operation, especially
+when it depends on a signal from another thread (as in \ref{fig:gcdeadlock}).
+
+I created two classes to help me synchronise threads for GC and handle all the scenarios above:
+\verb|Gc_guard| and \verb|Gc_lock|.
+To begin with, I used the following shared global state:
 \begin{code}
 \begin{minted}[breaklines,mathescape]{c++}
   std::atomic_int num_threads(0);
@@ -155,8 +161,8 @@ is in a safe state if it has saved all the information the garbage collector nee
 and stack head) and guarantees not to run any code that invalidates the garbage collection. Threads go into a safe
 state whenever they get paused for GC. However, they can also be in safe state when waiting for a blocking call.
 
-I created a special \emph{RAII} class to handle both scenarios, which I called \verb|Gc_guard|.
-The class only has a constructor and a destructor and is a way for the thread to promise it is in a safe state.
+The \verb|Gc_guard| class handles both scenarios.
+It has a constructor and a destructor and is a way for the thread to promise it is in a safe state.
 
 \begin{code}
 \begin{minted}[breaklines,mathescape]{c++}
@@ -259,7 +265,7 @@ As before, the na\"ive solution would be to implement a mutex lock on the entire
 lookup function.
 
 To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access
-to either a single writing thread, or all the reading threads. This would would allow multiple
+to either a single writing thread, or all the reading threads. This would allow multiple
 threads to lookup symbols at the same time. However, as soon as one one thread has to create a
 symbol, all the readers have to wait for it to finish.
 
@@ -326,7 +332,7 @@ LispObject lookup(std::string name) {
 This approach adds no penalty to single-threaded
 code. For comparison, I also implemented the mutex lock approach and tested
 them on building REDUCE (single-threaded). Table \ref{tab:lockfree} shows that the mutex
-version is noticeably slower.
+version is noticeably slower, while the lock-free takes the same amount of time.
 
 \begin{table}[H]
   \centering
@@ -349,7 +355,7 @@ standard library ones. The lookup function, for example, actually takes a char a
 pointer and the string length as separate arguments. I even identified a bug
 in VSL where the wrong length was passed as a hard-coded number, and it prompted
 me to use the more modern \verb|std::string| class. Surprisingly, this change alone
-slowed down ParVSL, as can be seen in the last row of Table \ref{fig:lockfree}.
+slowed down ParVSL, as can be seen in the last row of Table \ref{tab:lockfree}.
 I made sure no more extra copying or construction of these strings was done than
 necessary. I reverted my change in this case, but I note it as an interesting example
 of the trade-off C++ features can bring.
@@ -373,12 +379,12 @@ g ()
 \end{verbatim}
 
 The above example will not compile in any statically scoped languages such as OCaml or C++
-because the variable \texttt{y} is not defined in its scope.
-Most dynamic languages, even weakly typed ones, like Javascript or Python, will allow equivalent
-code as valid, but will encounter a runtime error because \texttt{y} is not defined.
-Lisp, and VSL in particular, has a mach looser concept of scope.
-In the example above, \texttt{y} is defined before the call of \texttt{f} and will remain defined until the
-call to \texttt{g} returns.
+because the variable \verb|y| is not defined in the scope of \verb|f|.
+Most dynamic languages, even weakly typed ones, like Javascript or Python, will consider the equivalent
+code valid, but will encounter a runtime error because \verb|y| is not defined.
+Lisp, and VSL in particular, has a much looser concept of scope.
+In the example above, \verb|y| is defined before the call of \verb|f| and will remain defined until the
+call to \verb|g| returns.
 
 \emph{Shallow binding} is the mechanism through which this is achieved. Each symbol is mapped to a single value.
 When a variable name is bound, e.g. as a function parameter name during a function call or through a
@@ -410,7 +416,7 @@ Many variable names are reused multiple times in a program (e.g. \texttt{i, j, c
 Multiple threads binding the same variable will override each other's values.
 
 I wanted to fix this while keeping the same dynamic scoping semantics for backward compatibility.
-One option was to implement a form of deep binding with functional association lists storing local values,
+One option was to implement a form of deep binding with association lists storing local values,
 yet performance was a concern. While shallow binding has a constant factor, deep binding requires
 an associative data structure which would add non-negligible overheads to a critical area of the
 interpreter.
@@ -443,8 +449,9 @@ LispObject par_value(LispObject symbol) {
 }
 \end{verbatim}
 
-I carefully replaced all calls to \texttt{value} to \texttt{par\_value}. Now, multiple threads accessing the same symbol
-can do so safely, as they will each access their own versions. This eliminates data races entirely,
+I carefully replaced all calls to \texttt{value} to use \texttt{par\_value} instead.
+Now, multiple threads accessing the same symbol can do so safely,
+as they will each access their own versions. This eliminates data races entirely,
 and shallow binding is unaffected.
 
 \begin{figure}[H]
@@ -463,10 +470,10 @@ global value in \verb|shared_fluids|, the string \verb|"John"|. Finally, symbol 
 undefined in \verb|shared_fluids| but otherwise behaves the same as \verb|x|, storing its thread-local values at
 index \verb|1|.
 
-I redesigned shallow binding to use a RAII style class, called \verb|Shallow_bind| deals with all the changes
+I redesigned shallow binding to use a RAII style class, called \verb|Shallow_bind| which deals with all the changes
 described above, while providing more safety guarantees, thus leading to more robust code. It checks if the symbol is global and prevents binding,
 it handles thread-local storage and it always restores the old value correctly in its destructor, including the
-case of exceptions. Previous code mspent time testing error flags, manually restoring the old value in every place.
+case of exceptions. Previous code spent time testing error flags, manually restoring the old value in every place.
 For example, the code in \ref{code:let-vsl} was rewritten as:
 \begin{code}
 \begin{verbatim}
@@ -483,25 +490,23 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
 \section{Data races in the interpreter}
 \label{sec:datarace}
 
-The interpreter is the core of VSL. It runs a \emph{read-eval-print} loop which makes heavy
-use of global state and side effects.
 Running VSL in parallel involves, in effect, running an interpreter in each thread. The spawned threads do not
-run a print-eval-print loop, instead they run a computation, save the result, then terminate. However,
+run a read-eval-print loop, instead they run a computation, save the result, then terminate. However,
 in ParVSL I allow these threads to execute any code the main thread can, with no restriction. This means
 all threads can use and modify global state and interact with standard input, output and files and
 thus can conflict with each other.
 
-There are plenty of global variables holding state in VSL. I slowly discovered which ones represented local
-state. Many of those handle the global heap, and are discussed in sections \ref{sec:storage} and \ref{sec:gc}.
-Another example is \verb|unwind_flag|, which is heavily used for Lisp control flow. Among other uses, it is
+There are plenty of global variables holding state in VSL. I discovered which ones represented local
+state.
+One example is \verb|unwind_flag|, which is heavily used for Lisp control flow. Among other uses, it is
 mutated to indicate an exception, to implement \verb|goto| and \verb|return| instructions,
-as weel as to indicate early program exit,
-among other uses. Each thread needs its own version of this global flag, otherwise they will mess each
+as well as to indicate early program exit,
+among other uses. Each thread needs its own version of this global flag, otherwise they will mess with each
 other's control flow, so I made it \emph{thread-local}.
 
 A third case is file handling. Global variables indicate which file is in use, and hold buffers for reading
 and writing. Again, I had to make all these thread-local. On the other hand, there are other variables holding
-truly global information, like pointers to and status of all the open files. At one point I was over-zealous in
+truly global information, like file handles. At one point I was over-zealous in
 my modifications and made a variable thread-local which should have stayed global. Although tt looked as if it indicated
 the direction of the current file, it turned out to be a bitmap of all the files in the system. The fact
 that VSL makes creative uses of integers for optimisation reasons effectively hides information from the type system.
@@ -526,7 +531,7 @@ contention. In my testing, these changes did not slow down ParVSL in any measura
 \label{sec:threads}
 
 At the start of the project I bolted on to ParVSL a small, broken, but very much useful feature to evaluate
-Lisp code in a new thread, as described in section \ref{sec:babythreads}. I ran a number of small tests
+Lisp code in a new thread, as demonstrated in section \ref{sec:babythreads}. I ran a number of small tests
 and found where this functionality broke the interpreter, then reworked those parts of the Lisp system
 until it successfully passed the tests. At the same time, I adapted a large suite of regression tests
 from REDUCE to ensure single-threaded behaviour was unaffected and performance didn't degrade significantly.
@@ -580,17 +585,13 @@ mutex_unlock(m);
 \end{verbatim}
 
 The mutexes are created in C++ and stored in a lock-free hashtable, each with a unique id. I used the lock-free
-hashtable implementation to allow mutex different mutexes to be accessed in parallel. I also
-make use of the \verb|GC_guard| when \verb|mutex_lock| is called. This is to ensure that the blocking
+hashtable implementation to allow different mutexes to be accessed in parallel. I also
+make use of the \verb|Gc_guard| when \verb|mutex_lock| is called. This is to ensure that the blocking
 call to lock the mutex does not cause a deadlock during garbage collection.
 
 While ParVSL users can use mutexes to protect against data races, they may not always do so
-(due to an omissions or bugs). Operations such as modifying a global or mutating a list in place
+(due to omissions or bugs). Operations such as modifying a global symbol or mutating a list in place
 may still clash.
-I could lock a mutex for any such operation to ensure safety, however such a change would add a massive overhead to ParVSL.
-I have decided to leave this issue as a responsibility to the ParVSL user.
-My choice means that the user can optimise their code to minimise lock usage, at the expense of safety.
-
 One way to ensure safety would be to lock the mutex for any such operations, but this change would add a
 too much overhead to ParVSL. With this in mind, the decision was made to leave this issue as a responsibility
 of the ParVSL user, since they can manage the trade-off between safety and lock usage minimisation.
@@ -598,43 +599,31 @@ of the ParVSL user, since they can manage the trade-off between safety and lock 
 The second primitive that I added was \emph{condition variables}. They provide a useful way for
 threads to signal each other, enabling an efficient way to perform common parallel processes such as
 waiting for a task to finish. I stored the condition variables the same way as the mutexes (i.e. in a lock-free
-hashtable) and the wait operation uses the \verb|GC_guard| to check for garbage collection.
+hashtable) and the wait operation uses the \verb|Gc_guard| to check for garbage collection.
 
 I included a few more helpful function such as \verb|hardware_threads| to check the number of hardware
-threads on the current system and \verb|yield| to allow the system to reschedule the thread, and
+threads on the current system, \verb|yield| to allow the system to reschedule the thread, and
 \verb|sleep| to pause the thread for a specified duration.
 
-These primitives are versatile enough to enable parallel algorithm, as I will showcase in Chapter \ref{ch:evaluation}.
+These primitives are versatile enough to enable parallel algorithms, as I will showcase in Chapter \ref{ch:evaluation}.
 They can also be used to implement other common threading gadgets, such as atomics and futures
 (see \ref{ssec:managethreads} and \ref{ssec:waitjob}).
 
 \section{Saving state to disk and reloading}
 \label{sec:preserve}
 
-One important feature of the language is the ability to preserve the state of the world at any
-time and save to disk. It is difficult to keep the same guarantees when multiple threads are running:
-preserving when some of the threads are running a computation is cannot be easily defined. To simplify the
-matter, I have decided that all threads have to be joined before preserving. This way, the state of
-the world is consistent and relatively easy to restore. I have modified parts of the code to write
-all the thread-local data back into global storage and then restore it when reloading. As such, the same
-file format is preserved, and I have not broken compatibility between single and multi-threaded images.
+REDUCE has an important feature which allows the user to preserve the state to disk. A \texttt{preserve} instruction can be
+used to do so, and the user is able to specify a function to run on restart. \verb|preserve| saves the entire state of the
+program, including memory and symbols.
 
-While implementing ParVSL, I introduced additional state and book-keeping to manage the extra complexity.
-When preserving in VSL, all this state is stored to a file by compressing a bit for bit copy of the
-content. Its main use is saving the results of computations and function definitions.
-The REDUCE build is stored in the same way: all the necessary files are executed and the resulting
-state is saved inside an image. Loading the image on startup of VSL will effectively start REDUCE.
-
-I wanted to keep the VSL image format in ParVSL so that compatibility between the two would not be broken.
-Of note is that preserving a running multi-threaded program would be impossible without making major changes
-to the image format and major redesign of the code. If a thread attempts to preserve while others
+It is difficult to keep the same guarantees when multiple threads are running.
+If a thread attempts to preserve while others
 are running, the contents of the final image will be non-deterministic and generally undesirable,
 even if all data races were resolved. At the same time, I found little benefit to implementing such
-a feature, as the ability to preserve is useful in retaing the results of computations, not intermediate states.
+a feature, as the ability to preserve is useful in retaining the results of computations, not intermediate states.
 Saving state to disk is used at the end of the program.
 
-My implementation of \verb|preserve| will wait
-for all spawned threads to finish running and join. Once there is only one thread running all the
+Once all threads are joined and there is only one thread running, all the
 thread-local data can be treated as global again and stored in the same locations that
 VSL uses. When restoring from an image, this data is moved back into thread-local storage. The image
 format is not affected.
