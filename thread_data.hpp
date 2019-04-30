@@ -94,7 +94,6 @@ public:
 
     /**
      * Whether the thread is in a safe state for GC.
-     * TODO VB: right now we say always true
      * */
     bool safe_memory = true;
 

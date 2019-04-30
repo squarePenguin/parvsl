@@ -83,8 +83,8 @@ causing corruption.
 When a thread is initialised, I save its own stack base in \texttt{Thread\_data}, and then also save its stack head
 when it is paused to wait for GC. All these stack ranges are scanned before I start garbage collection:
 
-\begin{figure}[H]
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 void garbage_collection() {
   for (auto thread: thread_table)
     // scan the stack from its head to base
@@ -96,10 +96,10 @@ void garbage_collection() {
       }
   ...
 }
-\end{verbatim}
+\end{minted}
 \caption{Scan the scan of each thread for pinned items before GC.}
 \label{code:parstackscan}
-\end{figure}
+\end{code}
 
 \subsection{Garbage collection locks and safety}
 \label{sec:gclock}
@@ -119,9 +119,9 @@ like waiting for user input will prevent the collection from starting.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=1\linewidth]{gcdeadlock.pdf}
-  \label{fig:gcdeadlock}
+  \includegraphics[width=0.8\linewidth]{gcdeadlock.pdf}
   \caption{Possible deadlock when starting Garbage Collection}
+  \label{fig:gcdeadlock}
 \end{figure}
 
 I implemented three mechanisms
@@ -132,7 +132,8 @@ delay the garbage collector for too long. Finally, I used the \verb|GC_guard| de
 causing a deadlock.
 
 I used the following shared global state to synchronise threads for GC:
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
   std::atomic_int num_threads(0);
 
   // number of threads ready for GC
@@ -146,7 +147,8 @@ I used the following shared global state to synchronise threads for GC:
 
   // flag indicating gc is running (or pending)
   std::atomic_bool gc_on(false);
-\end{verbatim}
+\end{minted}
+\end{code}
 
 To deal with the issue of blocking calls, I defined another state threads can be in: \emph{safe for GC}. A thread
 is in a safe state if it has saved all the information the garbage collector needs to begin (e.g stack base
@@ -156,8 +158,8 @@ state whenever they get paused for GC. However, they can also be in safe state w
 I created a special \emph{RAII} class to handle both scenarios, which I called \verb|Gc_guard|.
 The class only has a constructor and a destructor and is a way for the thread to promise it is in a safe state.
 
-\begin{figure}[H]
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 class Gc_guard {
   // Global mutex shared by Gc_guard instance.
   static std::mutex gc_guard_mutex;
@@ -185,16 +187,17 @@ class Gc_guard {
     thread_data.c_stack_head = nullptr;
   }
 };
-\end{verbatim}
+\end{minted}
 \caption{\texttt{Gc\_guard} makes a thread safe for GC.}
 \label{code:gc-guard}
-\end{figure}
+\end{code}
 
 The \verb|Gc_guard| is designed to be used before any blocking call. For example,
 to fix the issue in figure \ref{fig:gcdeadlock}, we simply need to modify the
 code in thread 2 as follows:
 
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 ...
 {
   Gc_guard gc_guard; // thread is now safe for GC
@@ -203,14 +206,15 @@ code in thread 2 as follows:
   // Gc_guard destructor will block here until GC is completed.
 }
 ...
-\end{verbatim}
+\end{minted}
+\end{code}
 
 The \texttt{Gc\_guard} class is accompanied by \texttt{Gc\_lock}. A thread trying to initiate the GC has to
 acquire a \texttt{Gc\_lock}. This lock makes further use of a mutex lock for mutual exclusion.
 Additionally, it waits until all threads are in a safe state.
 
-\begin{figure}[H]
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 class Gc_lock {
   // Global lock shared by Gc_lock instances.
   static std::mutex gc_lock_mutex;
@@ -238,10 +242,10 @@ class Gc_lock {
     gc_done_cv.notify_all();
   }
 };
-\end{verbatim}
+\end{minted}
 \caption{Garbage collection must be done under the \texttt{Gc\_lock}.}
 \label{code:gc-lock}
-\end{figure}
+\end{code}
 
 \section{Lock-free hashtable for symbol lookup}
 \label{sec:hashtable}
@@ -270,8 +274,8 @@ I have found a third approach, based on the Compare-And-Swap (CAS) instruction w
 above, while also providing a lock-free implementation. The symbol lookup table is currently implemented
 as a static array of linked lists. VSL never erases symbols, which made the lock-free implementation easier.
 
-\begin{figure}
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 std::atomic<LispObject> symbol_table[TABLE_SIZE];
 
 LispObject lookup(std::string name) {
@@ -314,17 +318,17 @@ LispObject lookup(std::string name) {
 
   return s;
 }
-\end{verbatim}
+\end{minted}
 \caption{Lock-free symbol hashtable look up implementation}
 \label{code:lockfree}
-\end{figure}
+\end{code}
 
 This approach adds no penalty to single-threaded
 code. For comparison, I also implemented the mutex lock approach and tested
-them on building Reduce (single-threaded). Table \ref{fig:lockfree} shows that the mutex
+them on building Reduce (single-threaded). Table \ref{tab:lockfree} shows that the mutex
 version is noticeably slower.
 
-\begin{figure}
+\begin{table}[H]
   \centering
   \begin{tabular}{lr}
                                & Time \\
@@ -334,9 +338,9 @@ version is noticeably slower.
   ParVSL with lock-free lookup & 1m55s \\
   ParVSL with std::string      & 2m04s
   \end{tabular}
-  \label{fig:lockfree}
   \caption{Symbol lookup effects on building Reduce}
-\end{figure}
+  \label{tab:lockfree}
+\end{table}
 
 \subsection{Impact of C++ \texttt{std::string} on performance}
 
@@ -387,7 +391,7 @@ let varName = expr1 in expr2
 
 can be implemented as:
 
-\begin{figure}
+\begin{code}
 \begin{verbatim}
 void implement_let(string varName, LispObject expr1, LispObject expr2) {
   LispObject symbol = lookup_symbol(varName);
@@ -399,7 +403,7 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
 \end{verbatim}
 \caption{Implementation of \texttt{let} in VSL.}
 \label{code:let-vsl}
-\end{figure}
+\end{code}
 
 This mechanism was not designed with concurrency in mind, and is not thread-safe.
 Many variable names are reused multiple times in a program (e.g \texttt{i, j, count}, etc).
@@ -445,9 +449,9 @@ and shallow binding is unaffected.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=1\linewidth]{symbols.pdf}
-  \label{fig:symbols}
+  \includegraphics[width=0.9\linewidth]{symbols.pdf}
   \caption{Storage of symbols in ParVSL}
+  \label{fig:symbols}
 \end{figure}
 
 In figure \ref{fig:symbols} I show a full example of how symbols are stored. The first symbol is \texttt{g}, which
@@ -464,7 +468,7 @@ described above, while providing more safety guarantees, thus leading to more ro
 it handles thread-local storage and it always restores the old value correctly in its destructor, including the
 case of exceptions. Previous code mspent time testing error flags, manually restoring the old value in every place.
 For example, the code in \ref{code:let-vsl} was rewritten as:
-\begin{figure}
+\begin{code}
 \begin{verbatim}
 void implement_let(string varName, LispObject expr1, LispObject expr2) {
   LispObject symbol = lookup_symbol(varName);
@@ -474,7 +478,7 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
 \end{verbatim}
   \caption{Implementation of \texttt{let} in ParVSL.}
   \label{code:let-parvsl}
-\end{figure}
+\end{code}
 
 \section{Data races in the interpreter}
 \label{sec:datarace}

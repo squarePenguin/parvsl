@@ -89,7 +89,7 @@ If the allocation would cross the limit, it triggers \emph{garbage collection}.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=1\linewidth]{vslalloc.pdf}
+    \includegraphics[width=0.7\linewidth]{vslalloc.pdf}
     \label{fig:vslalloc}
     \caption{Memory allocations in VSL}
 \end{figure}
@@ -156,8 +156,8 @@ Additionally, the \texttt{allocate} function will have to check for pinned items
 additional book-keeping is manageable. When building the entirety of Reduce, the number of pinned items does not reach 300.
 Considering memory used is in the order of megabytes, these pinned locations cause negligible fragmentation.
 
-\begin{figure}
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 int main() {
   ...
   // before starting the Lisp interpreter
@@ -177,10 +177,10 @@ void garbage_collection() {
     }
   ...
 }
-\end{verbatim}
+\end{minted}
 \caption{Scanning the stack for ambiguous references.}
 \label{fig:scanpinned}
-\end{figure}
+\end{code}
 
 \subsection{Running single-threaded}
 

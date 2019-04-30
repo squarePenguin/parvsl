@@ -197,14 +197,8 @@ We need two procedures: \texttt{safe\_queue\_push(sq, x)} and \texttt{safe\_queu
 wait if the queue is empty until an element is enqueued. The waiting is done using the condition variable:
 
 \begin{verbatim}
-procedure safe_queue_pop(sq);
+procedure safe_queue_pop(sq{q, m, cv});
 begin
-  scalar q, m, cv, res;
-  % unpack the safe queue
-  q := first sq;
-  m := second sq;
-  cv := third sq;
-
   mutex_lock m;
 
   while queue_empty q do
@@ -219,13 +213,8 @@ end;
 
 Now, the push method must notify the condition variable if the queue was empty.
 \begin{verbatim}
-procedure safe_queue_push(sq, x);
+procedure safe_queue_push(sq{q, m, cv}, x);
 begin
-  scalar q, m, cv;
-  q := first sq;
-  m := second sq;
-  cv := third sq;
-
   mutex_lock m;
   queue_push(q, x);
   condvar_notify_one cv;
@@ -474,14 +463,15 @@ The core, which I will refer to as RCORE, satisfies most of the dependencies
 any of the additional packages need, and only takes a fraction of the time
 to build.
 
-\begin{center}
+\begin{table}[H]
+\centering
 \begin{tabular}{lr}
  & Time (s)\\
 \hline
 RCORE & 11.83s\\
 REDUCE & 59:93s\\
 \end{tabular}
-\end{center}
+\end{table}
 
 Once good use of multi-threading would be to speed up this build time by
 arranging to build individual REDUCE packages in parallel. The RCORE base
@@ -497,7 +487,7 @@ for package_name in packages do
   build_package package_name;
 \end{verbatim}
 
-The total running time was \texttt{14.190}. Then, I used the thread pool
+The total running time was 14.1 seconds. Then, I used the thread pool
 to run these builds in parallel:
 
 \begin{verbatim}
@@ -574,7 +564,7 @@ This meant I was not able to parallelise the building of most Reduce packages.
 
 Luckily, I did manage to find at least 20 packages which would not conflict in modifying symbol flags.
 I parallelised the building of those, the built the other packages sequentially. The resulting
-running time was \texttt{8.771s}. This showed a 40\% improvement, which is very promising.
+running time was 8.7 seconds (vs 14.1s), a 40\% improvement.
 I believe that fixing the issue of shared global names in Reduce could lead to a significant improvement
 of build time when using multi-threading. The speed-up in system rebuild time will be valuable for
 developers.
@@ -597,7 +587,7 @@ The other systems successfully compiled and ran all the code.
 The more surprising result is the vast difference in performance between the platforms
 when running ParVSL vs VSL. The following are times
 
-\begin{figure}[H]
+\begin{table}
   \centering
   \begin{tabular}{lrr}
                        & VSL    & ParVSL \\
@@ -608,19 +598,20 @@ when running ParVSL vs VSL. The following are times
   \end{tabular}
   \caption{Building Reduce on different platforms in VSL vs ParVSL}
   \label{table:cross-platform-reduce}
-\end{figure}
+\end{table}
 
 
 \subsection{Thread-local access performance}
 
 Once observed, this can be verified by trying a trivial test program just referencing a
-thread-local variable in a loop. Figure \ref{fig:thread-local}
+thread-local variable in a loop. Figure \ref{fig:threadlocal}
 shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the other platforms.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=1\linewidth]{thread_local.png}
-\label{fig:thread-local}
+\caption{Thread local performance on different platforms.}
+\label{fig:threadlocal}
 \end{figure}
 
 The biggest culprit for the performance impact is the system's thread local storage (TLS)

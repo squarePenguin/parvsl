@@ -1,7 +1,8 @@
 \section{Cheney's algorithm}
 \label{sec:cheneycode}
 
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 // LispObject is just a pointer type
 typedef uintptr_t LispObject;
 
@@ -10,6 +11,11 @@ uintptr_t fringe1, limit1; // heap1, where all allocations happen
 uintptr_t fringe2, limit2; // heap2 used for copying GC
 
 LispObject allocate(size_t size) {
+  // skip over pinned items
+  if (is_pinned(fringe1)) {
+    fringe1 += sizeof(LispObject);
+  }
+
   if (fringe1 + size > limit1) {
     collect();
   }
@@ -29,12 +35,18 @@ LispObject copy(LispObject obj) {
   size_t len = size(obj);
 
   LispObject new_obj = static_cast<LispObject>(fringe2);
+
+  if (is_pinned(fringe2)) {
+    // skip over pinned items;
+    fringe2 += sizeof(LispObject);
+  }
+
   fringe2 += len;
   return new_obj;
 }
 
 uintptr_t copycontent(LispObject obj) {
-  for (auto ref&: forward_references(obj)) {
+  for (auto& ref: references(obj)) {
     ref = copy(ref);
   }
 
@@ -42,25 +54,41 @@ uintptr_t copycontent(LispObject obj) {
 }
 
 void collect() {
+  c_stack_head = approximate_stack_pointer();
+
+  // scan the stack from its head to base
+  for (uintptr_t s  = c_stack_head;
+                 s  < c_stack_base;
+                 s  += sizeof(LispObject))
+  if (in_heap(s)) { // check if s points to the virtual heap
+    set_pinned(s); // found an ambiguous root
+  }
+
+  // remember the starting point of copied locations
+  uintptr_t start_fringe2 = fringe2;
+
   // First we copy over the root set, which includes symbols.
   for (LispObject& symbol: symbols_table) {
     symbol = copy(symbol);
   }
+  ...
 
-  uintptr_t s = heap2;
-  while (fringe2 < fringe2) {
+  uintptr_t s = start_fringe2;
+  while (s < fringe2);
     s = copycontent(static_cast<LispObject>(s));
   }
 
   swap(fringe1, fringe2);
   swap(limit1, limit2);
 }
-\end{verbatim}
+\end{minted}
+\end{code}
 
 \section{\texttt{Gc\_guard} and \texttt{Gc\_lock}}
 \label{sec:gclock-code}
 
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 namespace {
 std::atomic_int num_threads(0);
 std::atomic_int paused_threads(0);
@@ -73,81 +101,153 @@ std::mutex gc_lock_mutex;
 }
 
 class Gc_guard {
+private:
+  // Global mutex shared by Gc_guard instance.
+  static std::mutex gc_guard_mutex;
+
 public:
-    Gc_guard() {
-        int stack_var = 0;
-        td.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+  Gc_guard() {
+    td.c_stack_head = approximate_stack_pointer();
 
-        paused_threads += 1;
-        gc_waitall.notify_one();
-    }
+    // This thread is now safe for GC.
+    safe_threads += 1;
 
-    ~Gc_guard() {
-        std::unique_lock<std::mutex> lock(gc_guard_mutex);
-        gc_cv.wait(lock, []() { return !gc_on; });
-        paused_threads -= 1;
+    // Notify the thread waiting for garbage collection.
+    gc_wait_cv.notify_one();
+  }
 
-        td.C_stackhead = nullptr;
-    }
+  ~Gc_guard() {
+    std::unique_lock<std::mutex> lock(gc_guard_mutex);
+
+    // Wait until GC is done.
+    gc_done_cv.wait(lock, []() { return !gc_on; });
+
+    // Thread is not longer safe for GC.
+    safe_threads -= 1;
+
+    // Thread stack head will be invalidated when execution resumes.
+    thread_data.c_stack_head = nullptr;
+  }
 };
 
 class Gc_lock {
 private:
-    std::unique_lock<std::mutex> lock;
+  // Global lock shared by Gc_lock instances.
+  static std::mutex gc_lock_mutex;
+
+  // Prevents other threads from acquiring the Gc_lock.
+  std::unique_lock<std::mutex> lock;
+
+  // The GC thread needs to be in a safe state as well.
+  Gc_guard gc_guard;
 
 public:
-    Gc_lock() : lock(gc_lock_mutex) {
-        int stack_var = 0;
-        td.C_stackhead = (LispObject *)((intptr_t)&stack_var & -sizeof(LispObject));
+  // Initialise the lock and guard before Gc_lock is constructed.
+  Gc_lock() : lock(gc_lock_mutex), gc_guard() {
+    gc_on = true;
 
-        gc_on = true;
+    // Wait until all threads are in a safe state.
+    gc_wait_cv.wait(lock, []() {
+      return paused_threads == num_threads;
+    });
+  }
 
-        paused_threads += 1;
-        gc_waitall.wait(lock, []() {
-            return paused_threads == num_threads; });
-    }
+  ~Gc_lock() {
+    gc_on = false;
 
-    ~Gc_lock() {
-        paused_threads -= 1;
-        gc_on = false;
-        td.C_stackhead = nullptr;
-        gc_cv.notify_all();
-    }
+    // Notify all threads that GC is over.
+    gc_done_cv.notify_all();
+  }
 };
-\end{verbatim}
+\end{minted}
+\end{code}
+
+\section{Thread-local data}
+\label{sec:thread-local-code}
+
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
+class Thread_data {
+public:
+    static constexpr int SEGMENT_SIZE = 0x10000; // 64KB per segment
+    // use these as the segment we can write on.
+    uintptr_t segment_fringe = -1;
+    uintptr_t segment_limit = 0;
+    int id; // thread id
+    LispObject *c_stack_base;
+    LispObject *c_stack_head = nullptr;
+
+    LispObject work1 = NULLATOM;
+    LispObject work2 = NULLATOM;
+    LispObject cursym = NULLATOM;
+
+    char boffo[BOFFO_SIZE+4];
+    size_t boffop;
+
+    int lispin = STDIN, lispout = STDOUT;
+    std::string file_buffer[MAX_LISPFILES];
+
+    char input_line[INPUT_LINE_SIZE];
+    size_t input_ptr = 0, input_max = 0;
+
+    char printbuffer[32];
+
+    int curchar = '\n', symtype = 0;
+
+    unsigned int unwindflag = unwindNONE;
+    int backtraceflag = -1;
+
+    // I suspect that linelength and linepos need to be maintained
+    // independently for each output stream. At present that is not
+    // done. And also blank_pending.
+    int linelength = 80, linepos = 0, printflags = printESCAPES;
+    bool blank_pending = false;
+
+    /**
+     * Whether the thread is in a safe state for GC.
+     * */
+    bool safe_memory = true;
+};
+
+thread_local Thread_data thread_data;
+\end{minted}
+\end{code}
 
 \section{Shallow binding}
 \label{sec:shallowbind-code}
 
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 class Shallow_bind {
-    private:
-        int loc;
-        LispObject save;
-    public:
-        Shallow_bind(LispObject x, LispObject tval) {
-            if (is_global(x)) {
-                error1("shallow bind global", qpname(x));
-            }
+private:
+  int loc;
+  LispObject save;
+public:
+  Shallow_bind(LispObject x, LispObject tval) {
+    if (is_global(x)) {
+      error1("shallow bind global", qpname(x));
+    }
 
-            loc = qfixnum(qvalue(x));
-            LispObject& sv = td.local_symbol(loc);
-            save = sv;
-            sv = tval;
-        }
+    loc = qfixnum(qvalue(x));
+    LispObject& sv = td.local_symbol(loc);
+    save = sv;
+    sv = tval;
+  }
 
-        Shallow_bind(Shallow_bind&&) noexcept = default;
+  Shallow_bind(Shallow_bind&&) noexcept = default;
 
-        ~Shallow_bind() {
-            td.local_symbol(loc) = save;
-        }
-    };
-\end{verbatim}
+  ~Shallow_bind() {
+    td.local_symbol(loc) = save;
+  }
+};
+\end{minted}
+\end{code}
 
 \section{Lock free symbol lookup}
 \label{sec:lockfree-code}
 
-\begin{verbatim}
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
 /**
 * [search_bucket] searches a particular bucket in the symbol table
 * It can search the whole bucket, or down to a location.
@@ -200,295 +300,358 @@ LispObject lookup(const char *name, size_t len, int flag)
     // successfully inserted the symbol in the hash, can return it.
     return sym;
 }
-\end{verbatim}
+\end{minted}
+\end{code}
 
+\section{Thread-local symbols}
+\label{sec:threadlocal-code}
+
+\begin{code}
+\begin{minted}[breaklines,mathescape]{c++}
+std::atomic_int num_symbols(0);
+
+thread_local std::vector<LispObject> fluid_locals;
+std::vector<LispObject> fluid_globals; // the global values
+
+/**
+ * Returns a shared id to index the symbol.
+ * Used internally to identify the same symbol name on multiple
+ * threads. This location will be an index into the actual storage array,
+ * whether it's global or thread_local, and will be stored inside
+ * qvalue(x).
+ * */
+int allocate_symbol() {
+  std::unique_lock<std::mutex> lock(alloc_symbol_mutex);
+  int loc = num_symbols;
+  num_symbols += 1;
+  fluid_globals.resize(num_symbols, undefined);
+  return loc;
+}
+
+/**
+* [local_symbol] gets the thread local symbol. may return undefined.
+* Note, thread_local symbols are only lazily resised. Accessing a local
+* symbol directly is dangerous. You need to use this function to ensure the
+* local symbol is at least allocated.
+*/
+LispObject& local_symbol(int loc) {
+  if (num_symbols > (int)fluid_locals.size()) {
+    fluid_locals.resize(num_symbols, undefined);
+  }
+
+  return fluid_locals[loc];
+}
+
+/**
+* [symval] returns the real current value of the symbol on the current thread.
+* It handles, globals, fluid globals, fluid locals and locals.
+* should be used to get the true symbol, instead of qvalue(s).
+*/
+LispObject& par_value(LispObject s) {
+  if (is_global(s)) {
+    return qvalue(s);
+  }
+
+  int loc = qfixnum(qvalue(s));
+  LispObject& res = td.local_symbol(loc);
+  // Here I assume undefined is a sort of "reserved value", meaning it can only exist
+  // when the object is not shallow_bound. This helps me distinguish between fluids that
+  // are actually global and those that have been bound.
+  // When the local value is undefined, I refer to the global value.
+  if (is_fluid(s) && res == undefined) {
+    return fluid_globals[loc];
+  }
+  // This is either local or locally bound fluid
+  return res;
+}
+\end{minted}
+\end{code}
 
 \section{Thread pool}
 \label{sec:threadpool-code}
 
-\begin{verbatim}
+\begin{code}
+\begin{minted}{text}
 lisp;
 
 symbolic procedure queue;
-    {nil, nil};
+  {nil, nil};
 
 symbolic procedure q_push(q, x);
-    begin scalar back, newback;
-        back := second q;
-        newback := {x};
+  begin scalar back, newback;
+    back := second q;
+    newback := {x};
 
-        if null back then <<
-            rplaca(q, newback);
-            rplaca(cdr q, newback); >>
-        else <<
-            rplacd(back, newback);
-            rplaca(cdr q, newback); >>;
-        return q;
-    end;
+    if null back then <<
+      rplaca(q, newback);
+      rplaca(cdr q, newback); >>
+    else <<
+      rplacd(back, newback);
+      rplaca(cdr q, newback); >>;
+    return q;
+  end;
 
 symbolic procedure q_pop(q);
-    begin scalar front, next;
-        front := first q;
-        if null front then
-            return {}
-        else <<
-            next := cdr front;
-            if null next then rplaca(cdr q, {});
-            rplaca(q, next);
-            return (first front); >>;
-    end;
+  begin scalar front, next;
+    front := first q;
+    if null front then
+      return {}
+    else <<
+      next := cdr front;
+      if null next then rplaca(cdr q, {});
+      rplaca(q, next);
+      return (first front); >>;
+  end;
 
 symbolic procedure q_empty(q);
-    null (first q);
+  null (first q);
 
 symbolic procedure atomic(val);
-    {mutex(), val};
+  {mutex(), val};
 
 symbolic procedure atomic_set(a, val);
 begin
-    scalar m;
-    m := first a;
+  scalar m;
+  m := first a;
 
-    mutexlock m;
-    rplaca(cdr a, val);
-    mutexunlock m;
+  mutexlock m;
+  rplaca(cdr a, val);
+  mutexunlock m;
 end;
 
 symbolic procedure atomic_get(a);
 begin
-    scalar m, res;
-    m := first a;
+  scalar m, res;
+  m := first a;
 
-    mutexlock m;
-    res := cadr a;
-    mutexunlock m;
-    return res;
+  mutexlock m;
+  res := cadr a;
+  mutexunlock m;
+  return res;
 end;
 
 symbolic procedure safeq();
-    {queue(), mutex(), condvar()};
+  {queue(), mutex(), condvar()};
 
 symbolic procedure safeq_push(sq, x);
-    begin scalar q, m, cv;
-        q := first sq;
-        m := second sq;
-        cv := third sq;
+begin scalar q, m, cv;
+  q := first sq;
+  m := second sq;
+  cv := third sq;
 
-        mutexlock m;
-        q_push(q, x);
-        condvar_notify_one cv;
-        mutexunlock m;
-        return sq;
-    end;
+  mutexlock m;
+  q_push(q, x);
+  condvar_notify_one cv;
+  mutexunlock m;
+  return sq;
+end;
 
 symbolic procedure safeq_pop(sq);
-    begin scalar q, m, cv, res;
-        q := first sq;
-        m := second sq;
-        cv := third sq;
-        res := nil;
+begin scalar q, m, cv, res;
+  q := first sq;
+  m := second sq;
+  cv := third sq;
+  res := nil;
 
-        mutexlock m;
-        while q_empty q do condvar_wait(cv, m);
-        res := q_pop q;
-        mutexunlock m;
-        return res;
-    end;
+  mutexlock m;
+  while q_empty q do condvar_wait(cv, m);
+  res := q_pop q;
+  mutexunlock m;
+  return res;
+end;
 
 % non-blocking call
 symbolic procedure safeq_trypop(sq);
-    begin scalar q, m, cv, res;
-        q := first sq;
-        m := second sq;
-        cv := third sq;
-        res := nil;
+begin scalar q, m, cv, res;
+  q := first sq;
+  m := second sq;
+  cv := third sq;
+  res := nil;
 
-        mutexlock m;
+  mutexlock m;
 
-        if q_empty q then
-            res := nil
-        else
-            res := {q_pop q};
+  if q_empty q then
+      res := nil
+  else
+      res := {q_pop q};
 
-        mutexunlock m;
-        return res;
-    end;
+  mutexunlock m;
+  return res;
+end;
 
 symbolic procedure safeq_empty(sq);
-    begin scalar r, m;
-        m := second sq;
-        mutexlock m;
-        r := q_empty (first sq);
-        mutexunlock m;
-        return r;
-    end;
+begin scalar r, m;
+  m := second sq;
+  mutexlock m;
+  r := q_empty (first sq);
+  mutexunlock m;
+  return r;
+end;
 
 symbolic procedure future();
-    {mutex (), nil};
+  {mutex (), nil};
 
 % blocking call to wait for future result
 symbolic procedure future_get(fut);
 begin
-    scalar m, state, cv, res;
-    m := first fut;
-    mutexlock m;
+  scalar m, state, cv, res;
+  m := first fut;
+  mutexlock m;
 
-    state := second fut;
+  state := second fut;
 
-    if state = 'done then <<
-        res := third fut;
-        mutexunlock m;
-        return res >>;
-
-    if state = 'waiting then
-        cv := third fut
-    else <<
-        cv := condvar ();
-        rplacd(fut, {'waiting, cv}) >>;
-
-
-    condvar_wait(cv, m);
-    % ASSERT: promise is fulfilled here
-
+  if state = 'done then <<
     res := third fut;
     mutexunlock m;
+    return res >>;
 
-    return res;
+  if state = 'waiting then
+    cv := third fut
+  else <<
+    cv := condvar ();
+    rplacd(fut, {'waiting, cv}) >>;
+
+
+  condvar_wait(cv, m);
+  % ASSERT: promise is fulfilled here
+
+  res := third fut;
+  mutexunlock m;
+
+  return res;
 end;
 
 % non-blocking call for future result
 % can wait on cv until timeout
 symbolic procedure future_tryget(fut, timeout);
 begin
-    scalar m, state, cv, res;
-    m := first fut;
-    mutexlock m;
+  scalar m, state, cv, res;
+  m := first fut;
+  mutexlock m;
 
-    state := second fut;
+  state := second fut;
 
-    if state = 'done then
-        res := {third fut}
-    else if timeout = 0 then
-        res := nil
+  if state = 'done then
+    res := {third fut}
+  else if timeout = 0 then
+    res := nil
+  else <<
+    if state = 'waiting then
+      cv := third fut
     else <<
-        if state = 'waiting then
-            cv := third fut
-        else <<
-            cv := condvar ();
-            rplacd(fut, {'waiting, cv}) >>;
+      cv := condvar ();
+      rplacd(fut, {'waiting, cv}) >>;
 
-        if condvar_wait_for(cv, m, timeout) then
-            res := {third fut}
-        else
-            res := nil >>;
+    if condvar_wait_for(cv, m, timeout) then
+      res := {third fut}
+    else
+      res := nil >>;
 
-    mutexunlock m;
+  mutexunlock m;
 
-    return res;
+  return res;
 end;
 
 symbolic procedure future_set(fut, value);
 begin
-    scalar m, state;
-    m := first fut;
+  scalar m, state;
+  m := first fut;
 
-    mutexlock m;
-    state := second fut;
+  mutexlock m;
+  state := second fut;
 
-    if state = 'done then
-        error("future already set");
+  if state = 'done then
+    error("future already set");
 
-    if state = 'waiting then
-        condvar_notify_all third fut;
+  if state = 'waiting then
+    condvar_notify_all third fut;
 
-    rplacd(fut, {'done, value});
-    mutexunlock m;
+  rplacd(fut, {'done, value});
+  mutexunlock m;
 end;
 
 symbolic procedure tp_runjob(tp);
 begin
-    scalar tp_q, job, resfut, f, args, res;
-    tp_q := first tp;
-    job := safeq_trypop tp_q;
-    if null job then thread_yield ()
-    else <<
-        job := first job;
-        resfut := first job;
-        f := second job;
-        args := third job;
-        res := errorset({'apply, mkquote f, mkquote args}, t);
-        future_set(resfut, res);
-    >>
+  scalar tp_q, job, resfut, f, args, res;
+  tp_q := first tp;
+  job := safeq_trypop tp_q;
+  if null job then thread_yield ()
+  else <<
+    job := first job;
+    resfut := first job;
+    f := second job;
+    args := third job;
+    res := errorset({'apply, mkquote f, mkquote args}, t);
+    future_set(resfut, res);
+  >>
 end;
 
 symbolic procedure thread_pool_job(tp_q, status);
 begin
-    scalar job, resfut, f, args, res, stat;
+  scalar job, resfut, f, args, res, stat;
+  job := safeq_trypop tp_q;
+  repeat <<
+    if job then <<
+      job := first job;
+      resfut := first job;
+      f := second job;
+      args := third job;
+      res := errorset({'apply, mkquote f, mkquote args}, t);
+      future_set(resfut, res);
+    >> else <<
+      thread_yield ();
+    >>;
     job := safeq_trypop tp_q;
-    repeat <<
-        if job then <<
-            job := first job;
-            resfut := first job;
-            f := second job;
-            args := third job;
-            res := errorset({'apply, mkquote f, mkquote args}, t);
-            future_set(resfut, res);
-        >> else <<
-            thread_yield ();
-        >>;
-        job := safeq_trypop tp_q;
-        stat := atomic_get status;
-    >> until (stat = 'kill) or (stat = 'stop and null job);
+    stat := atomic_get status;
+  >> until (stat = 'kill) or (stat = 'stop and null job);
 
-    return nil
+  return nil
 end;
 
 symbolic procedure thread_pool(numthreads);
-    begin scalar tp_q, status, threads;
-        tp_q := safeq();
-        status := atomic 'run;
-        threads := {};
-        % print "starting workers";
-        for i := 1:numthreads do threads := thread2('thread_pool_job, {tp_q, status}) . threads;
-        return {tp_q, status, threads};
-    end;
+begin scalar tp_q, status, threads;
+  tp_q := safeq();
+  status := atomic 'run;
+  threads := {};
+  for i := 1:numthreads do 
+    threads := thread2('thread_pool_job, {tp_q, status}) . threads;
+  return {tp_q, status, threads};
+end;
 
 symbolic procedure tp_addjob(tp, f, args);
 begin
-    scalar tp_q, status, resfut;
-    tp_q := first tp;
-    status := atomic_get (second tp);
+  scalar tp_q, status, resfut;
+  tp_q := first tp;
+  status := atomic_get (second tp);
 
-    if not (status = 'run) then
-        return nil
-    else <<
-        resfut := future ();
-        % print "pushing job";
-        safeq_push(tp_q, {resfut, f, args});
-        return resfut;
-    >>;
+  if not (status = 'run) then
+    return nil
+  else <<
+    resfut := future ();
+    safeq_push(tp_q, {resfut, f, args});
+    return resfut;
+  >>;
 end;
 
 symbolic procedure tp_stop(tp);
 begin
-    scalar threads;
-    atomic_set(second tp, 'stop);
-    threads := third tp;
-    for each td in threads do <<
-        jointhread td;
-    >>;
-    return nil;
+  scalar threads;
+  atomic_set(second tp, 'stop);
+  threads := third tp;
+  for each td in threads do <<
+    jointhread td;
+  >>;
+  return nil;
 end;
 
 symbolic procedure tp_kill(tp);
 begin
-    scalar threads;
-    atomic_set(second tp, 'kill);
-    threads := third tp;
-    for each td in threads do <<
-        jointhread td;
-    >>;
+  scalar threads;
+  atomic_set(second tp, 'kill);
+  threads := third tp;
+  for each td in threads do <<
+    jointhread td;
+  >>;
 end;
-
-end;
-\end{verbatim}
+\end{minted}
+\end{code}
