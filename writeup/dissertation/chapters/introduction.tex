@@ -2,39 +2,39 @@ The motivation for this project is to explore the implementation of multi-thread
 capabilities within a working compiler and assess the benefits and trade-offs it brings
 to a real-world application with a large, actively-developed body of code.
 
-\section{Reduce}
+\section{REDUCE}
 
-Reduce \cite{reduce} is a portable general-purpose computer algebra system (CAS). It enables symbolic
+REDUCE \cite{reduce} is a portable general-purpose Computer Algebra System (CAS). It enables symbolic
 manipulation of mathematical expressions and provides a wide range of algorithms
 to solve problems spanning many fields, with arbitrary precision numerical approximation.
 It has a friendly user interface and can display maths and generate graphics.
 
-Reduce is one of a few open-source general-purpose CAS programs, alongside Maxima and Axiom.
+REDUCE is one of a few open-source general-purpose CAS programs, alongside Maxima and Axiom.
 The three projects are all built on top of different Lisp kernels. At the time of this writing,
-none of these projects have any multi-threaded capabilities. My aim is to remove this limitation
-for Reduce. The project is using its own Lisp dialect which is similar to Common Lisp, but has its
-own design and set of capabilities.
+none of these projects have any multi-threading capabilities. My aim is to remove this limitation
+for REDUCE. The project is using its own Lisp dialect called REDUCE Lisp, or RLISP,
+which is similar to Common Lisp, but has its own design and set of capabilities.
 
 \section{VSL}
 
-There are multiple implementations of the Lisp backend Reduce uses: PSL, CSL and VSL.
+There are multiple implementations of the Lisp backend REDUCE uses: PSL, CSL and VSL.
 Visual Standard Lisp (VSL) is an interpreted language written
-in \texttt{C}. It is fully capable of building the entirety of Reduce, supports all the major
+in \texttt{C}. It is fully capable of building the entirety of REDUCE, supports all the major
 platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
 of being interpreted. It exists to provide a test-bed for ideas that may later move to the much larger,
 compiled CSL version.
 
 \section{Benefits of multithreading}
-The idea of using parallel computing to speed up computer algebra computing has come
-up in research papers for many years \cite{GabrielQML,multilisp,multilisp-implementation},
+The idea of using parallel computing to speed up computer algebra has come
+up in research papers for many years \cite{algebra-parallelism},
 but much of the activity
 pre-dates the now ubiquitous multi-core CPUs used in modern computers and the amount of memory
-which they now provide. Moreover, advancements in single-core CPU performance has slowed down
+which they now provide. Moreover, advancements in single-core CPU performance have slowed down
 significantly, as clock speeds have stagnated and even gone down in recent years. The biggest
 area of improvement in these new CPUs is their core count and number of hardware threads.
-Therefore, binding the performance of Reduce to single-threaded performance is limit the speed gains
+Therefore, binding the performance of REDUCE to single-threaded performance limits the speed gains
 brought by new hardware. This project involves proving the infrastructure
-Reduce will need to take full advantage of today's hardware.
+REDUCE will need to take full advantage of today's hardware.
 
 \section{Code examples}
 
@@ -42,13 +42,13 @@ To help explain the concepts that I introduce, code fragments will be used to sh
 These fragments will be a simplification of the original code, in order to remove the need
 for context within the rest of the codebase. To that end, the names and function interfaces
 are different from the real implementation. More complete versions of the code fragments
-I showcase can be found in the Appendix \ref{ch:appendix-code}.
+I showcase can be found in Appendix \ref{ch:appendix-code}.
 
 For examples relating to the implementation of the interpreter, I will be using C++.
-For work related to my evaluation, I will be showcasing the ParVSL language, which is a type
-of Lisp. Reduce implements an additional language running on top of Lisp, called RLisp.
-The RLisp examples are kept short and as readable as possible.
-Consequently, when the syntax of the language gets in the way of readability,
+For work related to my evaluation, I will be showcasing the ParVSL language, which is a
+Lisp variant. I also used an additional language running on top of Lisp, called RLisp,
+in order to code for REDUCE.
+When the syntax of the language gets in the way of readability,
 pseudo-code is used to aid the explanations.
 
 \section{Achievements}
@@ -56,11 +56,11 @@ pseudo-code is used to aid the explanations.
 
 My project involved modifications to several thousand lines of C/C++ code, upgrading it to
 make better idiomatic use of C++ as well as adding concurrency support. It has also used raw
-Lisp code in bracket notation, along with the rebuilding of Reduce, which starts off as Lisp,
-but is almost entirely written in its own language. Reduce as a whole is around half a million
+Lisp code in bracket notation, along with the rebuilding of REDUCE, which starts off as Lisp,
+but is almost entirely written in its own language. REDUCE as a whole is around half a million
 lines of code and my system fully supports it. I have also coded demonstration programs to
-show how, given the thread support I now provide it with, it can take advantage of modern
-multi-core processors to improve performance. The existing set of Reduce test scripts have provided me
+show how it can take advantage of modern multi-core processors to improve performance,
+given the thread support I now provide it with. The existing set of REDUCE test scripts have provided me
 with significant examples to demonstrate correctness and analyse the overheads of
 concurrency support on all the major platforms (Linux, Windows and MacOS), with some surprising
 differences between them.

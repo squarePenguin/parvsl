@@ -1,7 +1,7 @@
 To evaluate the project, I worked with existing REDUCE code for regression testing
 but also wrote my own tests in both plain Lisp and REDUCE RLisp code.
 
-\section{Single-threaded building of Reduce}
+\section{Single-threaded building of REDUCE}
 
 My project involved modifying a large body of code and it was almost guaranteed
 that I would introduce bugs during development. Since the work involves a complex,
@@ -46,18 +46,18 @@ as extensively until I started working on it. These issues were mostly minor. So
 were not present at all and needed to be reintroduced, for example system functions to get
 working directory. There were subtle bugs such as wrong
 hard-coded strings and integers. There were multiple issues with floating point manipulation,
-again caused by simple human errors (e.g negated condition being checked). Switching between
+again caused by simple human errors (e.g. negated condition being checked). Switching between
 output files would lose buffer content. In one place, a value on the heap was not marked
 properly, meaning that if a garbage collection was triggered at the right time, it would
 be collected prematurely, causing corruption. All these bugs have since been fixed.
 
-Reduce itself showed multiple cases of sloppy code. Most of the time, the issue was using
+REDUCE itself showed multiple cases of sloppy code. Most of the time, the issue was using
 a global symbol with a very common name liberally and then behaving weirdly
 on clashes. The most striking example was when the RLisp interpreter used the symbol \texttt{x}
 parsing, meaning any tests using the variable \texttt{x} would have the value be a self-reference
 to code. Another instance was a name clash in the error handling function, leading to failure
 to contain exceptions. While these two cases have been manually fixed, there are many other
-such potential problems within the Reduce packages which will have to be cleaned up.
+such potential problems within the REDUCE packages which will have to be cleaned up.
 % Identifying when odd behaviour was down to my code or whether it revealed
 
 \subsection{Benchmarks}
@@ -154,7 +154,7 @@ They now act as regression tests for ParVSL.
 
 \section{Thread pool}
 
-Once I showed  that ParVSL could run both single-thread code (i.e build REDUCE) and pass some
+Once I showed  that ParVSL could run both single-thread code (i.e. build REDUCE) and pass some
 simple tests for multi-threading, I was able to write more complex code using threads.
 
 Spawning hardware threads directly to parallelise each task can be undesirable. The user has
@@ -372,11 +372,11 @@ Now, workers can start (and finish) other jobs while waiting and will not deadlo
 \subsection{Results}
 
 To test the correctness, I simply generate a list of random numbers, then compare the output
-to that of the sorting function built in Reduce. Afterwards, I could test for performance.
+to that of the sorting function built in REDUCE. Afterwards, I could test for performance.
 I first tuned the parallel version to use the sequential algorithm once if the list is too
 small. I found on my machine that around parallelisation became useful once the size of
 the list was larger than 1000, and I tuned it to a threshold of 5000. Without this optimisation
-the parallel version would spawn too many jobs (\(O(N)\) to be more exact) and the time book-keeping
+the parallel version would spawn too many jobs (as many as \(O(N)\)) and the time book-keeping
 would completely eliminate any benefit of multi-threading. Indeed, it runs an order of magnitude
 slower on large lists (over 1000 elements).
 
@@ -412,11 +412,11 @@ At the same time, it is relatively easy to split the multiplication
 algorithm into multiple independent tasks. All the well-known
 multiplication algorithms (i.e. the naive quadratic solution, Karatsuba,
 and using Fast Fourier Transform) have parallel versions \cite[Chapter~30.3]{cormen}.
-The latter are mostly used for multiplying numbers, and Reduce
+The latter are mostly used for multiplying numbers, and REDUCE
 uses the quadratic algorithm as it is better suited to sparse and
 more general multi-variate polynomials.
 
-I wrote a parallel implementation of polynomial multiplication in Reduce
+I wrote a parallel implementation of polynomial multiplication in REDUCE
 and ran it in ParVSL. It splits the polynomials into odd and even
 terms and thereby splits the problem into four sub-tasks. These can be
 easily computed in separate threads, then joined to obtain the
@@ -461,7 +461,7 @@ more general cases.
 % polynomial multiplication is such a fundamental operation in algebra
 % that being able to speed it up could really help.
 
-\section{Parallel building of Reduce}
+\section{Parallel building of REDUCE}
 
 The entirety of REDUCE is made up of RLISP code, which VSL and ParVSL
 can simply run to build it. The process can be separated into two steps:
@@ -518,13 +518,13 @@ packages use global symbols with common names for storage. Any global
 symbol used by a package should use a globally unique name, usually by prepending
 the package name to the symbol name. Unfortunately, the writers of these packages
 didn't always follow good practices. It is outside the scope of this project to
-fix all Reduce packages, however I tried to work my way around that.
+fix all REDUCE packages, however I tried to work my way around that.
 
 I modified the ParVSL code so that when I enable a compilation flag it tracks all
 reads and writes to global values of fluid or global symbols. Then, I wrote a python
 script which builds each package individually with the build flag on and saved those
 accessed to a file. The script then computed all conflicts between packages. The script
-then generated a Reduce test file which would remove all global access on building the packages:
+then generated a REDUCE test file which would remove all global access on building the packages:
 
 \begin{verbatim}
 % Force conflicting symbols to be fluid.
@@ -553,7 +553,7 @@ end;
 The generated file makes use of the dynamic scoping mechanism in Lisp. When building the package
 with \texttt{build\_package\_safe}, all accesses to those global symbols will instead access locally
 bound ones. This removes all conflicts between symbol accesses, without needing to modify code in
-the Reduce packages themselves. It also illustrates how in the future Reduce will need modification
+the REDUCE packages themselves. It also illustrates how in the future REDUCE will need modification
 to cope with concurrency.
 
 The second issue I found was that any package can change the access specifier of a global symbol.
@@ -563,16 +563,16 @@ ParVSL interpreter. Effectively, I disabled globals altogether, and made every g
 fluid instead. Fluids allow all the functionality of globals, plus they will allow other threads
 to locally bind the name.
 
-Finally, I discovered an inherent design flaw in the Lisp language used by Reduce which I could not
-fix. A feature in Reduce allows the user to set flags to a symbol. These flags always affect the global
-symbol. Many Reduce packages use this feature, adding, retrieving and removing flags from shared
-global symbol names. I could not find a way to around this issue without modifying all of Reduce.
-This meant I was not able to parallelise the building of most Reduce packages.
+Finally, I discovered an inherent design flaw in the Lisp language used by REDUCE which I could not
+fix. A feature in REDUCE allows the user to set flags to a symbol. These flags always affect the global
+symbol. Many REDUCE packages use this feature, adding, retrieving and removing flags from shared
+global symbol names. I could not find a way to around this issue without modifying all of REDUCE.
+This meant I was not able to parallelise the building of most REDUCE packages.
 
 Luckily, I did manage to find at least 20 packages which would not conflict in modifying symbol flags.
 I parallelised the building of those, the built the other packages sequentially. The resulting
 running time was 8.7 seconds (vs 14.1s), a 40\% improvement.
-I believe that fixing the issue of shared global names in Reduce could lead to a significant improvement
+I believe that fixing the issue of shared global names in REDUCE could lead to a significant improvement
 of build time when using multi-threading. The speed-up in system rebuild time will be valuable for
 developers.
 
@@ -603,7 +603,7 @@ when running ParVSL vs VSL. The following are times
   x86 MacOS            & 1m19s &  3m56s  \\
   x86 Windows (Cygwin) & 1m03s & 10m15s \\
   \end{tabular}
-  \caption{Building Reduce on different platforms in VSL vs ParVSL}
+  \caption{Building REDUCE on different platforms in VSL vs ParVSL}
   \label{table:cross-platform-reduce}
 \end{table}
 
@@ -622,7 +622,7 @@ shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the 
 \end{figure}
 
 The biggest culprit for the performance impact is the system's thread local storage (TLS)
-mechanism. In the best case (i.e on x86 Linux) a thread-local variable is accessed
+mechanism. In the best case (i.e. on x86 Linux) a thread-local variable is accessed
 similarly to a regular static one. One would hope that Cygwin developers will
 implement a more efficient TLS in the future. Currently, the only two platforms
 with a negligible TLS slowdown are Linux and (native) Windows.

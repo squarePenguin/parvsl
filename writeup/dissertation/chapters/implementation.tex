@@ -48,7 +48,7 @@ I carefully modified all the areas where allocations are preformed to use the se
 instead of the global fringe. The global fringe is only moved to assign a new segment. Writes
 to the global fringe are executed under a mutex lock, while the segment fringe is a thread local
 variable accessed without any locks. If the requested memory is larger than the segment size
-(e.g a large string or number), it is allocated outside any segment, using the global fringe.
+(e.g. a large string or number), it is allocated outside any segment, using the global fringe.
 
 \begin{figure}[H]
   \centering
@@ -67,10 +67,10 @@ total memory, I have found a good compromise for segments of a few kilobytes eac
 
 \section{Garbage collection}
 \label{sec:gc}
-The \emph{garbage collector} (GC) has to account for the state of all threads. These threads have to be synchronised
+The garbage collector has to account for the state of all threads. These threads have to be synchronised
 and in a \emph{safe} state to initiate the GC. They must also be included in the calculation of the root set.
 
-I store all the thread-local information required for synchronisation in a class called \texttt{Thread\_data}. This
+I store all the thread-local information required for synchronisation in a class called \verb|Thread_data|. This
 class is populated when a thread is started and updated before and after a GC cycle. All threads register
 themselves in a global thread table at start-up. The thread starting the GC can use this table to check the status
 of the other threads.
@@ -151,7 +151,7 @@ I used the following shared global state to synchronise threads for GC:
 \end{code}
 
 To deal with the issue of blocking calls, I defined another state threads can be in: \emph{safe for GC}. A thread
-is in a safe state if it has saved all the information the garbage collector needs to begin (e.g stack base
+is in a safe state if it has saved all the information the garbage collector needs to begin (e.g. stack base
 and stack head) and guarantees not to run any code that invalidates the garbage collection. Threads go into a safe
 state whenever they get paused for GC. However, they can also be in safe state when waiting for a blocking call.
 
@@ -325,7 +325,7 @@ LispObject lookup(std::string name) {
 
 This approach adds no penalty to single-threaded
 code. For comparison, I also implemented the mutex lock approach and tested
-them on building Reduce (single-threaded). Table \ref{tab:lockfree} shows that the mutex
+them on building REDUCE (single-threaded). Table \ref{tab:lockfree} shows that the mutex
 version is noticeably slower.
 
 \begin{table}[H]
@@ -338,7 +338,7 @@ version is noticeably slower.
   ParVSL with lock-free lookup & 1m55s \\
   ParVSL with std::string      & 2m04s
   \end{tabular}
-  \caption{Symbol lookup effects on building Reduce}
+  \caption{Symbol lookup effects on building REDUCE}
   \label{tab:lockfree}
 \end{table}
 
@@ -406,7 +406,7 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
 \end{code}
 
 This mechanism was not designed with concurrency in mind, and is not thread-safe.
-Many variable names are reused multiple times in a program (e.g \texttt{i, j, count}, etc).
+Many variable names are reused multiple times in a program (e.g. \texttt{i, j, count}, etc).
 Multiple threads binding the same variable will override each other's values.
 
 I wanted to fix this while keeping the same dynamic scoping semantics for backward compatibility.
@@ -529,7 +529,7 @@ At the start of the project I bolted on to ParVSL a small, broken, but very much
 Lisp code in a new thread, as described in section \ref{sec:babythreads}. I ran a number of small tests
 and found where this functionality broke the interpreter, then reworked those parts of the Lisp system
 until it successfully passed the tests. At the same time, I adapted a large suite of regression tests
-from Reduce to ensure single-threaded behaviour was unaffected and performance didn't degrade significantly.
+from REDUCE to ensure single-threaded behaviour was unaffected and performance didn't degrade significantly.
 Once I was confident that ParVSL could run multi-threaded I started implementing the extra functionality
 required to make parallel programs practical.
 
@@ -622,8 +622,8 @@ file format is preserved, and I have not broken compatibility between single and
 While implementing ParVSL, I introduced additional state and book-keeping to manage the extra complexity.
 When preserving in VSL, all this state is stored to a file by compressing a bit for bit copy of the
 content. Its main use is saving the results of computations and function definitions.
-The Reduce build is stored in the same way: all the necessary files are executed and the resulting
-state is saved inside an image. Loading the image on startup of VSL will effectively start Reduce.
+The REDUCE build is stored in the same way: all the necessary files are executed and the resulting
+state is saved inside an image. Loading the image on startup of VSL will effectively start REDUCE.
 
 I wanted to keep the VSL image format in ParVSL so that compatibility between the two would not be broken.
 Of note is that preserving a running multi-threaded program would be impossible without making major changes
