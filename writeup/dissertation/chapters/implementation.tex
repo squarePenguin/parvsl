@@ -125,15 +125,10 @@ like waiting for user input will prevent the collection from starting.
   \label{fig:gcdeadlock}
 \end{figure}
 
-I implemented three mechanisms
-for a thread to check for garbage collection. The first one is when it tries to allocate. Then, it
-polls the global flag in the interpreter, so that time-consuming loops which do not allocate do not
-delay the garbage collector for too long. Finall
-
 There are three scenarios in which a thread should check for GC. The first one is when it tries to allocate.
 Then, it should poll a global flag in the interpreter, so that time-consuming loops which do not allocate do not
 delay the garbage collector for too long. Finally, it must handle any blocking operation, especially
-when it depends on a signal from another thread (as in \ref{fig:gcdeadlock}).
+when it depends on a signal from another thread (as in figure \ref{fig:gcdeadlock}).
 
 I created two classes to help me synchronise threads for GC and handle all the scenarios above:
 \verb|Gc_guard| and \verb|Gc_lock|.
@@ -266,7 +261,7 @@ lookup function.
 
 To improve on that I tried to use a reader-writer lock. Reader-writer locks allow grant access
 to either a single writing thread, or all the reading threads. This would allow multiple
-threads to lookup symbols at the same time. However, as soon as one one thread has to create a
+threads to lookup symbols at the same time. However, as soon as one thread has to create a
 symbol, all the readers have to wait for it to finish.
 
 Moreover, the lookup function is two-step: first it tries to find a symbol, then it creates one
@@ -507,7 +502,7 @@ other's control flow, so I made it \emph{thread-local}.
 A third case is file handling. Global variables indicate which file is in use, and hold buffers for reading
 and writing. Again, I had to make all these thread-local. On the other hand, there are other variables holding
 truly global information, like file handles. At one point I was over-zealous in
-my modifications and made a variable thread-local which should have stayed global. Although tt looked as if it indicated
+my modifications and made a variable thread-local which should have stayed global. Although it looked as if it indicated
 the direction of the current file, it turned out to be a bitmap of all the files in the system. The fact
 that VSL makes creative uses of integers for optimisation reasons effectively hides information from the type system.
 After a significant time spent debugging, I realised that the variable was used differently and the solution became apparent.

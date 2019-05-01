@@ -168,7 +168,7 @@ stack and operating system handle,
 A thread pool is a structure for simplifying parallelism by abstracting away the interaction
 with hardware threads. A thread pool consists of a work queue for pending jobs and a number
 of worker threads which execute those jobs as they become available. The number of workers
-can kept low so that the program never has to spawn more threads
+can be kept low so that the program never has to spawn more threads
 than the operating system limit, and threads can be reused. Once a thread pool is created,
 the user simply needs to submit jobs and they will be automatically parallelised.
 
@@ -345,7 +345,7 @@ procedure parallel_merge_sort(list):
 
 We use the thread pool implemented above to achieve parallelism. Without the thread pool, we would
 have to manually manage threads. Using threads here would have resulted in a new thread spawned for
-each element in the array. The function would already oversubscribe threads for lists as small as
+each element in the list. The function would already oversubscribe threads for lists as small as
 100 elements. The thread pool only uses a constant number of threads.
 
 \subsection{Dealing with tasks waiting for other tasks}
@@ -356,7 +356,7 @@ state is does not handle tasks enqueuing and then waiting for other tasks. In th
 will end up waiting for the future (\verb|sorted_xs_future|) without doing any work.
 
 To fix this, I have added extra functionality to the thread pool. An extra procedure \verb|thread_pool_run_job|
-allows can be called by any thread to run on job on the queue. This procedure is implemented similarly
+can be called by any thread to run one job from the queue. This procedure is implemented similarly
 to the worker function, except it only takes at most one job (or none if the queue is empty) from the
 queue instead of looping.
 This function should be called by any job which is waiting for another job in the thread pool.

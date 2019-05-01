@@ -59,7 +59,7 @@ total running time of the program.
 In a CAS program the user is most likely to care about throughput, i.e. for computing the outputs of large
 problem sizes as quickly as possible. The program is single-user and has a simple interface. The only case
 for low latency is in the responsiveness of the graphical user interface. This is already provided by the
-operating system so our main goal is directed towards minimising throughput in the application.
+operating system so our main goal is directed towards maximising throughput in the application.
 This is particularly important when designing the garbage collector.
 
 \section{The read-eval-print loop}
@@ -120,9 +120,8 @@ collection. When the first half is full and garbage collection is triggered, all
 to the second half. Then, the two halves are swapped.
 
 To start the tracing we need to consider a \emph{root set}: a subset of objects which are known to be in use.
-One example of elements in the root set is the table of symbols which are defined at the start
-of the garbage collection.
-The stack will also contain pointers to objects and must be scanned when computing the root set.
+One example of elements in the root set is the set of symbols that are in use at the start of garbage collection.
+The stack also contains pointers to objects and must be scanned when computing the root set.
 While these are the main components of the root set, the interpreter may contain others depending on language features
 and implementation, all of which must be spotted and added.
 
