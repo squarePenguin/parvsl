@@ -320,12 +320,11 @@ LispObject yield_thread() {
 std::unordered_map<int, std::mutex> mutexes;
 int mutex_id = 0;
 
-// TODO: use RW lock
-// std::mutex mutex_mutex;
-Rw_lock mutex_rwlock;
+std::mutex mutex_mutex;
+// Rw_lock mutex_rwlock;
 
 int mutex() {
-    std::lock_guard<Rw_lock::Writer_lock> lock{mutex_rwlock.writer_lock()};
+    std::lock_guard<std::mutex> lock{mutex_mutex};
     mutex_id += 1;
 
     mutexes[mutex_id]; // easiest way to construct mutex in place
@@ -333,7 +332,7 @@ int mutex() {
 }
 
 std::mutex& get_mutex(int id) {
-    std::lock_guard<Rw_lock::Reader_lock> lock{mutex_rwlock.reader_lock()};
+    std::lock_guard<std::mutex> lock{mutex_mutex};
     return mutexes.find(id)->second;
 }
 
@@ -351,11 +350,11 @@ void mutex_unlock(int mid) {
 std::unordered_map<int, std::condition_variable> condvars;
 int condvar_id = 0;
 
-// std::mutex condvar_mutex;
-Rw_lock condvar_rwlock;
+std::mutex condvar_mutex;
+// Rw_lock condvar_rwlock;
 
 int condvar() {
-    std::lock_guard<Rw_lock::Writer_lock> lock(condvar_rwlock.writer_lock());
+    std::lock_guard<std::mutex> lock(condvar_mutex);
     condvar_id += 1;
 
     condvars[condvar_id]; // easiest way to construct condvar in place
@@ -363,7 +362,7 @@ int condvar() {
 }
 
 std::condition_variable& get_condvar(int id) {
-    std::lock_guard<Rw_lock::Reader_lock> lock(condvar_rwlock.reader_lock());
+    std::lock_guard<std::mutex> lock(condvar_mutex);
     return condvars.find(id)->second; // will crash if not found
 }
 
