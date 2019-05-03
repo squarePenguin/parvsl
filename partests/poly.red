@@ -2,43 +2,67 @@ lisp;
 global('(!~radix));
 
 symbolic procedure multiply_by_constant(n, l);
-  if null l then nil
-  else (n*car l) . multiply_by_constant(n, cdr l);
+  for each x in l collect n * x;
 
 symbolic procedure add_polys(a, b);
-    if null a then b
-    else if null b then a
-    else
-        (car a + car b) . add_polys(cdr a, cdr b);
+begin
+  scalar res;
+  res := {};
+  while a and b do <<
+    res := (car a + car b) . res;
+    a := cdr a;
+    b := cdr b;
+  >>;
+  res := reverse res;
+  if a then res := append(res, a);
+  if b then res := append(res, b);
+  return res;
+end;
 
 symbolic procedure multiply_polys(a, b);
-  if null a then nil
-  else add_polys(
-    multiply_by_constant(car a, b),
-    0 . multiply_polys(cdr a, b));
+begin
+  scalar prods, res;
+  prods := {};
+  for each x in a do
+    prods := multiply_by_constant(x, b) . prods;
+
+  res := nil;
+  for each p in prods do
+    res := add_polys(p, 0 . res);
+
+  return res;
+end;
 
 symbolic procedure interleave(a, b);
-  if null a then b
-  else (car a) . interleave(b, cdr a);
-
-symbolic procedure reverse0(l, acc);
-  if null l then acc
-  else
-    reverse0(cdr l, (car l) . acc);
-
-symbolic procedure reverse(l);
-  reverse0(l, {});
-
-symbolic procedure unwind0(l, evens, odds, is_odd);
-  if null l then {reverse evens, reverse odds}
-  else
-    if is_odd then
-      unwind0(cdr l, evens, (car l) . odds, nil)
-    else
-      unwind0(cdr l, (car l) . evens, odds, t);
+begin
+  scalar res;
+  res := {};
+  while a and b do <<
+    res := (car b) . (car a) . res;
+    a := cdr a;
+    b := cdr b;
+  >>;
+  res := reverse res;
+  if a then res := append(res, a);
+  if b then res := append(res, b);
+  return res;
+end;
 
 symbolic procedure unwind(l);
-  unwind0(l, {}, {}, nil);
+begin
+  scalar evens, odds, is_odd;
+  while l do <<
+    evens := (car l) . evens;
+    l := cdr l;
+    if l then <<
+      odds := (car l) . odds;
+      l := cdr l;
+    >>;
+  >>;
+  evens := reverse evens;
+  odds := reverse odds;
+  return {evens, odds};
+end;
 
 % like parallel, but running sequentially O(N^2)
 symbolic procedure multiply_polys2(a, b);
@@ -83,6 +107,18 @@ begin
   return interleave(add_polys(a0b0, 0 . a1b1), add_polys(a0b1, a1b0));
 end;
 
+% in "partests/thread_pool.red";
+
+symbolic procedure fut_get(fut);
+begin
+  scalar res;
+  res := future_tryget(fut, 10); % wait max 10ms
+  while null res do <<
+      tp_runjob(tp);
+      res := future_tryget(fut, 100) >>;
+  return caar res;
+end;
+
 symbolic procedure nrand(n);
 begin
     scalar res;
@@ -92,13 +128,23 @@ begin
     return res;
 end;
 
-a := {21, 5, 0, -2, 3, 6};
-b := {-1, 3, 1, 4, -5};
-c := multiply_polys(a, b);
-a := nrand 4000;
-b := nrand 3900;
-c2 := multiply_polys_par(a, b);
+% a := {21, 5, 0, -2, 3, 6};
+% b := {-1, 3, 1, 4, -5};
+% c := multiply_polys(a, b);
+% a := nrand 4000;
+% b := nrand 3900;
+% c2 := multiply_polys_par(a, b);
 % c2 := multiply_polys2(a, b);
 % cp := multiply_polys_par(a, b);
+
+symbolic procedure test(n);
+begin
+  scalar a, b, c;
+  a := nrand n;
+  b := nrand n;
+  c := multiply_polys_par3(a, b);
+end;
+
+test 5000;
 
 end;

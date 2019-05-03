@@ -12,21 +12,18 @@
 \usepackage[normalem]{ulem}
 \usepackage{amsmath}
 \usepackage{textcomp}
+\usepackage{float}
 \usepackage{amssymb}
 \usepackage{verbatim}
+\usepackage{caption}
 \usepackage{listings}
+\usepackage{minted}
 \usepackage[pdfborder={0 0 0}]{hyperref}    % turns references into hyperlinks
 \usepackage{docmute}   % only needed to allow inclusion of proposal.tex
 \usepackage[margin=25mm]{geometry}
 \date{\today}
-\title{}
-\hypersetup{
- pdfauthor={},
- pdftitle={},
- pdfkeywords={},
- pdfsubject={},
- pdfcreator={Emacs 26.2 (Org mode 9.1.14)},
- pdflang={English}}
+\title{Implementing Parallelism in Lisp for REDUCE}
+\author{Andrei-Vlad Badelita}
 
 \raggedbottom                           % try to avoid widows and orphans
 \sloppy
@@ -39,8 +36,10 @@
 
 \graphicspath{ {figures/} }
 
-\usepackage{biblatex}
+\usepackage[backend=biber,sorting=none]{biblatex}
 \addbibresource{references.bib}
+
+\newenvironment{code}{\captionsetup{type=listing}}{}
 
 % \makeglossaries
 
@@ -97,8 +96,8 @@ to be made available to the students and staff of the University.
 Candidate Number:   & \bf 2320D \\
 Project Title:      & \bf Implementing Parallelism in Lisp for REDUCE \\
 Examination:        & \bf Computer Science Tripos -- Part II, 2019  \\
-Word Count:         & \bf 11273        \\
-Final code line count: & \bf 8803        \\
+Word Count:         & \bf 11683          \\
+Final code line count: & \bf 3686        \\
 Project Originator: & Dr. Arthur C. Norman                    \\
 Supervisor:         & Dr. Arthur C. Norman                    \\
 \end{tabular}
@@ -106,11 +105,11 @@ Supervisor:         & Dr. Arthur C. Norman                    \\
 
 \subsection*{Original Aims of the Project}
 
-To implement a multi-threaded version of a Lisp interpreter. It should
+To implement a multi-threaded version of a Lisp system. It should
 allow the user to create threads and offer the primitives necessary to
 write parallel programs. The original language is able to build and
 run a complete computer algebra system, which the parallel version should
-be able replicate fully. Additionally, a number of tests and algorithms will
+be able to replicate fully. Additionally, a number of tests and algorithms need to
 be implemented to evaluate correctness and the potential benefits of parallelism.
 
 \subsection*{Work Completed}
@@ -123,6 +122,10 @@ while preserving full backwards compatibility with the original language.
 There were no special difficulties encountered.
 
 \newpage
+
+\section*{Acknowledgements}
+I would like to thank Dr Arthur Norman for all the invaluable help
+and support he offered during the making of this project.
 
 \setcounter{tocdepth}{2}
 \tableofcontents

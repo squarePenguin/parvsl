@@ -1,18 +1,20 @@
 I have successfully implemented a parallel programming language. The language ParVSL
-allows the user the use multi-threading to speed up their algorithms. It offers
-a simple shared memory model, based on mutual exclusion and condition variable,
+allows the user to employ multi-threading to speed up their algorithms. It offers
+a simple shared memory model, based on mutual exclusion and condition variables,
 without compromising on any features of the original language VSL. I have demonstrated
 this by using it to build a large software project: the REDUCE Algebra System.
-I then used to implement a thread pool and tested it on parallel algorithms with
+I then used it to implement a thread pool and tested it on parallel algorithms with
 inter-thread communication, proving a large performance gain can be obtained.
 
 Ultimately, I have shown that a Computer Algebra System can benefit from parallelism,
-and have proved that it is possible to modify REDUCE, a large real-world application
-to use effectively employ multi-threading.
+and have proved that it is possible to modify REDUCE, a large real-world application,
+to employ multi-threading effectively. Developers of REDUCE are now able to
+use ParVSL to test parallel versions of their algorithms, and some of these developers
+have already started testing my system on their workflows.
 
 \section{Cross platform performance}
 
-Historically, one of the biggest difficulty of implementing multi-threaded languages
+Historically, one of the biggest difficulties of implementing multi-threaded languages
 was providing cross platform support. I have tested ParVSL on the major platforms and
 showed that is capable of supporting them. However, I also discovered that performance
 across platforms is very inconsistent. System specific mechanisms of thread local storage
@@ -25,21 +27,32 @@ necessary.
 
 I discovered that the REDUCE Lisp language included a few historical design decisions which
 limit the potential of parallelism, namely its side-effectful nature. The functional programming
-paradigm makes it much easier to write safe high-performance multi-threaded by avoiding
+paradigm makes it much easier to write safe high-performance multi-threaded programs by avoiding
 data races. When using an imperative style, the language has to do extra work to maintain safety,
 such as using mutual exclusion on variable access, which can severely slow down any algorithm.
 memory model which allows side-effects it is much more difficult
 
-RLisp already offers many features for funtional programming.
-Modifying REDUCE to avoid side-effectful features of the language, and using it in a more
-functional would be needed for it to make good use of multi-threading.
+RLisp already offers many features for functional programming.
+Modifying REDUCE to avoid side-effectful features of the language, and using a more
+functional approach would be needed for it to make good use of multi-threading.
 
 \section{Future work}
 
-While ParVSL was fully able to support all of the REDUCE, it is an interpreted language
-which limits its performance. A large number of optimisations such is unavailable in this
+While ParVSL is able to support all of REDUCE, it is an interpreted language
+which limits its performance. A large number of optimisations are unavailable in this
 case and many checks are performed real-time, rather than statically, slowing it down.
-The next step would be to use use the lessons learned to modify VSL's compiled brother: CSL.
-CSL is compiled and already much faster than VSL, however it has a much larger code base.
+The next step would be to use use the lessons learned to modify VSL's brother: CSL.
+CSL is compiled and faster than VSL, however it has a much larger code base.
 While it would take more work, most of the lessons from writing ParVSL could be translated
-to ParCSL.
+to create a similar ParCSL.
+
+While I have focused on the implementation of the Lisp system, I did not formally define
+the semantics the new features. I talked about the trade-offs between safety and performance,
+and these need to be carefully considered when establishing the set of guarantees to
+provide for multi-threaded programs.
+
+% Retrofitting multi-threading into a system designed without parallelism in mind is bound to bring issues.
+% Many assumptions in original code were violated when running multiple threads. To find and fix all the issues
+% I had to thoroughly understand every part of the system, which took time. Multi-threaded code is non-deterministic
+% by nature so many issues would only show up in testing some times when the threads would conflict in just the
+% right way. Tested behaviour was not always be reproducible, making debugging difficult.

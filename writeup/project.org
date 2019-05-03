@@ -287,3 +287,5 @@ things not likely to be be repeatable
 retrofitting concurrency to a an existing codebase shows hidden problems
 which other languages support threads? what's the difference?
 lisp is very extensible
+
+real	1m33.735s
