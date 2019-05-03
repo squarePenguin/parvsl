@@ -15,7 +15,7 @@ symbolic;
 
 if getd 'spool then spool "babygroe.log";
 global '(numthreads);
-numthreads := 4;
+numthreads := 8;
 
 random_new_seed(17);
 
@@ -116,7 +116,7 @@ START:
     for each p in L do
         pairs := (s . p) . pairs;
 
-    pairs := randomise pairs;
+    % pairs := randomise pairs;
 
     L := s . L;
     rplaca (L_ref, L); % box it back
@@ -144,7 +144,7 @@ begin
 % stuff, and also not fussing too much with muxex protection, so really this
 % is intended at this stage as a SKETCH not as working code.
 
-    pairs := randomise pairs;
+    % pairs := randomise pairs;
 
 % And obviously I have not tried this and unvcovered the glitches!!!!!
     pairs_ref := {pairs};
@@ -547,11 +547,19 @@ babygroe {
 quit;
 
 %  VSL    babygroe 1T     0m41.077s
-%  ParVSL babygroe 1T     1m03.517s
+%  ParVSL babygroe 1T     1m03.517s  <---- ouch!
 
+%  Disabled mutex locks or any parvsl features here:
 %  VSL    pargroe2 1T     0m39.444s
 %  ParVSL pargroe2 1T     1m01.191s
-%  ParVSL pargroe2 1T mut 0m54.541s
+
+%  ParVSL pargroe2 1T     0m54.541s
 %  ParVSL pargroe2 2T     0m52.020s
 %  ParVSL pargroe2 4T     0m59.414s
-%  ParVSL pargroe2 8T     1m41.564s
+%  ParVSL pargroe2 8T     1m41.564s  <----- dunno what happened here
+%  ParVSL pargroe2 8T     0m52.946s
+
+% Fully randomised (seed 17)
+%  ParVSL pargroe2 1T     0m53.057s
+%  ParVSL pargroe2 4T     0m53.290s
+%  ParVSL pargroe2 8T     0m53.404s

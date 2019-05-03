@@ -38,14 +38,14 @@ I used asserts in various places to try to get the program to crash as soon as p
 and find the issue early. Sometimes I had to introduce a system of binary searching the
 problem by trapping the program early and checking for the state of the computation.
 I tried to find small tests which would still reproduce the issue, then use the
-\texttt{gdb} \cite{gdb} debugger to step through the code and try to find the errors. I have also used
-Valgrind \cite{valgrind}, which offers a large set of tools for detecting undefined behaviour and memory
+\texttt{gdb} debugger to step through the code and try to find the errors. I have also used
+Valgrind, which offers a large set of tools for detecting undefined behaviour and memory
 corruption.
 
 \subsection{Bugs in VSL and REDUCE}
 
 While debugging I discovered some issues in VSL. The language hadn't been tested
-as extensively until I started working on it. These issues were mostly minor. Some functions
+extensively until I started working on it. These issues were mostly minor. Some functions
 were not present at all and needed to be reintroduced, for example a system function to get
 the working directory. There were subtle bugs such as wrong
 hard-coded strings and integers. There were multiple issues with floating point manipulation,
@@ -57,8 +57,9 @@ be collected prematurely, causing corruption. All these bugs have since been fix
 REDUCE itself showed multiple cases of sloppy code. Most of the time, the issue was using
 a global symbol with a very common name liberally and then behaving weirdly
 on clashes. The most striking example was when the RLisp interpreter used the symbol \texttt{x}
-parsing, meaning any tests using the variable \texttt{x} would have the value be a self-reference
-to code. Another instance was a name clash in the error handling function, leading to failure
+during parsing, meaning any tests using the variable \texttt{x} as a free global value
+would turn it into a self-reference to code.
+Another instance was a name clash in the error handling function, leading to failure
 to contain exceptions. While these two cases have been manually fixed, there are many other
 such potential problems within the REDUCE packages which will have to be cleaned up.
 % Identifying when odd behaviour was down to my code or whether it revealed

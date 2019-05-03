@@ -1,6 +1,7 @@
 \section{ParVSL}
 I have forked the original VSL project into a new language which I named Parallel VSL, or ParVSL.
-ParVSL is fully backwards compatible with VSL and will be compared against it for performance.
+ParVSL is fully backwards compatible with VSL and will be compared against it for correctness and
+performance.
 
 VSL was a good candidate for this project because it featured a complete, working Lisp implementation while being
 small enough to be a manageable project. The entire VSL codebase consists of around 10000 lines of code, all of which
@@ -73,15 +74,19 @@ multi-threading, I pay special attention to not encumber it.
 \section{Memory allocation}
 Memory is managed by the interpreter. VSL allocates a large block of memory at the beginning,
 which it then manages as a contiguous array. When running out of memory, an extra block of the
-same size as the one in use is \verb|malloc|-ed, doubling the amount available. These blocks are
-never freed until the end of the program. They are sorted by their pointer locations,
+same size as the one in use is \verb|malloc|-ed, doubling the amount available. These blocks
+stay in use until the end of the program. They are sorted by their pointer locations,
 and behave as if they were \emph{joined} together to maintain the abstract model of contiguous memory.
 Binary search is used to identify the block containing a location.
+In figure \ref{fig:vslalloc} we can the total memory split into multiple allocated blocks.
+I will use the term \emph{heap} to refer to the entire memory available in Lisp and treat it as
+a large continuous array.
 
 The allocations are efficient, using a simple pointer, called \emph{fringe} to indicate the start of the
 free area of memory. An additional pointer \emph{limit} indicates the end of free memory. To allocate,
 VSL checks whether there is enough space, then simply increments the fringe by the specified amount.
-If the allocation would cross \verb|limit|, it triggers \emph{garbage collection}.
+If the allocation would cross \verb|limit|, it triggers \emph{garbage collection}. Note that the heap
+may also contain a small number of \emph{pinned} items which I will discuss in section \ref{sec:conservativegc}.
 
 \begin{figure}[H]
     \centering
@@ -100,7 +105,8 @@ In effect, the garbage collector is an important component of VSL and careful co
 have to be made when modifying it. First of all, any bugs in the garbage collector may leave the memory in
 an invalid state, corrupting the state of the program and leading to undefined behaviour in C. Such errors
 are also very difficult to spot and debug, as they can go undetected until the particular region of memory
-is accessed again.
+is accessed again. The VSL garbage collector only supported a single-threaded model, and so I needed to
+understand it fully ahead of adapting it.
 
 \subsection{Cheney's algorithm}
 The approach a garbage collector uses to deal with freed memory affects both its performance and memory usage.
@@ -111,7 +117,7 @@ compact and fast. When the garbage collector finds unreachable objects and elimi
 The algorithm is \emph{stop-the-world}:
 it requires pausing execution of the program until the entire collection is over.
 The alternative, an \emph{incremental} GC would use minor collections which only partially reclaim memory.
-Such an algorithm would only reduce latency at the expense of throughput and fragmentation.
+Such an algorithm would reduce latency at the expense of throughput and fragmentation.
 
 Cheney's algorithm \cite{cheney} is a way of implementing a copying garbage collection.
 The virtual \emph{heap} is divided into
@@ -136,6 +142,7 @@ For example, a list object will contain a reference to the rest of the list whic
 Please refer to appendix \ref{sec:cheneycode} for a more detailed implementation of the algorithm.
 
 \subsection{Conservative GC}
+\label{sec:conservativegc}
 
 Garbage collection may start in the middle of a large computation and the references on the stack cannot be discarded.
 One safe, but slow approach of dealing with this is to keep a virtual stack. Such a stack could be well typed and easily scanned to find
@@ -153,7 +160,8 @@ shows the process of pinning objects.
 Any location on our heap which is pointed to by an ambiguous root is pinned and not copied over.
 Additionally, the \texttt{allocate} function will have to check for pinned items on the heap and skip over them.
 When building the entirety of REDUCE, the number of pinned items does not reach 300.
-Considering memory used is in the order of megabytes, these pinned locations cause negligible fragmentation.
+Considering memory used is in the order of tens or hundreds of megabytes,
+these pinned locations cause negligible fragmentation.
 
 \begin{code}
 \begin{minted}[breaklines,mathescape]{c++}
