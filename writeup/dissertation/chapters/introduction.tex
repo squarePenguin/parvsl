@@ -18,10 +18,11 @@ Lisp dialect with an Algol-like syntax.
 \section{VSL}
 
 There are multiple implementations of the Lisp backend REDUCE uses: PSL, CSL and VSL.
-Visual Standard Lisp (VSL) is an interpreted language written
-in \texttt{C}. It is fully capable of building the entirety of REDUCE, supports all the major
-platforms and architectures, and is well optimised for speed, minimising the performance tradeoff
-of being interpreted. It exists to provide a test-bed for ideas that may later move to the much larger,
+Visual Standard Lisp (VSL) is an interpreted implementation written
+in \texttt{C}. It is capable of building the entirety of REDUCE, supports all the major
+platforms and architectures, and despite being slower than CSL or PSL it is capable of
+running realistic calculations including the full REDUCE test suite.
+It exists to provide a test-bed for ideas that may later move to the much larger,
 compiled CSL version.
 
 \section{Benefits of multithreading}

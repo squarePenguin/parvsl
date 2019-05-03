@@ -126,7 +126,7 @@ like waiting for user input will prevent the collection from starting.
 \end{figure}
 
 There are three scenarios in which a thread should check for GC. The first one is when it tries to allocate.
-Then, it should poll a global flag in the interpreter, so that time-consuming loops which do not allocate do not
+Secondly, it should poll a global flag in the interpreter, so that time-consuming loops which do not allocate do not
 delay the garbage collector for too long. Finally, it must handle any blocking operation, especially
 when it depends on a signal from another thread (as in figure \ref{fig:gcdeadlock}).
 
