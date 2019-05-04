@@ -14,9 +14,8 @@ symbolic;
 % on echo, backtrace, comp;
 
 if getd 'spool then spool "babygroe.log";
-global '(numthreads maxpairs);
+global '(numthreads pairs_tried basis_updates);
 numthreads := 4;
-maxpairs := 1000;
 
 random_new_seed(17);
 
@@ -35,18 +34,6 @@ end;
 
 % I will put the main and central and important part first!
 
-symbolic procedure take(l, n);
-begin
-  scalar res, i;
-  res := {};
-  i := 0;
-  while i < n and l do <<
-    res := car l . res;
-    l := cdr l;
-    i := i + 1;
-  >>;
-  return {res, l};
-end;
 
 % VB: This is from inside the "while loop".
 %% [groe_worker] takes
@@ -92,59 +79,67 @@ START:
         done := nil;
     >>;
 
-    workpairs := take (pairs, maxpairs);
-    pairs := second workpairs;
-
-    rplaca (pairs_ref, second workpairs);
-    workpairs := first workpairs;
-
+    p := car pairs;
+    rplaca (pairs_ref, cdr pairs);
     L := car L_ref;
+
+    pairs_tried := pairs_tried + 1;
+    prin "Thread ";
+    prin thread_id();
+    prin " taking pair ";
+    print pairs_tried;
+
     mutexunlock m;
 
-    for each p in workpairs do <<
-      % Now I have the work that I perform for each task.
-      % Create an s-polynomial.
-      s := s_poly(car p, cdr p);
+    % Now I have the work that I perform for each task.
+    % Create an s-polynomial.
+    s := s_poly(car p, cdr p);
 
-      % Reduce it be an unsynchronized current snapshot of the current draft base.
-      % note that other threads might be updating L either by adding extra
-      % polynomials or by reducing or removing some that are at present there.
-      % Here I will just use whatever I see.
-      % Note I get L here under a mutex, to avoid data race.
-      s := reduce_by(s, L);
+    % Reduce it be an unsynchronized current snapshot of the current draft base.
+    % note that other threads might be updating L either by adding extra
+    % polynomials or by reducing or removing some that are at present there.
+    % Here I will just use whatever I see.
+    % Note I get L here under a mutex, to avoid data race.
+    s := reduce_by(s, L);
 
-      % If that simple unsynchronized work reduces the s-poluynomial to zero
-      % then this work packet has completed.
-      % And in this case I have finished a work packet and can go back to the
-      % "while" loop to find another one to start.
-      % I am expecting that a large proportion of cases will have gone through
-      % the above path and do not contribute anything new to my result. But here
-      % it looks as if I might add more information!
-      if s then <<
-        mutexlock m;
-        L := car L_ref; % unbox L again as it might have changed
-        pairs := car pairs_ref;
-        L1 := L;  % because I will update L as I scan it.
+    % If that simple unsynchronized work reduces the s-poluynomial to zero
+    % then this work packet has completed.
+    % And in this case I have finished a work packet and can go back to the
+    % "while" loop to find another one to start.
+    if null s then goto START;
+    % I am expecting that a large proportion of cases will have gone through
+    % the above path and do not contribute anything new to my result. But here
+    % it looks as if I might add more information!
 
-        % Now if any polynomial in the existing base would be divisible by the new
-        % element I should remove it and all pending pairs using it. Doing this
-        % should let me end up with a miminal basis.
-        for each p in L1 do
-            if not xless(dfx p, dfx s) then <<
-                L := delete(p, L);
-                pairs := delete_pairlist(p, pairs) >>;
-        for each p in L do
-            pairs := (s . p) . pairs;
+    mutexlock m;
 
-        % pairs := randomise pairs;
+    basis_updates := basis_updates + 1;
+    prin "Thread ";
+    prin thread_id();
+    prin " updating basis ";
+    print basis_updates;
 
-        L := s . L;
-        rplaca (L_ref, L); % box it back
-        rplaca (pairs_ref, pairs);
+    L := car L_ref; % unbox L again as it might have changed
+    pairs := car pairs_ref;
+    L1 := L;  % because I will update L as I scan it.
 
-        mutexunlock m;
-      >>;
-    >>;
+    % Now if any polynomial in the existing base would be divisible by the new
+    % element I should remove it and all pending pairs using it. Doing this
+    % should let me end up with a miminal basis.
+    for each p in L1 do
+        if not xless(dfx p, dfx s) then <<
+            L := delete(p, L);
+            pairs := delete_pairlist(p, pairs) >>;
+    for each p in L do
+        pairs := (s . p) . pairs;
+
+    % pairs := randomise pairs;
+
+    L := s . L;
+    rplaca (L_ref, L); % box it back
+    rplaca (pairs_ref, pairs);
+
+    mutexunlock m;
     goto START;
 
 FINISH:
@@ -167,6 +162,8 @@ begin
 % is intended at this stage as a SKETCH not as working code.
 
     % pairs := randomise pairs;
+    pairs_tried := 0;
+    basis_updates := 0;
 
 % And obviously I have not tried this and unvcovered the glitches!!!!!
     pairs_ref := {pairs};
@@ -404,23 +401,36 @@ symbolic procedure prefix_to_df w;
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 symbolic procedure xallzero v;
-  if null v then t
-  else if not zerop car v then nil
-  else xallzero cdr v;
+begin
+  scalar res := t;
+  while v and res do <<
+    if not zerop car v then
+      res := nil;
+    v := cdr v;
+  >>;
+  return res;
+end;
 
 symbolic procedure prinxvec(v, names);
-  if null v then nil
-  else if zerop car v then prinxvec(cdr v, cdr names)
-  else << princ " ";
-          princ car names;
-          if not onep car v then <<
-            princ "^";
-            princ car v >>;
-          prinxvec(cdr v, cdr names) >>;
+begin
+  while v do <<
+    if not (zerop car v) then <<
+      princ " ";
+      princ car names;
+      if not onep car v then <<
+        princ "^";
+        princ car v
+      >>;
+    >>;
+    v := cdr v;
+    names := cdr names;
+  >>;
+  return nil;
+end;
 
 symbolic procedure dfprin1 u;
-  if null u then terpri()
-  else <<
+begin
+  while u do <<
     if dflc u = '(1 . 1) then <<
        princ " + ";
        if xallzero dfx u then princ "1"
@@ -434,7 +444,10 @@ symbolic procedure dfprin1 u;
        princ abs qnum dflc u;
        if qden dflc u neq 1 then << princ "/"; princ qden dflc u >>;
        prinxvec(dfx u, varnames) >>;
-    dfprin1 dfred u >>;
+    u := dfred u;
+  >>;
+  terpri();
+end;
 
 symbolic procedure dfprin u;
   << if null u then print 0 else dfprin1 u >>;
@@ -447,9 +460,20 @@ symbolic procedure dfprin u;
 % as L2.
 
 symbolic procedure xtrax(L1, L2);
-  if null L1 then nil
-  else if car L1 < car L2 then (car L2 - car L1) . xtrax(cdr L1, cdr L2)
-  else 0 . xtrax(cdr L1, cdr L2);
+begin
+  scalar res := {};
+
+  while L1 do <<
+    if car L1 < car L2 then
+      res := (car L2 - car L1) . res
+    else
+      res := 0 . res;
+    L1 := cdr L1;
+    L2 := cdr L2;
+  >>;
+
+  return reverse res;
+end;
 
 symbolic procedure s_poly(u, v);
   begin
@@ -465,13 +489,28 @@ symbolic procedure s_poly(u, v);
 
 % If any value in L1 is less then the one in L2 return true
 symbolic procedure xless(L1, L2);
-  if null L1 then nil
-  else if car L1 < car L2 then t
-  else xless(cdr L1, cdr L2);
+begin
+  scalar res := nil;
+  while L1 and not res do <<
+    res := car L1 < car L2;
+    L1 := cdr L1;
+    L2 := cdr L2;
+  >>;
+  return res;
+end;
 
 symbolic procedure xdiff(L1, L2);
-  if null L1 then nil
-  else (car L1 - car L2) . xdiff(cdr L1, cdr L2);
+begin
+  scalar res := {};
+
+  while L1 do <<
+    res := (car L1 - car L2) . res;
+    L1 := cdr L1;
+    L2 := cdr L2;
+  >>;
+
+  return reverse res;
+end;
 
 symbolic procedure dfremainder(u, v);
   begin
@@ -509,9 +548,13 @@ symbolic procedure reduce_by(S, L);
   end;
 
 symbolic procedure delete_pairlist(p, L);
-  if null L then nil
-  else if p = caar L or p = cdar L then delete_pairlist(p, cdr L)
-  else car L . delete_pairlist(p, cdr L);
+begin
+  scalar res := {};
+  for each x in L do
+    if not (p = car x) and not (p = cdr x) then
+      res := x . res;
+  return reverse res;
+end;
 
 % Now partially hook this onto Reduce.
 
@@ -544,10 +587,10 @@ on time;
 
 lisp << !*noisy := t >>;
 
-babygroe {x*y-x, x^2-y};
+% babygroe {x*y-x, x^2-y};
 
-babygroe {x^3 - 2*x*y,
-          x^2*y - 2*y^2 + x};
+% babygroe {x^3 - 2*x*y,
+%           x^2*y - 2*y^2 + x};
 
 lisp << !*noisy := nil >>;
 
@@ -555,15 +598,26 @@ lisp << varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8) >>;
 
 lisp verbos t;
 
+% babygroe {
+%   a1^2 - 1,
+%   a2^2 - a1 - 1,
+%   a3^2 - a2 - 1,
+%   a4^2 - a3 - 1,
+%   a5^2 - a4 - 1,
+%   a6^2 - a5 - 1,
+%   a7^2 - a6 - 1
+%   };
+
+lisp << varnames := '(c2 c3 b3 b2 b1 a21 a32 a31) >>;
 babygroe {
-  a1^2 - 1,
-  a2^2 - a1 - 1,
-  a3^2 - a2 - 1,
-  a4^2 - a3 - 1,
-  a5^2 - a4 - 1,
-  a6^2 - a5 - 1,
-  a7^2 - a6 - 1
-  };
+  6*c2 - 6*a21,
+  6*c3 - 6*a31 - 6*a32,
+  6*b1 + 6*b2 + 6*b3 - 6,
+  6*b2*c2 + 6*b3*c3 - 3,
+  6*b2*c2**2 + 6*b3*c3**2 - 2,
+  6*b3*a32*c2 - 1,
+  c2
+};
 
 
 quit;
