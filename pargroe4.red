@@ -545,6 +545,7 @@ algebraic babygroe {x^3 - 2*x*y,
 varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8);
 
 verbos t;
+on echo;
 
 fluid '(wt0 t0);
 
@@ -557,7 +558,7 @@ symbolic procedure restartable nn;
 begin
   scalar thr, seed;
   thr := remainder(nn, 32);
-  seed = nn/32;
+  seed := nn/32;
   if seed > 4 then return;
   numthreads := nn;
   random_new_seed (starting_seed + seed);
@@ -587,7 +588,7 @@ symbolic procedure restartable1 nn;
 begin
   scalar thr, seed;
   thr := remainder(nn, 32);
-  seed = nn/32;
+  seed := nn/32;
   if seed > 4 then return;
   numthreads := nn;
   random_new_seed (starting_seed + seed);
