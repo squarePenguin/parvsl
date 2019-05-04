@@ -560,12 +560,31 @@ begin
   thr := remainder(nn, 32);
   seed := nn/32;
   if seed > 4 then return;
-  numthreads := nn;
+  numthreads := thr;
   random_new_seed (starting_seed + seed);
   wt0 := walltime();
   t0 := time();    
   algebraic babygroe {
-      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
       a2^2 - a1 - 1,
       a3^2 - a2 - 1,
       a4^2 - a3 - 1,
@@ -573,15 +592,15 @@ begin
       a6^2 - a5 - 1,
       a7^2 - a6 - 1
       };
-  princ "@@Nthreads: "; print nn;
+  princ "@@Nthreads: "; print thr;
   princ "@@Seed: "; print starting_seed;
   princ "@@CPU time: "; print ((time() - t0)/1000.0);
   princ "@@Elapsed time: "; print (walltime() - wt0);
-  if nn < 8 then nn := nn + 1
+  if thr < 8 then thr := thr + 1
   else <<
-    nn := 1;
+    thr := 1;
     seed := seed + 1 >>;
-  restart!-csl('restartable, nn+32*seed)
+  restart!-csl('restartable, thr+32*seed)
 end;
 
 symbolic procedure restartable1 nn;
@@ -599,27 +618,7 @@ begin
 % of it it will be necessary to do N^2 generations of s-polynomials against
 % itself. 
   algebraic babygroe {
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
-
+      a1^2 - 1,
       a2^2 - a1 - 1,
       a3^2 - a2 - 1,
       a4^2 - a3 - 1,
@@ -631,11 +630,11 @@ begin
   princ "@@Seed: "; print starting_seed;
   princ "@@CPU time: "; print ((time() - t0)/1000.0);
   princ "@@Elapsed time: "; print (walltime() - wt0);
-  if nn < 8 then nn := nn + 1
+  if thr < 8 then thr := thr + 1
   else <<
-    nn := 1;
+    thr := 1;
     seed := seed + 1 >>;
-  restart!-csl('restartable1, nn+32*seed)
+  restart!-csl('restartable1, thr+32*seed)
 end;
 
 % For restart!-csl to work ALL the code I have here must be stored
