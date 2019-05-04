@@ -587,10 +587,10 @@ on time;
 
 lisp << !*noisy := t >>;
 
-babygroe {x*y-x, x^2-y};
+% babygroe {x*y-x, x^2-y};
 
-babygroe {x^3 - 2*x*y,
-          x^2*y - 2*y^2 + x};
+% babygroe {x^3 - 2*x*y,
+%           x^2*y - 2*y^2 + x};
 
 lisp << !*noisy := nil >>;
 
@@ -607,6 +607,17 @@ lisp verbos t;
 %   a6^2 - a5 - 1,
 %   a7^2 - a6 - 1
 %   };
+
+lisp << varnames := '(c2 c3 b3 b2 b1 a21 a32 a31) >>;
+babygroe {
+  6*c2 - 6*a21,
+  6*c3 - 6*a31 - 6*a32,
+  6*b1 + 6*b2 + 6*b3 - 6,
+  6*b2*c2 + 6*b3*c3 - 3,
+  6*b2*c2**2 + 6*b3*c3**2 - 2,
+  6*b3*a32*c2 - 1,
+  c2
+};
 
 
 quit;
