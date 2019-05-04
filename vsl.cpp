@@ -378,6 +378,7 @@ double ASECD(double x)   { return ACOSD(1.0/x); }
 // a conservative garbage collector and will support a fuller and
 // higher performance Lisp.
 
+time_t time0;
 
 // A Lisp item is represented as an integer and the low 3 bits
 // contain tag information that specify how the rest will be used.
@@ -4953,6 +4954,11 @@ LispObject Ltime(LispObject lits)
     return packfixnum((intptr_t)((1000*(int64_t )c)/CLOCKS_PER_SEC));
 }
 
+LispObject Lwalltime(LispObject lits)
+{   uintptr_t c = time(NULL) - time0;
+    return packfixnum(c);
+}
+
 LispObject Ldate(LispObject lits)
 {   time_t t = time(NULL);
     char today[32];
@@ -7689,6 +7695,7 @@ LispObject Lerrorset_1(LispObject lits, LispObject a1)
     SETUP_TABLE_SELECT("stop",              Lstop_0),           \
     SETUP_TABLE_SELECT("terpri",            Lterpri),           \
     SETUP_TABLE_SELECT("time",              Ltime),             \
+    SETUP_TABLE_SELECT("walltime",          Lwalltime),         \
     SETUP_TABLE_SELECT("vector",            Lvector_0),
 
 #define SETUP1                                                  \
@@ -9751,6 +9758,7 @@ int main(int argc, char *argv[])
         else lispfiles[3] = in;
     }
     boffop = 0;
+    time0 = time(NULL);
     for (;;) // This loop is for restart-lisp and preserve.
     {   allocateheap();
 // A warm start will read an image file which it expects to have been
