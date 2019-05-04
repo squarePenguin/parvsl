@@ -14,8 +14,9 @@ symbolic;
 % on echo, backtrace, comp;
 
 if getd 'spool then spool "babygroe.log";
-global '(numthreads);
-numthreads := 8;
+global '(numthreads maxpairs);
+numthreads := 4;
+maxpairs := 1000;
 
 random_new_seed(17);
 
@@ -31,18 +32,31 @@ begin
     lr := for each x in lr collect cdr x;
     return lr;
 end;
-    
+
 % I will put the main and central and important part first!
 
+symbolic procedure take(l, n);
+begin
+  scalar res, i;
+  res := {};
+  i := 0;
+  while i < n and l do <<
+    res := car l . res;
+    l := cdr l;
+    i := i + 1;
+  >>;
+  return {res, l};
+end;
+
 % VB: This is from inside the "while loop".
-%% [groe_worker] takes 
+%% [groe_worker] takes
 %% [p]  - the pair to process
 %% [L]  - the reference to the base
 %% [m]  - the mutex
 %% [tp] - the thread_pool itself, to push to it
 symbolic procedure groeworker(pairs_ref, L_ref, m, numdone_ref);
 begin
-    scalar s, pairs, L, L1, numdone, done;
+    scalar s, pairs, L, L1, numdone, done, workpairs;
 
     done := nil;
 
@@ -77,52 +91,60 @@ START:
         rplaca (numdone_ref, numdone);
         done := nil;
     >>;
-    
-    p := car pairs;
-    rplaca (pairs_ref, cdr pairs);
+
+    workpairs := take (pairs, maxpairs);
+    pairs := second workpairs;
+
+    rplaca (pairs_ref, second workpairs);
+    workpairs := first workpairs;
 
     L := car L_ref;
     mutexunlock m;
 
-% Now I have the work that I perform for each task. Create an s-polynomial.
-    s := s_poly(car p, cdr p);
-% Reduce it be an unsynchronized current snapshot of the current draft base.
-% note that other threads might be updating L either by adding extra
-% polynomials or by reducing or removing some that are at present there.
-% Here I will just use whatever I see.
-% Note I get L here under a mutex, to avoid data race.
-    s := reduce_by(s, L);
-% If that simple unsynchronized work reduces the s-poluynomial to zero
-% then this work packet has completed.
-% And in this case I have finished a work packet and can go back to the
-% "while" loop to find another one to start. 
-    if null s then goto START;
+    for each p in workpairs do <<
+      % Now I have the work that I perform for each task.
+      % Create an s-polynomial.
+      s := s_poly(car p, cdr p);
 
-% I am expecting that a large proportion of cases will have gone through
-% the above path and do not contribute anything new to my result. But here
-% it looks as if I might add more information!
-%  atomically begin
-    mutexlock m;
-    L := car L_ref; % unbox L again as it might have changed
-    pairs := car pairs_ref;
-    L1 := L;  % because I will update L as I scan it.
-% Now if any polynomial in the existing base would be divisible by the new
-% element I should remove it and all pending pairs using it. Doing this
-% should let me end up with a miminal basis.
-    for each p in L1 do
-        if not xless(dfx p, dfx s) then <<
-            L := delete(p, L);
-            pairs := delete_pairlist(p, pairs) >>;
-    for each p in L do
-        pairs := (s . p) . pairs;
+      % Reduce it be an unsynchronized current snapshot of the current draft base.
+      % note that other threads might be updating L either by adding extra
+      % polynomials or by reducing or removing some that are at present there.
+      % Here I will just use whatever I see.
+      % Note I get L here under a mutex, to avoid data race.
+      s := reduce_by(s, L);
 
-    % pairs := randomise pairs;
+      % If that simple unsynchronized work reduces the s-poluynomial to zero
+      % then this work packet has completed.
+      % And in this case I have finished a work packet and can go back to the
+      % "while" loop to find another one to start.
+      % I am expecting that a large proportion of cases will have gone through
+      % the above path and do not contribute anything new to my result. But here
+      % it looks as if I might add more information!
+      if s then <<
+        mutexlock m;
+        L := car L_ref; % unbox L again as it might have changed
+        pairs := car pairs_ref;
+        L1 := L;  % because I will update L as I scan it.
 
-    L := s . L;
-    rplaca (L_ref, L); % box it back
-    rplaca (pairs_ref, pairs);
+        % Now if any polynomial in the existing base would be divisible by the new
+        % element I should remove it and all pending pairs using it. Doing this
+        % should let me end up with a miminal basis.
+        for each p in L1 do
+            if not xless(dfx p, dfx s) then <<
+                L := delete(p, L);
+                pairs := delete_pairlist(p, pairs) >>;
+        for each p in L do
+            pairs := (s . p) . pairs;
 
-    mutexunlock m;
+        % pairs := randomise pairs;
+
+        L := s . L;
+        rplaca (L_ref, L); % box it back
+        rplaca (pairs_ref, pairs);
+
+        mutexunlock m;
+      >>;
+    >>;
     goto START;
 
 FINISH:
@@ -156,7 +178,7 @@ begin
 
 % Put all the pairs in the work queue so that the one at the start of
 % the list "pairs" will be the first work packet to be run.
-    threads := for i := 1:numthreads collect 
+    threads := for i := 1:numthreads collect
         thread2('groeworker, {pairs_ref, L_ref, m, numdone_ref});
 
 % uncomment to test in VSL
@@ -508,7 +530,7 @@ symbolic procedure babygroeeval u;
     return 42
   end;
 
-put('babygroe, 'psopfn, 'babygroeeval); 
+put('babygroe, 'psopfn, 'babygroeeval);
 
 algebraic;
 
