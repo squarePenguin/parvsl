@@ -559,12 +559,32 @@ begin
   scalar thr, seed;
   thr := remainder(nn, 32);
   seed := nn/32;
-  if seed > 4 then return;
+  if seed > 2 then return;
   numthreads := thr;
   random_new_seed (starting_seed + seed);
   wt0 := walltime();
   t0 := time();    
   algebraic babygroe {
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
+      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
       a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
       a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
       a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,      a1^2 - 1,
@@ -626,8 +646,8 @@ begin
       a6^2 - a5 - 1,
       a7^2 - a6 - 1
       };
-  princ "@@Nthreads: "; thr;
-  princ "@@Seed: "; print seed;
+  princ "@@Nthreads: "; print thr;
+  princ "@@Seed: "; seed;
   princ "@@CPU time: "; print ((time() - t0)/1000.0);
   princ "@@Elapsed time: "; print (walltime() - wt0);
   if thr < 8 then thr := thr + 1
