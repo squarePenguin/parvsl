@@ -1,6 +1,6 @@
 % Created 2019-04-17 Wed 12:42
 % Intended LaTeX compiler: pdflatex
-\documentclass[a4paper,12pt,twoside,openright]{report}
+\documentclass[a4paper,12pt,twoside,openany]{report}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{graphicx}
@@ -9,6 +9,7 @@
 \usepackage[acronym]{glossaries}
 \usepackage{wrapfig}
 \usepackage{rotating}
+\usepackage{datetime2}
 \usepackage[normalem]{ulem}
 \usepackage{amsmath}
 \usepackage{textcomp}
@@ -16,6 +17,7 @@
 \usepackage{amssymb}
 \usepackage{verbatim}
 \usepackage{caption}
+\usepackage[linesnumbered,ruled]{algorithm2e}
 \usepackage{listings}
 \usepackage{minted}
 \usepackage[pdfborder={0 0 0}]{hyperref}    % turns references into hyperlinks
@@ -33,6 +35,9 @@
 \renewcommand{\baselinestretch}{1.1}    % adjust line spacing to make
 % more readable
 
+\DTMusemodule{british}{en-GB}
+\DTMsetregional
+\DTMlangsetup{showdayofmonth=false}
 
 \graphicspath{ {figures/} }
 
@@ -107,7 +112,7 @@ Supervisor:         & Dr. Arthur C. Norman                    \\
 
 \subsection*{Original Aims of the Project}
 
-To implement a multi-threaded version of a Lisp system. It should
+The goal was to implement a multi-threaded version of a Lisp system. It should
 allow the user to create threads and offer the primitives necessary to
 write parallel programs. The original language is able to build and
 run a complete computer algebra system, which the parallel version should
@@ -116,9 +121,11 @@ be implemented to evaluate correctness and the potential benefits of parallelism
 
 \subsection*{Work Completed}
 
-All of the original goals have been achieved. The multi-threaded Lisp
+All of the original goals were achieved. The multi-threaded Lisp
 is showing predictable speed-ups when executing tasks in parallel,
 while preserving full backwards compatibility with the original language.
+It is also able to run the full REDUCE Algebra System, with a number of experiments
+showing the potential benefits of parallelism in computer algebra.
 
 \subsection*{Special Difficulties}
 There were no special difficulties encountered.
@@ -176,6 +183,10 @@ and support he offered during the making of this project.
 \chapter{Source Code Listings}
 \label{ch:appendix-code}
 \input{appendix/code}
+
+\chapter{Gröbner basis background}
+\label{ch:grobner}
+\input{appendix/grobner.tex}
 
 \chapter{Project Proposal}
 \input{appendix/proposal}

@@ -76,7 +76,7 @@ RCORE is the core of REDUCE, skipping non-essential packages from the build. ALG
 a set of regression tests normally used to check for bugs in the code. INT TEST tests the
 symbolic integration package, and provides a good performance benchmark.
 
-\begin{figure}[h]
+\begin{figure}[H]
   \centering
   \includegraphics[width=1\linewidth]{single_threaded.eps}
   \caption{Relative performance of ParVSL on single-threaded tests (lower is better).}
@@ -462,6 +462,109 @@ more general cases.
 % polynomial multiplication is such a fundamental operation in algebra
 % that being able to speed it up could really help.
 
+\section{Gröbner basis}
+\label{sec:groebner}
+\emph{Gröbner basis} \cite{Groebner} is a set of non-linear multivariate
+polynomials that has useful algorithmic properties for many important problems
+in mathematics and sciences, including computational geometry, linear programming
+and coding theory. Here, a basis is just a set of polynomials. A basis is a Gröbner basis if
+all leading power products of linear combinations of polynomials in the basis
+are multiples of at least one of the leading power products in the set.
+
+The problem of constructing Gröbner bases for polynomials is characterised as follows:
+given a finite set of multi-variate polynomials $F$ in $K[x_1,\dots,x_n]$, find a
+finite set of polynomials $G$ in $K[x_1,\dots,x_n]$ such that $ideal(F) = ideal(G)$
+and $G$ is a Gröbner base.
+Any set of polynomials has a Gröbner basis, which is an equivalent system.
+In the case of linear systems the problem specialises to Gaussian elimination,
+while in the case of systems of univariate polynomials, it specialises
+to Euclid's algorithm. As such, it is a generalisation of the two, further
+covering non-linear systems in multiple variables. Problems which are extremely
+difficult to solve for arbitrary bases (such as solving a non-linear system of equations)
+may be solved easily for their equivalent Gröbner basis.
+
+Buchberger's algorithm \cite{Buchberger} is used to find the Gröbner basis
+of a set of polynomials. It involves repeatedly applying special reductions
+on pairs of polynomials to update the current base until it converges.
+A mathematical definition of Gröbner bases, along with an explanation of
+the algorithm can be found in Appendix \ref{ch:grobner}.
+
+\vspace*{.2cm}
+\begin{code}
+\begin{algorithm}[H]
+  \SetKwInOut{Input}{Input}
+  \SetKwInOut{Output}{Output}
+  \SetKwData{B}{$B$}
+  \SetKwData{G}{$G$}
+  \SetKwData{F}{$F$}
+  \SetKwFunction{Spoly}{S-polynomial}
+  \SetKwFunction{Reduce}{Reduce-by}
+  \Input{A basis $F$}
+  \Output{A Gröbner basis $G$ such that $ideal(F) = ideal(G)$.}
+  $\G \leftarrow \F$\;
+  \B $\leftarrow \{(p_1, p_2) \mid p_1,p_2 \in G \land p_1 \neq p_2 \}$\;
+  \While{\B $\neq \emptyset$} {
+      $(p_1, p_2) \leftarrow$ an element of \B\;
+      $B \leftarrow B \setminus \{(p_1, p_2)\}$\;
+      \tcp{See Appendix \ref{ch:grobner} for a description of these functions.}
+      $s \leftarrow$ \Spoly{$p_1$,$p_2$}\;
+      $s \leftarrow$ \Reduce{$s$, $G$}\;
+      \If{$s \neq 0$}{
+        $B \leftarrow B \cup \{(s, p) \mid p \in G\}$\;
+        $G \leftarrow G \cup \{s\}$\;
+      }
+  }
+  \caption{Buchberger's algorithm for finding the Gröbner basis of a set of multi-variate polynomials.}
+\end{algorithm}
+\label{alg:buchberger}
+\end{code}
+\vspace*{.2cm}
+
+REDUCE offers a \verb|Groebner| package for computing Gröbner basis which I tried
+to improve using parallelism. The known upper bound on the degrees of elements
+in the computed basis is $O(d^{2^n})$, where $n$ is the number of variables
+and $d$ is the maximum total degree of the polynomials \cite{MAYR}. This means the
+algorithm can have super-exponential runtime, and its performance highly
+depends on the order in which it applies the reductions.
+
+I implemented a parallel version of the algorithm which uses a work
+pool to try reductions in parallel, maximising the chance of finding the most useful reductions
+faster.
+
+The most challenging problem was finding good tests for my algorithm.
+Most examples I found were either trivial and were computed in under one
+second, or never terminated after hours of runtime. Coming up with
+tests that do not fall in either category requires an advanced understanding
+of the maths behind non-linear systems. My supervisor helped me
+find an input which terminates in under a minute, than modified it
+to contain a large number of dependent equations to increase the complexity.
+
+Figure \ref{fig:groebner} shows the results. Each test was run three times
+a six-core CPU and computer, explaining the levelling in runtimes after
+six threads. The variance was under 3 seconds in this case so I omitted it.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=1\linewidth]{groebner.eps}
+  \caption{Running time of Buchberger's algorithm by number of threads (lower is better).}
+  \label{fig:groebner}
+\end{figure}
+
+I also found another interesting test in which the parallel version
+always succeeded in under 2 seconds, whereas the single-threaded algorithm
+crashed VSL. I determined that the parallel algorithm added inherent
+non-determinism which effectively shuffled the reductions and
+reduced the probability of getting stuck.
+To compensate for this in VSL, I added a shuffling stage in both algorithms
+when updating the set of pairs $B$. This change did not affect the parallel
+algorithm, but it did make the sequential algorithm terminate sometimes.
+I then ran both algorithms 1000 times on the same test. The parallel
+algorithm always succeeded in finding a Gröbner basis in seconds,
+while the sequential algorithm timed out after one minute in 116/1000 runs.
+Therefore, the parallel Buchberger implementation is not only faster,
+but also more robust, as the level of concurrency it affords significantly
+reduces the chance of encountering a pathological case.
+
 \section{Parallel building of REDUCE}
 
 Most of REDUCE is made up of RLISP code, which can be run in VSL or ParVSL
@@ -600,8 +703,9 @@ when running ParVSL vs VSL. Table \ref{table:cross-platform-reduce} shows the re
                        & VSL    & ParVSL \\
   \hline
   x86 Linux            &   58s &  1m08s \\
-  x86 MacOS            & 1m19s &  3m56s  \\
+  x86 MacOS            & 1m19s &  3m56s \\
   x86 Windows (Cygwin) & 1m03s & 10m15s \\
+  ARMV8 Raspberry Pi Linux & 7m38.55s & 15m59.05s
   \end{tabular}
   \caption{Building REDUCE on different platforms in VSL vs ParVSL.}
   \label{table:cross-platform-reduce}

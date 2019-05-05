@@ -12,7 +12,29 @@ to employ multi-threading effectively. Developers of REDUCE are now able to
 use ParVSL to test parallel versions of their algorithms, and some of these developers
 have already started testing my system on their workflows.
 
-\section{Cross platform performance}
+\section{Lessons learned}
+
+\subsection{Debugging multi-threaded code}
+
+Retrofitting multi-threading into a system designed without parallelism in mind is bound to bring issues.
+Many assumptions in original code were violated when running multiple threads. To find and fix all the issues
+I had to thoroughly understand every part of the system, which took time.
+Sometimes my changes exposed an interaction with some area of code
+I had not yet analysed, causing unexpected bugs.
+
+Multi-threaded code is non-deterministic
+by nature so many issues would only show up in testing some times when the threads would conflict in just the
+right way. Tested behaviour was not always reproducible,
+meaning sometimes I only discovered a few bugs weeks after producing them,
+when tests which had been passing suddenly failed. making debugging difficult.
+
+Having a large system such as REDUCE provided a great set of regression
+tests. However, oftentimes errors showed up after running thousand of lines
+of code. This was also code in a language (RLISP) running on top
+of a language (LISP) running on top of a third language (C++), so the call stacks
+generated were generally unhelpful.
+
+\subsection{Cross platform performance}
 
 Historically, one of the biggest difficulties of implementing multi-threaded languages
 was providing cross platform support. I have tested ParVSL on the major platforms and
@@ -23,18 +45,18 @@ I could not replicate the performance achieved on Linux on other platforms. As o
 an understanding of each system and careful programming of individual scenarios is still
 necessary.
 
-\section{Parallelism is hindered by imperative programming}
+\subsection{Parallelism is hindered by imperative programming}
 
 I discovered that the REDUCE Lisp language included a few historical design decisions which
 limit the potential of parallelism, namely its side-effectful nature. The functional programming
 paradigm makes it much easier to write safe high-performance multi-threaded programs by avoiding
 data races. When using an imperative style, the language has to do extra work to maintain safety,
 such as using mutual exclusion on variable access, which can severely slow down any algorithm.
-memory model which allows side-effects it is much more difficult
 
 RLisp already offers many features for functional programming.
 Modifying REDUCE to avoid side-effectful features of the language, and using a more
-functional approach would be needed for it to make good use of multi-threading.
+functional approach (e.g. avoiding the use of global symbols or the modification
+of lists in place) would be needed for it to make good use of multi-threading.
 
 \section{Future work}
 
@@ -46,13 +68,13 @@ CSL is compiled and faster than VSL, however it has a much larger code base.
 While it would take more work, most of the lessons from writing ParVSL could be translated
 to create a similar ParCSL.
 
+The maintainers of REDUCE packages are now able to implement parallel algorithms
+for computer algebra, as I have demonstrated with my implementation of
+a parallel Buchberger's algorithm for computing Gröbner bases. I showed that
+we can achieve speed-ups of over 100\% and it would be interesting to take
+this further and evaluate other multi-threaded algorithms described in literature.
+
 While I have focused on the implementation of the Lisp system, I did not formally define
-the semantics the new features. I talked about the trade-offs between safety and performance,
+the semantics of the new features. I talked about the trade-offs between safety and performance,
 and these need to be carefully considered when establishing the set of guarantees to
 provide for multi-threaded programs.
-
-% Retrofitting multi-threading into a system designed without parallelism in mind is bound to bring issues.
-% Many assumptions in original code were violated when running multiple threads. To find and fix all the issues
-% I had to thoroughly understand every part of the system, which took time. Multi-threaded code is non-deterministic
-% by nature so many issues would only show up in testing some times when the threads would conflict in just the
-% right way. Tested behaviour was not always be reproducible, making debugging difficult.
