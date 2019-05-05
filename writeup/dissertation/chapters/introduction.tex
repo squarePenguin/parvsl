@@ -12,7 +12,7 @@ It has a friendly user interface and can display maths and generate graphics.
 REDUCE is one of a few open-source general-purpose CAS programs, alongside Maxima and Axiom.
 The three projects are all built on top of different Lisp kernels. At the time of this writing,
 none of these projects have any multi-threading capabilities. My aim is to remove this limitation
-for REDUCE. The project is written in a language called RLisp, which is a specialised
+for REDUCE. The project is written in a language called RLISP, which is a specialised
 Lisp dialect with an Algol-like syntax.
 
 \section{VSL}
@@ -37,21 +37,6 @@ Therefore, binding the performance of REDUCE to single-threaded performance limi
 brought by new hardware. This project involves building the infrastructure
 REDUCE needs to take full advantage of today's hardware.
 
-\section{Code examples}
-
-To help explain the concepts that I introduce, code fragments will be used to show the algorithms.
-These fragments will be a simplification of the original code, in order to remove the need
-for context within the rest of the codebase. To that end, the names and function interfaces
-are different from the real implementation. More complete versions of the code fragments
-I showcase can be found in Appendix \ref{ch:appendix-code}.
-
-For examples relating to the implementation of the interpreter, I will be using C++.
-For work related to my evaluation, I will be showcasing the ParVSL language, which is a
-Lisp variant. I also used an additional language running on top of Lisp, called RLisp,
-in order to write code for REDUCE.
-When the syntax of the language gets in the way of readability,
-pseudo-code is used to aid the explanations.
-
 \section{Achievements}
 \label{sec:achievements}
 
@@ -61,7 +46,9 @@ Lisp code in bracket notation, along with the rebuilding of REDUCE, which starts
 but is almost entirely written in its own language. REDUCE as a whole is around half a million
 lines of code and my system fully supports it. I have also coded demonstration programs to
 show how it can take advantage of modern multi-core processors to improve performance,
-given the thread support I now provide it with. The existing set of REDUCE test scripts have provided me
+given the thread support I now provide it with. In some cases the runtime speed more than doubled,
+proving that CAS programs can benefit from multi-threading support.
+The existing set of REDUCE test scripts have provided me
 with significant examples to demonstrate correctness and analyse the overheads of
 concurrency support on all the major platforms (Linux, Windows and MacOS), with some surprising
 differences between them.

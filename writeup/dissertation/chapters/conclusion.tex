@@ -1,4 +1,4 @@
-I have successfully implemented a parallel programming language. The language ParVSL
+I have successfully implemented a parallel programming language. The ParVSL language
 allows the user to employ multi-threading to speed up their algorithms. It offers
 a simple shared memory model, based on mutual exclusion and condition variables,
 without compromising on any features of the original language VSL. I have demonstrated
@@ -23,13 +23,14 @@ Sometimes my changes exposed an interaction with some area of code
 I had not yet analysed, causing unexpected bugs.
 
 Multi-threaded code is non-deterministic
-by nature so many issues would only show up in testing some times when the threads would conflict in just the
-right way. Tested behaviour was not always reproducible,
-meaning sometimes I only discovered a few bugs weeks after producing them,
-when tests which had been passing suddenly failed. making debugging difficult.
+by nature so many issues would only show up in testing sometimes
+when the threads would conflict in just the
+right way. Bugs were not always reproducible,
+meaning sometimes I only discovered some weeks after producing them,
+when tests which had been passing suddenly failed.
 
 Having a large system such as REDUCE provided a great set of regression
-tests. However, oftentimes errors showed up after running thousand of lines
+tests. However, oftentimes errors only showed up after running thousand of lines
 of code. This was also code in a language (RLISP) running on top
 of a language (LISP) running on top of a third language (C++), so the call stacks
 generated were generally unhelpful.
@@ -53,7 +54,7 @@ paradigm makes it much easier to write safe high-performance multi-threaded prog
 data races. When using an imperative style, the language has to do extra work to maintain safety,
 such as using mutual exclusion on variable access, which can severely slow down any algorithm.
 
-RLisp already offers many features for functional programming.
+RLISP already offers many features for functional programming.
 Modifying REDUCE to avoid side-effectful features of the language, and using a more
 functional approach (e.g. avoiding the use of global symbols or the modification
 of lists in place) would be needed for it to make good use of multi-threading.

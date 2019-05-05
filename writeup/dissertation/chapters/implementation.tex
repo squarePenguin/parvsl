@@ -497,7 +497,11 @@ One example is \verb|unwind_flag|, which is heavily used for Lisp control flow. 
 mutated to indicate an exception, to implement \verb|goto| and \verb|return| instructions,
 as well as to indicate early program exit,
 among other uses. Each thread needs its own version of this global flag, otherwise they will mess with each
-other's control flow, so I made it \emph{thread-local}.
+other's control flow, so I made it \emph{thread-local}. Furthermore, there are global symbols in Lisp
+that are used to store state, such as \verb|work1| and \verb|work2|. These symbols are modified by multiple
+VSL functions as a way to store temporary data. Since they are accessible in Lisp I had to ensure that the
+value they store is part of the GC root set and that their contents was correctly saved when preserving
+the program.
 
 A third case is file handling. Global variables indicate which file is in use, and hold buffers for reading
 and writing. Again, I had to make all these thread-local. On the other hand, there are other variables holding

@@ -1,7 +1,7 @@
 To evaluate the project, I worked with existing REDUCE code for regression testing
 but also wrote my own tests in both plain Lisp and RLISP code.
 Bracketed Lisp code was useful at the beginning of my project when ParVSL was not
-fully functional and I needed unit tests, while RLisp was necessary to write
+fully functional and I needed unit tests, while RLISP was necessary to write
 more complicated code which interfaces with REDUCE.
 
 \section{Single-threaded building of REDUCE}
@@ -33,15 +33,6 @@ building a library, most other libraries could be skipped to help pinpoint the p
 The problem was not completely fixed as just building the core involved running
 a very large amount of code, and libraries are also significant in size.
 
-Most of the bugs I could have potentially introduced were data corruption bugs.
-I used asserts in various places to try to get the program to crash as soon as possible
-and find the issue early. Sometimes I had to introduce a system of binary searching the
-problem by trapping the program early and checking for the state of the computation.
-I tried to find small tests which would still reproduce the issue, then use the
-\texttt{gdb} debugger to step through the code and try to find the errors. I have also used
-Valgrind, which offers a large set of tools for detecting undefined behaviour and memory
-corruption.
-
 \subsection{Bugs in VSL and REDUCE}
 
 While debugging I discovered some issues in VSL. The language hadn't been tested
@@ -52,7 +43,8 @@ hard-coded strings and integers. There were multiple issues with floating point 
 again caused by simple human errors (e.g. negated condition being checked). Switching between
 output files would lose buffer content. In one place, a value on the heap was not marked
 properly, meaning that if a garbage collection was triggered at the right time, it would
-be collected prematurely, causing corruption. All these bugs have since been fixed.
+be collected prematurely, causing corruption. All these bugs have since been fixed
+in both VSL and ParVSL.
 
 REDUCE itself showed multiple cases of sloppy code. Most of the time, the issue was using
 a global symbol with a very common name liberally and then behaving weirdly
@@ -372,7 +364,6 @@ while null (future_try_get(sorted_xs_future):
 \end{verbatim}
 Now, workers can start (and finish) other jobs while waiting and will not deadlock.
 
-% \section{{\bfseries\sffamily TODO} Results}
 \subsection{Results}
 
 To test the correctness, I simply generate a list of random numbers, then compare the output
@@ -382,8 +373,8 @@ small. I found on my machine that around parallelisation became useful once the 
 the list was larger than 1000, and I tuned it to a threshold of 5000. Without this optimisation
 the parallel version would spawn too many jobs (as many as \(O(N)\)) and the time book-keeping
 would completely eliminate any benefit of multi-threading. Indeed, it runs an order of magnitude
-slower on large lists (over 1000 elements). The following table shows the performance improvement
-we can gain by increasing the worker count.
+slower on large lists (over 1000 elements). Table \ref{table:parmergesort} shows the performance improvement
+we can gain by increasing the worker count on a computer with 4 physical CPU cores.
 
 \begin{table}[H]
 \centering
@@ -724,7 +715,7 @@ shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the 
 \label{fig:threadlocal}
 \end{figure}
 
-The biggest culprit for the performance impact is the system's thread local storage (TLS)
+The biggest culprit for the performance impact is the system's Thread Local Storage (TLS)
 mechanism. In the best case (i.e. on x86 Linux) a thread-local variable is accessed
 similarly to a regular static one. One would hope that Cygwin developers will
 implement a more efficient TLS in the future. Currently, the only two platforms

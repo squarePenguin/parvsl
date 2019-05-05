@@ -224,3 +224,11 @@ of the problem. I used \verb|gprof| \cite{gprof} to profile my code and find
 the areas on the critical path which needed optimisations the most. Finally,
 I used \verb|valgrind| \cite{valgrind} to analyse ParVSL for memory
 problems, data races and undefined behaviour.
+
+The most challenging bugs to find and fix were data corruption bugs.
+I used asserts in various places to try to get the program to crash as soon as possible
+and find the issue early. Sometimes I had to introduce a system of binary searching the
+problem by trapping the program early and checking for the state of the computation.
+I tried to find small tests which would still reproduce the issue, then use the
+\texttt{gdb} debugger to step through the code and try to find the errors. The tests
+were then kept as part of the unit test suite.
