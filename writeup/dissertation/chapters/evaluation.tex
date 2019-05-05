@@ -81,10 +81,12 @@ tool to profile the code and found the biggest cause of the time difference is t
 symbol value extraction mechanism described in \ref{sec:symbols}. In VSL all symbol
 values are stored globally with the symbol, whereas ParVSL adds extra book-keeping.
 The symbol access function is on the critical path, and slows the code by at least
-five percent. This penalty would easily be eliminated in a compiled language, where the
+five percent. I have also compiled a version of ParVSL with the new symbol
+storage disabled. In the above tests, it is less than 5\% slower than VSL, showing
+that this is the biggest factor, even though in theory it is an $O(1)$ operation.
+This penalty would easily be eliminated in a compiled language, where the
 checks for global and fluid variables could be performed statically and optimised away
-from the runtime. Other causes of the slowdown are thread-local variables in the interpreter,
-which I discuss in section \ref{sec:crossplatform}.
+from the runtime.
 
 \section{Multi-threading unit tests}
 

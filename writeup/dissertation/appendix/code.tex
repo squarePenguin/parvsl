@@ -613,7 +613,7 @@ begin scalar tp_q, status, threads;
   tp_q := safeq();
   status := atomic 'run;
   threads := {};
-  for i := 1:numthreads do 
+  for i := 1:numthreads do
     threads := thread2('thread_pool_job, {tp_q, status}) . threads;
   return {tp_q, status, threads};
 end;
@@ -653,5 +653,220 @@ begin
     jointhread td;
   >>;
 end;
+\end{minted}
+\end{code}
+
+\section{Parallel Buchberger's algorithm}
+\label{sec:buchberger}
+
+\begin{code}
+\begin{minted}{text}
+symbolic;
+
+numthreads := 8;
+
+% I will put the main and central and important part first!
+%% [groe_worker] takes
+%% [pairs_ref]  - ref to the set of pairs to process
+%% [L_ref]  - ref to the current basis
+%% [m]  - the mutex
+%% [numdone_ref] - for sync between threads (acts as a semaphore)
+symbolic procedure groeworker(pairs_ref, L_ref, m, numdone_ref);
+begin
+    scalar s, pairs, L, L1, numdone, done, workpairs;
+
+    done := nil;
+
+% using gotos for lack of continue and nested return.
+START:
+    mutexlock m;
+    pairs := car pairs_ref;
+    numdone := car numdone_ref;
+
+    % No more work to be done, return.
+    if null pairs then <<
+        if null done then <<
+          numdone := numdone + 1;
+          rplaca (numdone_ref, numdone);
+          done := t;
+        >>;
+
+        if numdone = numthreads then <<
+            % we are done
+            mutexunlock m;
+            goto FINISH;
+        >> else <<
+            mutexunlock m;
+
+            % Allow other threads a chance
+            thread_yield();
+            goto START;
+        >>;
+    >> else if done then <<
+        % Work queue no longer empty.
+        numdone := numdone - 1;
+        rplaca (numdone_ref, numdone);
+        done := nil;
+    >>;
+
+    p := car pairs;
+    rplaca (pairs_ref, cdr pairs);
+    L := car L_ref;
+
+    mutexunlock m;
+
+    % Now I have the work that I perform for each task.
+    % Create an s-polynomial.
+    s := s_poly(car p, cdr p);
+
+    % Reduce it be an unsynchronized current snapshot of the current draft base.
+    % note that other threads might be updating L either by adding extra
+    % polynomials or by reducing or removing some that are at present there.
+    % Here I will just use whatever I see.
+    s := reduce_by(s, L);
+
+    mutexlock m;
+    L := car L_ref; % unbox L again as it might have changed
+    pairs := car pairs_ref;
+    L1 := L;  % because I will update L as I scan it.
+
+    % Now if any polynomial in the existing base would be divisible by the new
+    % element I should remove it and all pending pairs using it. Doing this
+    % should let me end up with a miminal basis.
+    for each p in L1 do
+        if not xless(dfx p, dfx s) then <<
+            L := delete(p, L);
+            pairs := delete_pairlist(p, pairs) >>;
+    for each p in L do
+        pairs := (s . p) . pairs;
+
+    % pairs := randomise pairs;
+
+    L := s . L;
+    rplaca (L_ref, L); % box it back
+    rplaca (pairs_ref, pairs);
+
+    mutexunlock m;
+    goto START;
+
+FINISH:
+    return nil;
+end;
+
+symbolic procedure babygroe L;
+begin
+    scalar pairs, pairs_ref, L_ref, m, threads, numdone_ref;
+    L := for each p in L collect dfmake_monic p;
+    pairs := for each p on L conc
+      for each q in cdr p collect (car p . q);
+    terpri();
+    printc "Babygroe input:";
+    for each p in L do << dfprin p; terpri() >>;
+
+    pairs := randomise pairs;
+    pairs_tried := 0;
+    basis_updates := 0;
+
+% And obviously I have not tried this and unvcovered the glitches!!!!!
+    pairs_ref := {pairs};
+    L_ref := {L};
+    m := mutex ();
+    numdone_ref := {0};
+
+    print "starting threads";
+
+% Put all the pairs in the work queue so that the one at the start of
+% the list "pairs" will be the first work packet to be run.
+    threads := for i := 1:numthreads collect
+        thread2('groeworker, {pairs_ref, L_ref, m, numdone_ref});
+
+% uncomment to test in VSL
+    % groeworker(pairs_ref, L_ref, m, numdone_ref);
+
+% Block here until all workers are done.
+    for each thr in threads do jointhread thr;
+
+    print "done threads";
+
+% tp_stop does not interrupt any worker. It will only stop when the queue is empty
+% and no more workers are pushing stuff to it
+    L := car L_ref;
+
+    terpri();
+    printc "The base is:";
+    for each p in L do <<
+        dfprin p;
+        terpri() >>;
+    return L
+end;
+
+symbolic procedure s_poly(u, v);
+  begin
+    scalar u1 := xtrax(dfx u, dfx v),
+            v1 := xtrax(dfx v, dfx u);
+% The leading term of each of u*u1 and v*v1 should have a degree max() of the
+% degrees in each variable in u and v.
+    u := dfmulterm(qrecip dflc u, u1, u);
+    v := dfmulterm(qrecip dflc v, v1, v);
+% Leading terms should now cancel when I subtract.
+    return dfmake_monic dfsub(u, v)
+  end;
+
+symbolic procedure reduce_by(S, L);
+  begin
+    scalar done := nil, s1;
+    while not done do <<
+      done := t;
+      for each p in L do <<
+% If something has reduced to 0 there is no need to try further reductions!
+        if not null s then <<
+          if !*noisy then <<
+            princ "Reduce "; dfprin s; princ " using "; dfprin p >>;
+          s1 := dfremainder(s, p);
+          if !*noisy then <<
+            princ " => "; dfprin s; terpri() >>;
+% test if this made progress but did not reduce the polynomial all the way
+% down to nil, set the "done" flag to nil so that we will try everything
+% again.
+          if s1 neq s then <<
+            if s1 neq nil then done := nil;
+            s := s1 >> >> >> >>;
+    return s
+  end;
+
+symbolic procedure delete_pairlist(p, L);
+begin
+  scalar res := {};
+  for each x in L do
+    if not (p = car x) and not (p = cdr x) then
+      res := x . res;
+  return reverse res;
+end;
+
+algebraic;
+
+% Examples
+
+babygroe {x*y-x, x^2-y}
+
+babygroe {x^3 - 2*x*y,
+          x^2*y - 2*y^2 + x};
+
+lisp << !*noisy := nil >>;
+
+lisp << varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8) >>;
+
+lisp verbos t;
+
+babygroe {
+  a1^2 - 1,
+  a2^2 - a1 - 1,
+  a3^2 - a2 - 1,
+  a4^2 - a3 - 1,
+  a5^2 - a4 - 1,
+  a6^2 - a5 - 1,
+  a7^2 - a6 - 1
+  };
+
 \end{minted}
 \end{code}
