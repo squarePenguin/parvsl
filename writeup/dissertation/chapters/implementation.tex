@@ -444,14 +444,14 @@ LispObject par_value(LispObject symbol) {
 }
 \end{minted}
 
-I carefully replaced all calls to \texttt{value} to use \texttt{par\_value} instead.
+I replaced all calls to \texttt{value} to use \texttt{par\_value} instead.
 Now, multiple threads accessing the same symbol can do so safely,
 as they will each access their own versions. This eliminates data races entirely,
 and shallow binding is unaffected.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.9\linewidth]{symbols.pdf}
+  \includegraphics[width=1\linewidth]{symbols.pdf}
   \caption{Storage of symbols in ParVSL}
   \label{fig:symbols}
 \end{figure}
@@ -485,9 +485,7 @@ void implement_let(string varName, LispObject expr1, LispObject expr2) {
 \section{Data races in the interpreter}
 \label{sec:datarace}
 
-Running VSL in parallel involves, in effect, running an interpreter in each thread. The spawned threads do not
-run a read-eval-print loop, instead they run a computation, save the result, then terminate. However,
-in ParVSL I allow these threads to execute any code the main thread can, with no restriction. This means
+Running VSL in parallel involves, in effect, running an interpreter in each thread. This means
 all threads can use and modify global state and interact with standard input, output and files and
 thus can conflict with each other.
 

@@ -7,17 +7,14 @@ more complicated code which interfaces with REDUCE.
 \section{Single-threaded building of REDUCE}
 
 My project involved modifying a large body of code and it was almost guaranteed
-that I would introduce bugs during development. Since the work involves a complex,
-multi-paradigm programming language, it is not possible to guarantee to cover all
-possible scenarios that might exhibit new bugs. Thankfully, the language and its
+that I would introduce bugs during development. Thankfully, the language and its
 direct application are well intertwined, so there is a very large coverage test already
 available to demonstrate most functionalities of the language: building REDUCE.
 
 REDUCE consists of around 400 thousand lines of code, and since VSL was built to
 run it, all functionality in VSL is being used in REDUCE. In addition to that,
-REDUCE comes with a comprehensive suite of regression tests, which were written over the
-years to detect bugs in new code. Finally, almost every library in REDUCE contains a
-set of tests. These tests involve a large amount of heavy computation, stress testing
+REDUCE comes with a comprehensive suite of regression tests for most packages.
+These tests involve a large amount of heavy computation, stress testing
 many different algorithms, using large amounts of memory and requiring multiple cycles
 of garbage collection.
 
@@ -30,8 +27,6 @@ was too much code running and it was difficult to pinpoint the source of the pro
 To aid with this, I had multiple stages to build. The first stage was just building
 the core, while the second involved building the libraries. If an error showed up while
 building a library, most other libraries could be skipped to help pinpoint the problem.
-The problem was not completely fixed as just building the core involved running
-a very large amount of code, and libraries are also significant in size.
 
 \subsection{Bugs in VSL and REDUCE}
 
@@ -52,7 +47,7 @@ on clashes. The most striking example was when the RLisp interpreter used the sy
 during parsing, meaning any tests using the variable \texttt{x} as a free global value
 would turn it into a self-reference to code.
 Another instance was a name clash in the error handling function, leading to failure
-to contain exceptions. While these two cases have been manually fixed, there are many other
+to contain exceptions. While these cases have been fixed, there are many other
 such potential problems within the REDUCE packages which will have to be cleaned up.
 % Identifying when odd behaviour was down to my code or whether it revealed
 
@@ -74,7 +69,6 @@ symbolic integration package, and provides a good performance benchmark.
   \caption{Relative performance of ParVSL on single-threaded tests (lower is better).}
   \label{fig:single-threaded}
 \end{figure}
-
 
 A slow-down between 5 and 20 percent can be observed. I have used the GProf \cite{gprof}
 tool to profile the code and found the biggest cause of the time difference is the
@@ -262,18 +256,16 @@ while atomic_get(run_flag) = 'run do
     thread_yield()
 \end{verbatim}
 
-This approach solves the issue, but it is important to note the \verb|thread_yield()| call.
-I have implemented \verb|thread_yield()| to directly call the C++ equivalent. This allows the
-system to schedule other threads, making sure a waiting worker does not spin the CPU
-core to 100\% until forcefully preempted by the OS. It can also cause starvation as it
-delays other threads from being scheduled.
+This approach solves the issue, but it is important to note the \verb|thread_yield()| call,
+which I implemented to directly call the C++ equivalent. It allows the
+system to schedule other threads to do more work, preventing starvation.
 
 \subsection{Waiting for a job's result}
 \label{ssec:waitjob}
 
 In ParVSL, the \texttt{thread} function takes another function to execute on the new thread,
 along with the arguments for that function. The return value of the function call is
-then recovered when joining the thread with \texttt{join\_thread}, enabling thread communication.
+then recovered when joining the thread with \verb|join_thread|, enabling thread communication.
 
 When switching from threads to jobs in the thread pool, we want to maintain this functionality,
 otherwise the only way to communicate between parallel jobs would be through global state,
@@ -281,7 +273,7 @@ which would severely limit its usefulness. Passing arguments for a job is trivia
 stored in the safe queue, along with the function to be called. However, returning the result of
 a job required extra book-keeping.
 
-Using the primitives in ParVSL, we can implement a \texttt{future} type. A future is a helpful mechanism
+Using the primitives in ParVSL, we can implement a \texttt{future} type. A future is a mechanism
 that allows us to both wait for a task and obtain its return value. A future starts out as empty.
 It can have any number of readers but only one writer. The writer is usually the creator of the future
 and will set its value exactly once, at some point after creation. The readers can then try to get the
@@ -309,7 +301,7 @@ it meaning that worker threads unwound unsafely. This lead to the the thread-poo
 thread and fail to terminate. Additionally, threads waiting for the result would also be stuck.
 
 There are many aspects to be considered in the design of a thread pool. I have focused on the main ones, and
-this thread pool was sufficient for the rest of evaluation. I have successfully used to to parallelise the
+this thread pool was sufficient for the rest of evaluation. I have successfully used it to parallelise the
 other experiments in this report. However, depending on the task it could be improved upon with more features.
 Currently, the number of threads is static, but it could dynamically start and stop threads to accommodate
 the workload. An efficient safe queue could be implemented using more granular locking. Furthermore, we could
@@ -338,7 +330,7 @@ procedure parallel_merge_sort(list):
   return merge(sorted_xs, sorted_ys)
 \end{verbatim}
 
-We use the thread pool implemented above to achieve parallelism. Without the thread pool, we would
+We can use the thread pool implemented above to achieve parallelism. Without the thread pool, we would
 have to manually manage threads. Using threads here would have resulted in a new thread spawned for
 each element in the list. The function would already oversubscribe threads for lists as small as
 100 elements. The thread pool only uses a constant number of threads.
@@ -352,7 +344,7 @@ will end up waiting for the future (\verb|sorted_xs_future|) without doing any w
 
 To fix this, I have added extra functionality to the thread pool. An extra procedure \verb|thread_pool_run_job|
 can be called by any thread to run one job from the queue. This procedure is implemented similarly
-to the worker function, except it only takes at most one job (or none if the queue is empty) from the
+to the worker function, except it takes at most one job (or none if the queue is empty) from the
 queue instead of looping.
 This function should be called by any job which is waiting for another job in the thread pool.
 
@@ -372,10 +364,10 @@ To test the correctness, I simply generate a list of random numbers, then compar
 to that of the sorting function built in REDUCE. Afterwards, I could test for performance.
 I first tuned the parallel version to use the sequential algorithm once if the list is too
 small. I found on my machine that around parallelisation became useful once the size of
-the list was larger than 1000, and I tuned it to a threshold of 5000. Without this optimisation
-the parallel version would spawn too many jobs (as many as \(O(N)\)) and the time book-keeping
-would completely eliminate any benefit of multi-threading. Indeed, it runs an order of magnitude
-slower on large lists (over 1000 elements). Table \ref{table:parmergesort} shows the performance improvement
+the list was larger than 1000. Without this optimisation
+the parallel version would spawn too many jobs (as many as \(O(N)\)) and the time spent book-keeping
+would completely eliminate any benefit of multi-threading.
+Table \ref{table:parmergesort} shows the performance improvement
 we can gain by increasing the worker count on a computer with 4 physical CPU cores.
 
 \begin{table}[H]
@@ -657,12 +649,10 @@ The second issue I found was that any package can change the access specifier of
 One package could make a symbol global, while another tries to bind it locally causing an error.
 This issue could not be solved at the Lisp level, so I had to add another temporary flag to the
 ParVSL interpreter. Effectively, I disabled globals altogether, and made every global symbol
-fluid instead. Fluids allow all the functionality of globals, plus they will allow other threads
-to locally bind the name.
+fluid instead, which does not change the semantics of the program.
 
-Finally, I discovered an inherent design flaw in the Lisp language used by REDUCE which I could not
-fix. A feature in REDUCE allows the user to set flags to a symbol. These flags always affect the global
-symbol. Many REDUCE packages use this feature, adding, retrieving and removing flags from shared
+Finally, I discovered that REDUCE allows symbols to store global flags.
+Many REDUCE packages use this feature, adding, retrieving and removing flags from shared
 global symbol names. I could not find a way to around this issue without modifying all of REDUCE.
 This meant I was not able to parallelise the building of most REDUCE packages.
 
@@ -676,19 +666,14 @@ developers.
 \section{Testing ParVSL on different platforms}
 \label{sec:crossplatform}
 
-My benchmarks so far focused on x86 Linux, running
-up-to-date compilers. VSL is a cross-platform language which should run on any system as long as the
-C++ compiler supports it. ParVSL further requires C++11 support, however at the
-time of this writing, the standard is already widely supported on all major platforms.
-
+My benchmarks have so far focused on x86 Linux, running
+up-to-date compilers. ParVSL is a cross-platform language which should run on
+any system as long as the C++ compiler supports it.
 I tested three major operating systems: Linux, MacOS, and Windows. I also
-ran the tests on a Raspberry PI to test it on the ARM platform. Compiling on the Raspberry PI
-posed problems even for the single-threaded VSL, as only older compilers are available
-there and they exhibiting some bugs in compiling the code and complained about valid code.
-The other systems successfully compiled and ran all the code.
-
-The more surprising result is the vast difference in performance between the platforms
-when running ParVSL vs VSL. Table \ref{table:cross-platform-reduce} shows the results.
+ran the tests on a Raspberry PI to test it on the ARM architecture.
+Table \ref{table:cross-platform-reduce} shows surprising results:
+while all these platforms support multi-threading features,
+there is a stark difference in the performance of their implementations.
 
 \begin{table}[H]
   \centering
@@ -706,8 +691,12 @@ when running ParVSL vs VSL. Table \ref{table:cross-platform-reduce} shows the re
 
 \subsection{Thread-local access performance}
 
-Once observed, this can be verified by trying a trivial test program just referencing a
-thread-local variable in a loop. Figure \ref{fig:threadlocal}
+While analysing the issue, I discovered that the biggest culprit for the performance impact
+is the system's Thread Local Storage (TLS) mechanism. Currently, the only two platforms
+with a negligible TLS slowdown are Linux and (native) Windows. The other platforms
+have shown significant performance penalty on thread-local variable access.
+This can be verified by trying a trivial test
+program just referencing a thread-local variable in a loop. Figure \ref{fig:threadlocal}
 shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the other platforms.
 
 \begin{figure}[H]
@@ -716,9 +705,3 @@ shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the 
 \caption{Thread local performance on different platforms (lower is better).}
 \label{fig:threadlocal}
 \end{figure}
-
-The biggest culprit for the performance impact is the system's Thread Local Storage (TLS)
-mechanism. In the best case (i.e. on x86 Linux) a thread-local variable is accessed
-similarly to a regular static one. One would hope that Cygwin developers will
-implement a more efficient TLS in the future. Currently, the only two platforms
-with a negligible TLS slowdown are Linux and (native) Windows.
