@@ -99,7 +99,7 @@ symbolic procedure test(n);
 begin
     scalar l, sorted;
     l := nrand n;
-    sorted := mergesort l;
+    sorted := parmergesort l;
     return nil;
 end;
 
