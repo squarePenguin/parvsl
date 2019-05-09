@@ -353,8 +353,8 @@ value in the future if it was fulfilled, without blocking, or indicates failure,
 
 Subsequently, I have changed line the \verb|future_get| call above to the following code:
 \begin{verbatim}
-while null (future_try_get(sorted_xs_future):
-  thread_pool_run_job(tp)
+while null(future_try_get(sorted_xs_future)) do
+  thread_pool_run_job(tp);
 \end{verbatim}
 Now, workers can start (and finish) other jobs while waiting and will not deadlock.
 
