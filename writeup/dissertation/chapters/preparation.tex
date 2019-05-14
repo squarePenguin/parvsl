@@ -76,9 +76,9 @@ Memory is managed by the interpreter. VSL allocates a large block of memory at t
 which it then manages as a contiguous array. When running out of memory, an extra block of the
 same size as the one in use is \verb|malloc|-ed, doubling the amount available. These blocks
 stay in use until the end of the program. They are sorted by their pointer locations,
-and behave as if they were \emph{joined} together to maintain the abstract model of contiguous memory.
+and behave as if they were \emph{joined} together to maintain the abstract model of contiguous memory
+(see figure \ref{fig:vslalloc}).
 Binary search is used to identify the block containing a location.
-In figure \ref{fig:vslalloc} we can the total memory split into multiple allocated blocks.
 I will use the term \emph{heap} to refer to the entire memory available in Lisp and treat it as
 a large continuous array.
 
@@ -91,7 +91,8 @@ may also contain a small number of \emph{pinned} items which I will discuss in s
 \begin{figure}[H]
     \centering
     \includegraphics[width=1\linewidth]{vslalloc.pdf}
-    \caption{Memory allocations in VSL}
+    \caption[Memory allocations in VSL.]{Multiple memory blocks sorted by address form the virtual heap.
+    The \texttt{fringe} marks the start of free memory, and memory allocations involve incrementing it.}
     \label{fig:vslalloc}
 \end{figure}
 

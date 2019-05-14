@@ -41,7 +41,7 @@ fashion. A pointer indicates the start of the non-allocated part of the segment
 \begin{figure}[H]
   \centering
   \includegraphics[width=1\linewidth]{parvslalloc.pdf}
-  \caption{Memory allocations in ParVSL}
+  \caption[Memory allocations in ParVSL]{Memory allocations in ParVSL. Each thread allocates in its own \texttt{segment}.}
   \label{fig:parvslalloc}
 \end{figure}
 
@@ -121,7 +121,7 @@ like waiting for user input will prevent the collection from starting.
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\linewidth]{gcdeadlock.pdf}
-  \caption{Possible deadlock when starting garbage collection}
+  \caption{Possible deadlock when starting garbage collection.}
   \label{fig:gcdeadlock}
 \end{figure}
 
@@ -320,7 +320,7 @@ LispObject lookup(std::string name) {
   return s;
 }
 \end{minted}
-\caption{Lock-free symbol hashtable look up implementation}
+\caption{Lock-free symbol hashtable look up implementation.}
 \label{code:lockfree}
 \end{code}
 
@@ -339,7 +339,7 @@ version is noticeably slower, while the lock-free takes the same amount of time.
   ParVSL with lock-free lookup & 1m55s \\
   ParVSL with std::string      & 2m04s
   \end{tabular}
-  \caption{Symbol lookup effects on building REDUCE}
+  \caption{Symbol lookup effects on building REDUCE.}
   \label{tab:lockfree}
 \end{table}
 
@@ -452,7 +452,7 @@ and shallow binding is unaffected.
 \begin{figure}[H]
   \centering
   \includegraphics[width=1\linewidth]{symbols.pdf}
-  \caption{Storage of symbols in ParVSL}
+  \caption{Storage of symbols in ParVSL.}
   \label{fig:symbols}
 \end{figure}
 

@@ -162,57 +162,6 @@ public:
 \end{minted}
 \end{code}
 
-\section{Thread-local data}
-\label{sec:thread-local-code}
-
-\begin{code}
-\begin{minted}[breaklines,mathescape]{c++}
-class Thread_data {
-public:
-    static constexpr int SEGMENT_SIZE = 0x10000; // 64KB per segment
-    // use these as the segment we can write on.
-    uintptr_t segment_fringe = -1;
-    uintptr_t segment_limit = 0;
-    int id; // thread id
-    LispObject *c_stack_base;
-    LispObject *c_stack_head = nullptr;
-
-    LispObject work1 = NULLATOM;
-    LispObject work2 = NULLATOM;
-    LispObject cursym = NULLATOM;
-
-    char boffo[BOFFO_SIZE+4];
-    size_t boffop;
-
-    int lispin = STDIN, lispout = STDOUT;
-    std::string file_buffer[MAX_LISPFILES];
-
-    char input_line[INPUT_LINE_SIZE];
-    size_t input_ptr = 0, input_max = 0;
-
-    char printbuffer[32];
-
-    int curchar = '\n', symtype = 0;
-
-    unsigned int unwindflag = unwindNONE;
-    int backtraceflag = -1;
-
-    // I suspect that linelength and linepos need to be maintained
-    // independently for each output stream. At present that is not
-    // done. And also blank_pending.
-    int linelength = 80, linepos = 0, printflags = printESCAPES;
-    bool blank_pending = false;
-
-    /**
-     * Whether the thread is in a safe state for GC.
-     * */
-    bool safe_memory = true;
-};
-
-thread_local Thread_data thread_data;
-\end{minted}
-\end{code}
-
 \section{Shallow binding}
 \label{sec:shallowbind-code}
 
@@ -372,48 +321,12 @@ LispObject& par_value(LispObject s) {
 
 \begin{code}
 \begin{minted}{text}
-lisp;
-
-symbolic procedure queue;
-  {nil, nil};
-
-symbolic procedure q_push(q, x);
-  begin scalar back, newback;
-    back := second q;
-    newback := {x};
-
-    if null back then <<
-      rplaca(q, newback);
-      rplaca(cdr q, newback); >>
-    else <<
-      rplacd(back, newback);
-      rplaca(cdr q, newback); >>;
-    return q;
-  end;
-
-symbolic procedure q_pop(q);
-  begin scalar front, next;
-    front := first q;
-    if null front then
-      return {}
-    else <<
-      next := cdr front;
-      if null next then rplaca(cdr q, {});
-      rplaca(q, next);
-      return (first front); >>;
-  end;
-
-symbolic procedure q_empty(q);
-  null (first q);
-
 symbolic procedure atomic(val);
   {mutex(), val};
 
 symbolic procedure atomic_set(a, val);
 begin
-  scalar m;
-  m := first a;
-
+  scalar m := first a;
   mutexlock m;
   rplaca(cdr a, val);
   mutexunlock m;
@@ -421,9 +334,7 @@ end;
 
 symbolic procedure atomic_get(a);
 begin
-  scalar m, res;
-  m := first a;
-
+  scalar res, m := first a;
   mutexlock m;
   res := cadr a;
   mutexunlock m;
@@ -435,10 +346,7 @@ symbolic procedure safeq();
 
 symbolic procedure safeq_push(sq, x);
 begin scalar q, m, cv;
-  q := first sq;
-  m := second sq;
-  cv := third sq;
-
+  q := first sq; m := second sq; cv := third sq;
   mutexlock m;
   q_push(q, x);
   condvar_notify_one cv;
@@ -448,11 +356,7 @@ end;
 
 symbolic procedure safeq_pop(sq);
 begin scalar q, m, cv, res;
-  q := first sq;
-  m := second sq;
-  cv := third sq;
-  res := nil;
-
+  q := first sq; m := second sq; cv := third sq; res := nil;
   mutexlock m;
   while q_empty q do condvar_wait(cv, m);
   res := q_pop q;
@@ -463,18 +367,10 @@ end;
 % non-blocking call
 symbolic procedure safeq_trypop(sq);
 begin scalar q, m, cv, res;
-  q := first sq;
-  m := second sq;
-  cv := third sq;
-  res := nil;
-
+  q := first sq; m := second sq; cv := third sq; res := nil;
   mutexlock m;
-
-  if q_empty q then
-      res := nil
-  else
-      res := {q_pop q};
-
+  if q_empty q then res := nil
+  else res := {q_pop q};
   mutexunlock m;
   return res;
 end;
@@ -497,9 +393,7 @@ begin
   scalar m, state, cv, res;
   m := first fut;
   mutexlock m;
-
   state := second fut;
-
   if state = 'done then <<
     res := third fut;
     mutexunlock m;
@@ -511,13 +405,11 @@ begin
     cv := condvar ();
     rplacd(fut, {'waiting, cv}) >>;
 
-
   condvar_wait(cv, m);
   % ASSERT: promise is fulfilled here
 
   res := third fut;
   mutexunlock m;
-
   return res;
 end;
 
@@ -525,16 +417,13 @@ end;
 % can wait on cv until timeout
 symbolic procedure future_tryget(fut, timeout);
 begin
-  scalar m, state, cv, res;
-  m := first fut;
+  scalar state, cv, res, m := first fut;
   mutexlock m;
 
   state := second fut;
 
-  if state = 'done then
-    res := {third fut}
-  else if timeout = 0 then
-    res := nil
+  if state = 'done then res := {third fut}
+  else if timeout = 0 then res := nil
   else <<
     if state = 'waiting then
       cv := third fut
@@ -548,21 +437,17 @@ begin
       res := nil >>;
 
   mutexunlock m;
-
   return res;
 end;
 
 symbolic procedure future_set(fut, value);
 begin
-  scalar m, state;
-  m := first fut;
-
+  scalar state, m := first fut;
   mutexlock m;
   state := second fut;
 
   if state = 'done then
     error("future already set");
-
   if state = 'waiting then
     condvar_notify_all third fut;
 
@@ -643,16 +528,6 @@ begin
   >>;
   return nil;
 end;
-
-symbolic procedure tp_kill(tp);
-begin
-  scalar threads;
-  atomic_set(second tp, 'kill);
-  threads := third tp;
-  for each td in threads do <<
-    jointhread td;
-  >>;
-end;
 \end{minted}
 \end{code}
 
@@ -661,13 +536,10 @@ end;
 
 \begin{code}
 \begin{minted}{text}
-symbolic;
-
 numthreads := 8;
 
-% I will put the main and central and important part first!
 %% [groe_worker] takes
-%% [pairs_ref]  - ref to the set of pairs to process
+%% [pairs_ref] - ref to the set of pairs to process
 %% [L_ref]  - ref to the current basis
 %% [m]  - the mutex
 %% [numdone_ref] - for sync between threads (acts as a semaphore)
@@ -720,9 +592,6 @@ START:
     s := s_poly(car p, cdr p);
 
     % Reduce it be an unsynchronized current snapshot of the current draft base.
-    % note that other threads might be updating L either by adding extra
-    % polynomials or by reducing or removing some that are at present there.
-    % Here I will just use whatever I see.
     s := reduce_by(s, L);
 
     mutexlock m;
@@ -760,113 +629,26 @@ begin
     pairs := for each p on L conc
       for each q in cdr p collect (car p . q);
     terpri();
-    printc "Babygroe input:";
     for each p in L do << dfprin p; terpri() >>;
 
     pairs := randomise pairs;
     pairs_tried := 0;
     basis_updates := 0;
 
-% And obviously I have not tried this and unvcovered the glitches!!!!!
     pairs_ref := {pairs};
     L_ref := {L};
     m := mutex ();
     numdone_ref := {0};
-
-    print "starting threads";
 
 % Put all the pairs in the work queue so that the one at the start of
 % the list "pairs" will be the first work packet to be run.
     threads := for i := 1:numthreads collect
         thread2('groeworker, {pairs_ref, L_ref, m, numdone_ref});
 
-% uncomment to test in VSL
-    % groeworker(pairs_ref, L_ref, m, numdone_ref);
-
 % Block here until all workers are done.
     for each thr in threads do jointhread thr;
-
-    print "done threads";
-
-% tp_stop does not interrupt any worker. It will only stop when the queue is empty
-% and no more workers are pushing stuff to it
     L := car L_ref;
-
-    terpri();
-    printc "The base is:";
-    for each p in L do <<
-        dfprin p;
-        terpri() >>;
     return L
 end;
-
-symbolic procedure s_poly(u, v);
-  begin
-    scalar u1 := xtrax(dfx u, dfx v),
-            v1 := xtrax(dfx v, dfx u);
-% The leading term of each of u*u1 and v*v1 should have a degree max() of the
-% degrees in each variable in u and v.
-    u := dfmulterm(qrecip dflc u, u1, u);
-    v := dfmulterm(qrecip dflc v, v1, v);
-% Leading terms should now cancel when I subtract.
-    return dfmake_monic dfsub(u, v)
-  end;
-
-symbolic procedure reduce_by(S, L);
-  begin
-    scalar done := nil, s1;
-    while not done do <<
-      done := t;
-      for each p in L do <<
-% If something has reduced to 0 there is no need to try further reductions!
-        if not null s then <<
-          if !*noisy then <<
-            princ "Reduce "; dfprin s; princ " using "; dfprin p >>;
-          s1 := dfremainder(s, p);
-          if !*noisy then <<
-            princ " => "; dfprin s; terpri() >>;
-% test if this made progress but did not reduce the polynomial all the way
-% down to nil, set the "done" flag to nil so that we will try everything
-% again.
-          if s1 neq s then <<
-            if s1 neq nil then done := nil;
-            s := s1 >> >> >> >>;
-    return s
-  end;
-
-symbolic procedure delete_pairlist(p, L);
-begin
-  scalar res := {};
-  for each x in L do
-    if not (p = car x) and not (p = cdr x) then
-      res := x . res;
-  return reverse res;
-end;
-
-algebraic;
-
-% Examples
-
-babygroe {x*y-x, x^2-y}
-
-babygroe {x^3 - 2*x*y,
-          x^2*y - 2*y^2 + x};
-
-lisp << !*noisy := nil >>;
-
-lisp << varnames := '(a0 a1 a2 a3 a4 a5 a6 a7 a8) >>;
-
-lisp verbos t;
-
-babygroe {
-  a1^2 - 1,
-  a2^2 - a1 - 1,
-  a3^2 - a2 - 1,
-  a4^2 - a3 - 1,
-  a5^2 - a4 - 1,
-  a6^2 - a5 - 1,
-  a7^2 - a6 - 1
-  };
-
 \end{minted}
 \end{code}

@@ -66,7 +66,7 @@ symbolic integration package, and provides a good performance benchmark.
 \begin{figure}[H]
   \centering
   \includegraphics[width=1\linewidth]{single_threaded.eps}
-  \caption{Relative performance of ParVSL on single-threaded tests (lower is better).}
+  \caption[VSL vs ParVSL single-threaded performance.]{Relative performance of ParVSL on single-threaded tests (lower is better).}
   \label{fig:single-threaded}
 \end{figure}
 
@@ -428,7 +428,7 @@ more general cases.
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.8\linewidth]{polymult.eps}
-  \caption{Running time of polynomial multiplication in parallel vs single-threaded (lower is better).}
+  \caption[Parallel polynomial multiplication results.]{Running time of polynomial multiplication in parallel vs single-threaded (lower is better).}
   \label{fig:parpolymult}
 \end{figure}
 
@@ -531,7 +531,8 @@ six threads. The variance was under 3 seconds in this case so I omitted it.
 \begin{figure}[H]
   \centering
   \includegraphics[width=1\linewidth]{groebner.eps}
-  \caption{Running time of Buchberger's algorithm by number of threads (lower is better).}
+  \caption[Buchberger's algorithm running time by number of threads.]{Running time of Buchberger's
+  algorithm by number of threads (lower is better).}
   \label{fig:groebner}
 \end{figure}
 
@@ -702,6 +703,6 @@ shows a huge unexpected extra cost under Cygwin, and noticeable slowdown on the 
 \begin{figure}[H]
 \centering
 \includegraphics[width=1\linewidth]{thread_local.eps}
-\caption{Thread local performance on different platforms (lower is better).}
+\caption[Thread local performance on different platforms.]{Thread local performance on different platforms (lower is better).}
 \label{fig:threadlocal}
 \end{figure}
