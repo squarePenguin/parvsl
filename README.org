@@ -1,19 +1,19 @@
 * Implementing Parallelism in Lisp for REDUCE
 
-**** Final year undergraduate dissertation by Andrei-Vlad Badelita, University of Cambridge
+**** Final year undergraduate dissertation by Andrei-Vlad Badelita, University of Cambridge, 2019
 
 I would like to thank Dr Arthur C. Norman for all the invaluable help and support he offered
 during the making of this project.
 
-The following is extracted from the dissertation. You can find the rest at:
-https://github.com/squarePenguin/parvsl/blob/master/writeup/dissertation/diss.pdf
+The following is extracted from the dissertation. You can read the rest
+[[https://github.com/squarePenguin/parvsl/blob/master/writeup/dissertation/diss.pdf][here]].
 
 ** Introduction
 The motivation for this project is to explore the implementation of multi-threading capabilities
 within a working compiler and assess the benefits and trade-offs it brings to a
 real-world application with a large, actively-developed body of code.
-** REDUCE
-REDUCE [1] is a portable general-purpose Computer Algebra System (CAS). It enables
+*** REDUCE
+[[http://www.reduce-algebra.com/][REDUCE]] is a portable general-purpose Computer Algebra System (CAS). It enables
 symbolic manipulation of mathematical expressions and provides a wide range of algorithms
 to solve problems spanning many fields. It has a friendly user interface and can
 display maths and generate graphics.
@@ -22,16 +22,16 @@ and Axiom. The three projects are all built on top of different Lisp kernels. At
 time of this writing, none of these projects have any multi-threading capabilities. My
 aim is to remove this limitation for REDUCE. The project is written in a language called
 RLISP, which is a specialised Lisp dialect with an Algol-like syntax.
-** VSL
+*** VSL
 There are multiple implementations of the Lisp backend REDUCE uses: PSL, CSL and
 VSL. Visual Standard Lisp (VSL) is an interpreted implementation written in C. It is
 capable of building the entirety of REDUCE, supports all the major platforms and architectures,
 and despite being slower than CSL or PSL it is capable of running realistic
 calculations including the full REDUCE test suite. It exists to provide a test-bed for ideas
 that may later move to the much larger, compiled CSL version.
-** Benefits of multithreading
+*** Benefits of multithreading
 The idea of using parallel computing to speed up computer algebra has come up in research
-papers for many years [2], but much of the activity pre-dates the now ubiquitous multi-core
+papers for many years, but much of the activity pre-dates the now ubiquitous multi-core
 CPUs used in modern computers and the amount of memory which they now provide.
 Moreover, advancements in single-core CPU performance have slowed down significantly,
 as clock speeds have stagnated and even gone down in recent years. The biggest area
@@ -53,7 +53,7 @@ me with significant examples to demonstrate correctness and analyse the overhead
 concurrency support on all the major platforms (Linux, Windows and MacOS), with
 some surprising differences between them.
 
-* Setup
+** Setup
 
 While this project can be compiled stand-alone
 
